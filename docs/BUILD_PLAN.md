@@ -2,12 +2,14 @@
 
 ## Goal
 
-Ship the first playable technical spike: a portrait Expo app in which one pinch
-stitch visibly deforms a quilt, changes a button traveler's deterministic route,
-and turns a baseline failure into success.
+Ship a polished single-level vertical slice: a portrait Expo app in which one
+pinch stitch visibly deforms a quilt, changes a button traveler's deterministic
+route, teaches that mechanic without blocking play, and carries a successful
+run into results and a restartable deterministic replay.
 
-This milestone intentionally excludes the campaign, persistence, pocket stitch,
-RevenueCat, InsForge, Daily Scrap, and production content.
+The completed slice intentionally excludes the campaign, progression
+persistence, pocket stitch, RevenueCat, InsForge, Daily Scrap, and production
+content. Milestone 2 persists preferences and tutorial completion only.
 
 ## Milestone 1 plan
 
@@ -40,6 +42,26 @@ RevenueCat, InsForge, Daily Scrap, and production content.
 9. Verify lint, strict TypeScript, Jest, Expo Doctor, and platform bundle export.
    Run the web build for visual and interaction QA in this environment.
 
+## Milestone 2 plan
+
+1. Use `First Pull` as a three-beat tutorial: place the stitch, read the route,
+   then release gravity. Keep every hint skippable and outside the gesture area.
+2. Capture a successful run as versioned canonical stitch input, validate the
+   replay as untrusted JSON, and prove exact fixed-step equivalence across 30
+   repeated runs.
+3. Add a results route with thread, stitch, and time statistics, in-session
+   best-result comparison, a final route snapshot, a visible thread-tightening
+   pre-roll, restartable traveler playback, and immediate Try Again.
+4. Persist Sound, Haptics, Reduced motion, High contrast, Tutorial hints, and
+   tutorial completion through a versioned AsyncStorage-backed Zustand store.
+5. Apply sound/haptic settings to the existing feedback service and apply
+   reduced motion and high-contrast indicators without altering game physics.
+6. Expand pure-core, store, accessibility, and component tests plus Maestro
+   happy-path and failure/regression flows.
+7. Verify the integrated flow at 390 x 844 and the compact gameplay shell at
+   320 x 568, then repeat lint, strict TypeScript, Jest, Expo Doctor, and
+   three-platform export gates.
+
 ## Architecture
 
 ```text
@@ -53,8 +75,11 @@ src/
     levels/         # one spike level and reference solution
     rendering/      # Skia-only drawing components
     runtime/        # fixed-step session and animation loop
+    replay/         # validated compact replay input and fixed-step playback
+    tutorial/       # pure guided-flow reducer and accepted copy
     feedback/       # haptic/audio interface and Expo implementation
   store/            # planning phase, stitches, outcome, debug flags
+                    # plus separately persisted local preferences
   components/       # reachable controls and outcome UI
   theme/            # textile design tokens
 tests/
@@ -111,6 +136,23 @@ in a development build on real iOS or Android hardware.
 - [x] Lint, strict TypeScript, Jest, Expo Doctor, and three-platform export.
 - [ ] Physical-device mechanic proof and evidence record.
 
+### Milestone 2
+
+- [x] Three-step, skippable First Pull tutorial with persisted completion.
+- [x] Success-only Results route with exact run statistics and Try Again.
+- [x] Versioned replay validation, serialization, 30-run determinism proof,
+      visible thread tightening, traveler playback, and restart.
+- [x] Persisted sound, haptic, reduced-motion, high-contrast, and tutorial-hint
+      preferences with defensive hydration/migration.
+- [x] High-contrast Skia palette and OS-aware reduced-motion behavior.
+- [x] In-session best-run comparison ordered by thread, stitches, then time.
+- [x] Expanded Jest and two-flow Maestro coverage.
+- [x] Phone-sized browser flow: tutorial, solution, Results, replay restart,
+      Settings persistence, Try Again, and zero warning/error console entries.
+- [x] Compact-phone layout and an element-relative Maestro stitch guide that is
+      independent of global screen percentages and native safe-area offsets.
+- [ ] Physical-device Milestone 2 pass and evidence record.
+
 ## Completed work and tradeoffs
 
 - The technical spike is a directly launchable single screen with no account,
@@ -131,10 +173,16 @@ in a development build on real iOS or Android hardware.
   full Xcode toolchain, Android SDK, attached phone, or emulator. The milestone
   therefore remains **provisional** despite passing automated, export, and web
   interaction gates.
-- `npm audit --omit=dev` currently reports 22 transitive findings in the Expo
-  57 build chain (`metro`/`image-size` and `xcode`/`uuid`). npm offers only a
-  forced downgrade to Expo 53, so no incompatible automatic fix was applied;
+- `npm audit --omit=dev` currently reports 14 transitive findings (10 moderate,
+  4 high) in the Expo
+  57 build chain (`metro`/`image-size` and `xcode`/`uuid`). A non-mutating
+  `npm audit fix --dry-run --omit=dev` leaves the same findings, while the force
+  path proposes a breaking Expo 46 downgrade, so no incompatible fix was applied;
   this should be rechecked when Expo publishes an updated compatible chain.
+- Best-run comparison is intentionally process-local in Milestone 2. Campaign
+  progression and durable per-level best results begin in Milestone 3.
+- AsyncStorage and the SDK 57 patch updates are native dependency changes, so
+  an existing development client must be rebuilt before phone verification.
 
 ## Verification snapshot — 2026-08-18
 
@@ -147,10 +195,26 @@ in a development build on real iOS or Android hardware.
   Release, Retry, Undo, Reset, responsive layout, and zero warning/error console
   entries verified. Captures are stored in `docs/design/`.
 
+## Milestone 2 verification snapshot — 2026-08-22
+
+- `npm run lint` — passed.
+- `npm run typecheck` — passed.
+- `npm test -- --runInBand` — 18 suites and 96 tests passed.
+- `npx expo-doctor@latest` — 21 of 21 checks passed after the SDK 57 patch refresh.
+- `npm run export` — web, Android, and iOS bundles exported successfully.
+- Codex in-app browser at 390 x 844 — all three tutorial beats, exact reference
+  stitch success, Results, thread-tightening pre-roll, two replay cycles,
+  reduced-motion instant replay, high-contrast rendering, preference/tutorial
+  persistence across reload, Try Again reset, and zero warning/error console
+  entries verified. Captures are stored in `docs/design/`.
+- Compact 320 x 568 browser layout — tutorial, fabric gesture target, and all
+  three bottom controls remain visible without horizontal or vertical clipping.
+
 ## Next milestone
 
-First, complete `docs/PHYSICAL_DEVICE_TEST.md` on a real iOS or Android phone
-and tune the reference drag, feedback timing, and frame pacing from that
-evidence. Milestone 2 then adds a guided tutorial, richer results and replay
-presentation, settings-backed feedback/accessibility toggles, and expanded
-unit/UI coverage.
+First, rebuild the development client and complete
+`docs/PHYSICAL_DEVICE_TEST.md` on a real iOS or Android phone, including both
+new Maestro flows. Tune the reference drag, feedback timing, replay pre-roll,
+and frame pacing from that evidence. Milestone 3 then adds the quilt map, local
+campaign progression, fabric properties, hazards and patches, pocket stitch,
+campaign content, and durable score/best-result comparisons.

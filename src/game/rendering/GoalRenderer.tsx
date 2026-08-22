@@ -5,18 +5,22 @@ import {
 } from '@shopify/react-native-skia';
 
 import type { Point } from '../core/types';
+import { getGamePalette } from '../../theme/gamePalette';
 
 interface GoalRendererProps {
   readonly center: Point;
   readonly radius: number;
   readonly highlighted: boolean;
+  readonly highContrast?: boolean;
 }
 
 export function GoalRenderer({
   center,
   radius,
   highlighted,
+  highContrast = false,
 }: GoalRendererProps) {
+  const palette = getGamePalette(highContrast);
   const petals = Array.from({ length: 12 }, (_, index) => {
     const angle = (index / 12) * Math.PI * 2;
     return {
@@ -33,7 +37,11 @@ export function GoalRenderer({
           cx={petal.x}
           cy={petal.y}
           r={Math.max(2, radius * 0.12)}
-          color={index % 2 === 0 ? '#b98a2f' : '#315d5f'}
+          color={
+            index % 2 === 0
+              ? palette.goalPetal
+              : palette.goalPetalAccent
+          }
         />
       ))}
       <Circle
@@ -46,7 +54,7 @@ export function GoalRenderer({
         cx={center.x}
         cy={center.y}
         r={radius}
-        color={highlighted ? '#e5bd53' : '#c89a35'}
+        color={highlighted ? palette.goalHighlight : palette.goalFill}
       />
       <Circle
         cx={center.x}
@@ -62,7 +70,7 @@ export function GoalRenderer({
         cx={center.x}
         cy={center.y}
         r={radius * 0.42}
-        color="#8b6828"
+        color={palette.goalCore}
       />
       <Circle
         cx={center.x - radius * 0.12}

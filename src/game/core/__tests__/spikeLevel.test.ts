@@ -6,6 +6,7 @@ import {
   REFERENCE_PINCH_STITCH,
   SPIKE_LEVEL,
   SPIKE_PHYSICS_CONFIG,
+  TUTORIAL_GUIDED_PINCH_STITCH,
 } from '../../levels/spikeLevel';
 import { releaseSimulation, stepSimulation } from '../simulation';
 import type { Stitch } from '../types';
@@ -37,6 +38,15 @@ describe('First Pull technical spike', () => {
     expect(stitched.outcome?.status).toBe('success');
     expect(REFERENCE_PINCH_STITCH.threadCost).toBeLessThanOrEqual(
       SPIKE_LEVEL.threadBudget,
+    );
+  });
+
+  test('the element-relative tutorial guide authors a successful pull', () => {
+    expect(TUTORIAL_GUIDED_PINCH_STITCH.threadCost).toBeLessThanOrEqual(
+      SPIKE_LEVEL.threadBudget,
+    );
+    expect(runSpike([TUTORIAL_GUIDED_PINCH_STITCH]).outcome?.status).toBe(
+      'success',
     );
   });
 

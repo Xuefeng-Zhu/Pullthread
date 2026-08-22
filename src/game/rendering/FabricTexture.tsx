@@ -1,9 +1,12 @@
 import { Path, Rect, Skia } from '@shopify/react-native-skia';
 import { useMemo } from 'react';
 
+import { getGamePalette } from '../../theme/gamePalette';
+
 interface FabricTextureProps {
   readonly width: number;
   readonly height: number;
+  readonly highContrast?: boolean;
 }
 
 function createWeavePath(
@@ -28,7 +31,12 @@ function createWeavePath(
   return path.detach();
 }
 
-export function FabricTexture({ width, height }: FabricTextureProps) {
+export function FabricTexture({
+  width,
+  height,
+  highContrast = false,
+}: FabricTextureProps) {
+  const palette = getGamePalette(highContrast);
   const horizontalWeave = useMemo(
     () => createWeavePath(width, height, 4, true),
     [height, width],
@@ -40,18 +48,24 @@ export function FabricTexture({ width, height }: FabricTextureProps) {
 
   return (
     <>
-      <Rect x={0} y={0} width={width} height={height} color="#eddfc4" />
+      <Rect
+        x={0}
+        y={0}
+        width={width}
+        height={height}
+        color={palette.fabricBase}
+      />
       <Path
         path={horizontalWeave}
         style="stroke"
         strokeWidth={1}
-        color="rgba(255,255,255,0.24)"
+        color={palette.fabricWeaveLight}
       />
       <Path
         path={verticalWeave}
         style="stroke"
         strokeWidth={1}
-        color="rgba(62,50,38,0.08)"
+        color={palette.fabricWeaveDark}
       />
     </>
   );

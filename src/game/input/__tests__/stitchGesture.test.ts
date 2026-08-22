@@ -4,6 +4,7 @@ import {
   MINIMUM_STITCH_LENGTH,
   SPIKE_STITCH_RADIUS,
   createPinchStitch,
+  createValidPinchStitch,
   fabricPointToView,
   findStitchNearPoint,
   isValidStitchDrag,
@@ -72,6 +73,14 @@ describe('stitch gestures', () => {
         y: start.y,
       }),
     ).toBe(true);
+  });
+
+  test('rejects a drag that falls below the minimum after quantization', () => {
+    const start = { x: 0.0002, y: 0.2 };
+    const end = { x: 0.12020001, y: 0.2 };
+
+    expect(isValidStitchDrag(start, end)).toBe(true);
+    expect(createValidPinchStitch('boundary', start, end)).toBeNull();
   });
 
   test('returns the closest stitch inside the removal tolerance', () => {

@@ -1,8 +1,8 @@
 appId: com.xuefengzhu.pullthread
-name: Pullthread spike planning and run smoke
+name: Pullthread Milestone 2 tutorial, results, and replay smoke
 tags:
   - smoke
-  - spike
+  - milestone-2
 ---
 - launchApp:
     clearState: true
@@ -10,64 +10,75 @@ tags:
 - assertVisible:
     id: "spike-level-screen"
 - assertVisible:
-    id: "fabric-playfield"
+    id: "tutorial-coachmark"
 - assertVisible:
-    id: "planning-status"
+    id: "tutorial-step-title"
+    text: "Pull the cloth"
 - assertVisible:
     id: "stitch-count"
     text: ".*0.*"
-- assertVisible:
-    id: "release-button"
-- assertVisible:
-    id: "undo-button"
-- assertVisible:
-    id: "reset-button"
 
-# Percentage coordinates keep the reference drag stable across portrait phone
-# resolutions. Update them with the level's documented reference stitch if the
-# playfield layout or spike level intentionally changes.
+# Start from the authored in-field guide, then use Maestro's element-relative
+# directional swipe. The endpoint is clamped to the fabric, so device height
+# and native safe-area differences cannot move the gesture out of the field.
 - swipe:
-    start: 27%, 58%
-    end: 70%, 34%
+    from:
+      id: "tutorial-stitch-anchor"
+    direction: UP
     duration: 800
 
 - assertVisible:
     id: "stitch-count"
     text: ".*1.*"
+- assertVisible:
+    id: "tutorial-step-title"
+    text: "Read the route"
+- tapOn:
+    id: "tutorial-next-button"
+- assertVisible:
+    id: "tutorial-step-title"
+    text: "Let gravity work"
 - tapOn:
     id: "release-button"
 
 - extendedWaitUntil:
     visible:
-      id: "outcome-banner"
+      id: "results-button"
     timeout: 20000
-- assertVisible:
-    id: "retry-button"
 - tapOn:
-    id: "retry-button"
+    id: "results-button"
 
+- assertVisible:
+    id: "results-screen"
+- assertVisible:
+    id: "thread-result"
+- assertVisible:
+    id: "stitches-result"
+- assertVisible:
+    id: "time-result"
+- tapOn:
+    id: "watch-replay-button"
+- extendedWaitUntil:
+    visible:
+      id: "replay-status"
+      text: ".*REPLAY COMPLETE.*"
+    timeout: 20000
+
+- tapOn:
+    id: "try-again-button"
 - assertVisible:
     id: "planning-status"
 - assertVisible:
     id: "stitch-count"
-    text: ".*1.*"
-- tapOn:
-    id: "undo-button"
-- assertVisible:
-    id: "stitch-count"
     text: ".*0.*"
+- assertNotVisible:
+    id: "tutorial-coachmark"
 
-- swipe:
-    start: 27%, 58%
-    end: 70%, 34%
-    duration: 800
+# A default launch stops and relaunches the process without clearing storage.
+# This proves completion survives a native cold restart, not only navigation.
+- stopApp
+- launchApp
 - assertVisible:
-    id: "stitch-count"
-    text: ".*1.*"
-- tapOn:
-    id: "reset-button"
-- assertVisible:
-    id: "stitch-count"
-    text: ".*0.*"
-- assertVisible:
-    id: "planning-status"
+    id: "spike-level-screen"
+- assertNotVisible:
+    id: "tutorial-coachmark"

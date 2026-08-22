@@ -3,10 +3,18 @@ import { StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import type { SimulationOutcome } from '../game/core/types';
-import { colors, radii, shadows, spacing } from '../theme/tokens';
+import {
+  colors,
+  highContrastColors,
+  radii,
+  shadows,
+  spacing,
+} from '../theme/tokens';
 
 interface OutcomeBannerProps {
   readonly outcome: SimulationOutcome;
+  readonly highContrast?: boolean;
+  readonly reducedMotion?: boolean;
 }
 
 function failureCopy(outcome: Extract<SimulationOutcome, { status: 'failure' }>) {
@@ -22,8 +30,19 @@ function failureCopy(outcome: Extract<SimulationOutcome, { status: 'failure' }>)
   }
 }
 
-export function OutcomeBanner({ outcome }: OutcomeBannerProps) {
+export function OutcomeBanner({
+  outcome,
+  highContrast = false,
+  reducedMotion = false,
+}: OutcomeBannerProps) {
   const success = outcome.status === 'success';
+  const statusColor = success
+    ? highContrast
+      ? highContrastColors.goal
+      : colors.success
+    : highContrast
+      ? highContrastColors.thread
+      : colors.failure;
   const [title, detail] = success
     ? [
         'Perfect pull!',
@@ -34,16 +53,16 @@ export function OutcomeBanner({ outcome }: OutcomeBannerProps) {
   return (
     <Animated.View
       testID="outcome-banner"
-      entering={FadeInDown.duration(220)}
+      entering={reducedMotion ? undefined : FadeInDown.duration(220)}
       accessibilityRole="alert"
       accessibilityLiveRegion="polite"
-      style={[styles.banner, success ? styles.success : styles.failure]}
+      style={[styles.banner, { borderColor: statusColor }]}
     >
       <View style={styles.iconWrap}>
         <Ionicons
           name={success ? 'checkmark' : 'cut-outline'}
           size={20}
-          color={success ? colors.success : colors.failure}
+          color={statusColor}
         />
       </View>
       <View style={styles.copy}>
@@ -71,8 +90,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff7e7',
     ...shadows.raised,
   },
-  success: { borderColor: colors.success },
-  failure: { borderColor: colors.failure },
   iconWrap: {
     width: 38,
     height: 38,

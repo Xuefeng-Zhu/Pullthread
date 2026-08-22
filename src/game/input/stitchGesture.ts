@@ -68,6 +68,16 @@ export function createPinchStitch(
   };
 }
 
+/** Creates only a stitch that remains valid after canonical quantization. */
+export function createValidPinchStitch(
+  id: string,
+  start: Point,
+  end: Point,
+): Stitch | null {
+  const stitch = createPinchStitch(id, start, end);
+  return isValidStitchDrag(stitch.start, stitch.end) ? stitch : null;
+}
+
 export function findStitchNearPoint(
   stitches: readonly Stitch[],
   point: Point,

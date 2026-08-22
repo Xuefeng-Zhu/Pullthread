@@ -11,7 +11,11 @@ import {
   vec,
 } from '@shopify/react-native-skia';
 import { useMemo } from 'react';
-import { useDerivedValue, type SharedValue } from 'react-native-reanimated';
+import {
+  useDerivedValue,
+  useSharedValue,
+  type SharedValue,
+} from 'react-native-reanimated';
 
 import type { HeightField } from '../core/heightField';
 import type { Point, SimulationPhase, Stitch } from '../core/types';
@@ -22,6 +26,7 @@ import { GoalRenderer } from './GoalRenderer';
 import { StitchRenderer } from './StitchRenderer';
 import { Traveler } from './Traveler';
 import { toCanvasPoint, worldRadiusToPixels } from './coordinates';
+import { getGamePalette } from '../../theme/gamePalette';
 
 interface FabricCanvasProps {
   readonly size: CanvasSize;
@@ -34,6 +39,9 @@ interface FabricCanvasProps {
   readonly travelerX: SharedValue<number>;
   readonly travelerY: SharedValue<number>;
   readonly travelerSpeed: SharedValue<number>;
+  readonly highContrast?: boolean;
+  readonly showRoute?: boolean;
+  readonly stitchProgress?: SharedValue<number>;
 }
 
 function createDeformedGridPath(field: HeightField, size: CanvasSize) {
@@ -92,7 +100,12 @@ export function FabricCanvas({
   travelerX,
   travelerY,
   travelerSpeed,
+  highContrast = false,
+  showRoute,
+  stitchProgress,
 }: FabricCanvasProps) {
+  const palette = getGamePalette(highContrast);
+  const fullStitchProgress = useSharedValue(1);
   const deformedGrid = useMemo(
     () => createDeformedGridPath(field, size),
     [field, size],
@@ -150,18 +163,22 @@ export function FabricCanvas({
       style={{ width: size.width, height: size.height }}
       accessibilityLabel="Quilt playfield. Drag across the fabric to place a stitch."
     >
-      <FabricTexture width={size.width} height={size.height} />
+      <FabricTexture
+        width={size.width}
+        height={size.height}
+        highContrast={highContrast}
+      />
 
       <Path
         path={deformedGrid}
         style="stroke"
         strokeWidth={1.25}
-        color="rgba(87,67,49,0.24)"
+        color={palette.grid}
       >
         <DashPathEffect intervals={[5, 8]} />
       </Path>
 
-      {phase === 'planning' && route.length > 1 ? (
+      {(showRoute ?? phase === 'planning') && route.length > 1 ? (
         <Path
           path={routePath}
           style="stroke"
@@ -169,8 +186,8 @@ export function FabricCanvas({
           strokeCap="round"
           color={
             routeSucceeds
-              ? 'rgba(49,93,95,0.55)'
-              : 'rgba(89,94,91,0.42)'
+              ? palette.routeSuccess
+              : palette.routeFailure
           }
         >
           <DashPathEffect intervals={[1, 11]} />
@@ -181,8 +198,13 @@ export function FabricCanvas({
         center={goalCenter}
         radius={goalRadius}
         highlighted={phase === 'succeeded'}
+        highContrast={highContrast}
       />
-      <StitchRenderer stitches={mappedStitches} />
+      <StitchRenderer
+        stitches={mappedStitches}
+        highContrast={highContrast}
+        progress={stitchProgress ?? fullStitchProgress}
+      />
 
       <Group opacity={0.54}>
         <Line
@@ -210,6 +232,7 @@ export function FabricCanvas({
         y={canvasTravelerY}
         speed={travelerSpeed}
         radius={travelerRadius}
+        highContrast={highContrast}
       />
 
       <RoundedRect
@@ -218,7 +241,7 @@ export function FabricCanvas({
         width={size.width - inset * 2}
         height={size.height - inset * 2}
         r={18}
-        color="#1d4552"
+        color={palette.frame}
         style="stroke"
         strokeWidth={5}
       />

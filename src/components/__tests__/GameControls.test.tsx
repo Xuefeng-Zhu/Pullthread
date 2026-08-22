@@ -9,6 +9,7 @@ describe('GameControls', () => {
     const onReset = jest.fn();
     const onRelease = jest.fn();
     const onRetry = jest.fn();
+    const onResults = jest.fn();
     const view = await render(
       <GameControls
         phase="planning"
@@ -17,6 +18,7 @@ describe('GameControls', () => {
         onReset={onReset}
         onRelease={onRelease}
         onRetry={onRetry}
+        onResults={onResults}
       />,
     );
 
@@ -28,6 +30,7 @@ describe('GameControls', () => {
     expect(onReset).toHaveBeenCalledTimes(1);
     expect(onRelease).toHaveBeenCalledTimes(1);
     expect(onRetry).not.toHaveBeenCalled();
+    expect(onResults).not.toHaveBeenCalled();
   });
 
   test('exposes a retry action after a terminal run', async () => {
@@ -40,12 +43,37 @@ describe('GameControls', () => {
         onReset={jest.fn()}
         onRelease={jest.fn()}
         onRetry={onRetry}
+        onResults={jest.fn()}
       />,
     );
 
     await fireEvent.press(view.getByTestId('retry-button'));
     expect(onRetry).toHaveBeenCalledTimes(1);
     expect(view.getByTestId('undo-button').props.accessibilityState).toEqual({
+      disabled: true,
+    });
+  });
+
+  test('opens results after a successful run instead of retrying', async () => {
+    const onResults = jest.fn();
+    const onRetry = jest.fn();
+    const view = await render(
+      <GameControls
+        phase="succeeded"
+        canUndo
+        onUndo={jest.fn()}
+        onReset={jest.fn()}
+        onRelease={jest.fn()}
+        onRetry={onRetry}
+        onResults={onResults}
+      />,
+    );
+
+    await fireEvent.press(view.getByTestId('results-button'));
+
+    expect(onResults).toHaveBeenCalledTimes(1);
+    expect(onRetry).not.toHaveBeenCalled();
+    expect(view.getByTestId('reset-button').props.accessibilityState).toEqual({
       disabled: true,
     });
   });

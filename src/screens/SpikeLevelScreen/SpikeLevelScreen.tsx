@@ -1,8 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
 import {
   LayoutChangeEvent,
+  Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import {
@@ -14,6 +18,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GameControls } from '../../components/GameControls';
 import { OutcomeBanner } from '../../components/OutcomeBanner';
+import { TutorialCoachmark } from '../../components/TutorialCoachmark';
+import type { RootStackParamList } from '../../app/navigation/RootNavigator';
 import type { SimulationOutcome, Stitch } from '../../game/core/types';
 import {
   ExpoFeedbackService,
@@ -21,13 +27,14 @@ import {
 } from '../../game/feedback';
 import {
   createPinchStitch,
+  createValidPinchStitch,
   findStitchNearPoint,
-  isValidStitchDrag,
   viewPointToFabric,
   type CanvasSize,
 } from '../../game/input/stitchGesture';
 import {
   SPIKE_LEVEL,
+  TUTORIAL_GUIDED_PINCH_STITCH,
   createSpikeWorld,
 } from '../../game/levels/spikeLevel';
 import { FabricCanvas } from '../../game/rendering/FabricCanvas';
@@ -36,12 +43,39 @@ import {
   useGameSession,
 } from '../../game/runtime/useGameSession';
 import {
+  createTutorialFlowState,
+  tutorialFlowReducer,
+} from '../../game/tutorial/tutorialFlow';
+import {
   selectThreadUsed,
   useGameStore,
 } from '../../store/useGameStore';
-import { colors, radii, shadows, spacing } from '../../theme/tokens';
+import {
+  CURRENT_TUTORIAL_VERSION,
+  usePreferencesStore,
+} from '../../store/usePreferencesStore';
+import {
+  colors,
+  highContrastColors,
+  radii,
+  shadows,
+  spacing,
+  touchTargets,
+} from '../../theme/tokens';
 
 const EMPTY_SIZE: CanvasSize = { width: 1, height: 1 };
+const TUTORIAL_STITCH_ANCHOR_STYLE = {
+  left: `${
+    ((TUTORIAL_GUIDED_PINCH_STITCH.start.x - SPIKE_LEVEL.fabricBounds.x) /
+      SPIKE_LEVEL.fabricBounds.width) *
+    100
+  }%` as const,
+  top: `${
+    ((TUTORIAL_GUIDED_PINCH_STITCH.start.y - SPIKE_LEVEL.fabricBounds.y) /
+      SPIKE_LEVEL.fabricBounds.height) *
+    100
+  }%` as const,
+};
 
 function statusCopy(
   phase: ReturnType<typeof useGameStore.getState>['phase'],
@@ -56,7 +90,14 @@ function statusCopy(
   return 'The route changed. Release it or move the stitch.';
 }
 
-export function SpikeLevelScreen() {
+type SpikeLevelScreenProps = NativeStackScreenProps<
+  RootStackParamList,
+  'SpikeLevel'
+>;
+
+export function SpikeLevelScreen({ navigation }: SpikeLevelScreenProps) {
+  const viewport = useWindowDimensions();
+  const compactViewport = viewport.width < 350 || viewport.height < 700;
   const phase = useGameStore((state) => state.phase);
   const stitches = useGameStore((state) => state.stitches);
   const outcome = useGameStore((state) => state.outcome);
@@ -69,8 +110,30 @@ export function SpikeLevelScreen() {
   const resolve = useGameStore((state) => state.resolve);
   const resetSession = useGameStore((state) => state.resetSession);
   const threadUsed = useGameStore(selectThreadUsed);
+  const soundEnabled = usePreferencesStore((state) => state.soundEnabled);
+  const hapticsEnabled = usePreferencesStore((state) => state.hapticsEnabled);
+  const reducedMotion = usePreferencesStore(
+    (state) => state.reducedMotionEnabled,
+  );
+  const highContrast = usePreferencesStore(
+    (state) => state.highContrastEnabled,
+  );
+  const tutorialHintsEnabled = usePreferencesStore(
+    (state) => state.tutorialHintsEnabled,
+  );
+  const completedTutorialVersion = usePreferencesStore(
+    (state) => state.completedTutorialVersion,
+  );
+  const completeTutorial = usePreferencesStore(
+    (state) => state.completeTutorial,
+  );
   const [canvasSize, setCanvasSize] = useState<CanvasSize>(EMPTY_SIZE);
   const [preview, setPreview] = useState<Stitch | null>(null);
+  const [tutorial, dispatchTutorial] = useReducer(
+    tutorialFlowReducer,
+    completedTutorialVersion >= CURRENT_TUTORIAL_VERSION,
+    createTutorialFlowState,
+  );
   const gestureStartX = useSharedValue(0);
   const gestureStartY = useSharedValue(0);
   const gestureThreadTick = useSharedValue(0);
@@ -84,6 +147,42 @@ export function SpikeLevelScreen() {
     () => createSpikeWorld(preview ? [...stitches, preview] : stitches),
     [preview, stitches],
   );
+
+  useEffect(() => {
+    feedback.setPreferences({ hapticsEnabled, soundEnabled });
+  }, [feedback, hapticsEnabled, soundEnabled]);
+
+  useEffect(() => {
+    if (
+      tutorial.completed ||
+      completedTutorialVersion >= CURRENT_TUTORIAL_VERSION
+    ) {
+      return;
+    }
+
+    if (stitches.length === 0) {
+      dispatchTutorial({ type: 'stitchesCleared' });
+      return;
+    }
+
+    if (tutorial.step === 'pull') {
+      dispatchTutorial({ type: 'stitchCommitted' });
+      return;
+    }
+
+    if (
+      tutorial.step === 'release' &&
+      route.outcome.status !== 'success'
+    ) {
+      dispatchTutorial({ type: 'routeFailed' });
+    }
+  }, [
+    completedTutorialVersion,
+    route.outcome.status,
+    stitches.length,
+    tutorial.completed,
+    tutorial.step,
+  ]);
 
   const handleOutcome = useCallback(
     (nextOutcome: SimulationOutcome) => {
@@ -101,9 +200,8 @@ export function SpikeLevelScreen() {
   useEffect(
     () => () => {
       feedback.dispose();
-      resetSession();
     },
-    [feedback, resetSession],
+    [feedback],
   );
 
   const setDraft = useCallback((next: Stitch | null) => {
@@ -135,17 +233,17 @@ export function SpikeLevelScreen() {
       const start = { x: startX, y: startY };
       const end = { x: endX, y: endY };
       setDraft(null);
-      if (!isValidStitchDrag(start, end)) return;
 
       let stitchNumber = 1;
       while (stitches.some((stitch) => stitch.id === `stitch-${stitchNumber}`)) {
         stitchNumber += 1;
       }
-      const stitch = createPinchStitch(
+      const stitch = createValidPinchStitch(
         `stitch-${stitchNumber}`,
         start,
         end,
       );
+      if (!stitch) return;
       const committed = commitStitch(stitch, {
         maxStitches: SPIKE_LEVEL.maxStitches,
         threadBudget: SPIKE_LEVEL.threadBudget,
@@ -276,10 +374,14 @@ export function SpikeLevelScreen() {
 
   const handleRelease = useCallback(() => {
     setDraft(null);
+    if (route.outcome.status === 'success' && !tutorial.completed) {
+      dispatchTutorial({ type: 'released' });
+      completeTutorial(CURRENT_TUTORIAL_VERSION);
+    }
     void feedback.play('travelerRelease');
     void feedback.play('travelerRoll');
     release();
-  }, [feedback, release, setDraft]);
+  }, [completeTutorial, feedback, release, route.outcome.status, setDraft, tutorial]);
 
   const handleUndo = useCallback(() => {
     undo();
@@ -298,33 +400,87 @@ export function SpikeLevelScreen() {
     void feedback.play('buttonClick');
   }, [feedback, retry]);
 
+  const handleSkipTutorial = useCallback(() => {
+    dispatchTutorial({ type: 'skipped' });
+    completeTutorial(CURRENT_TUTORIAL_VERSION);
+    void feedback.play('buttonClick');
+  }, [completeTutorial, feedback]);
+
+  const handleNextTutorial = useCallback(() => {
+    if (route.outcome.status !== 'success') return;
+    dispatchTutorial({ type: 'routeSucceeded' });
+    void feedback.play('buttonClick');
+  }, [feedback, route.outcome.status]);
+
+  const handleOpenSettings = useCallback(() => {
+    void feedback.play('buttonClick');
+    navigation.navigate('Settings');
+  }, [feedback, navigation]);
+
+  const handleResults = useCallback(() => {
+    void feedback.play('buttonClick');
+    navigation.navigate('Results');
+  }, [feedback, navigation]);
+
   const previewThread = preview?.threadCost ?? 0;
   const displayedThread = Math.min(
     SPIKE_LEVEL.threadBudget,
     threadUsed + previewThread,
   );
   const status = statusCopy(phase, stitches.length, route.outcome.status === 'success');
+  const showTutorial =
+    phase === 'planning' &&
+    tutorialHintsEnabled &&
+    completedTutorialVersion < CURRENT_TUTORIAL_VERSION &&
+    !tutorial.completed;
 
   return (
     <SafeAreaView
       testID="spike-level-screen"
-      style={styles.screen}
+      style={[styles.screen, highContrast && styles.screenHighContrast]}
       edges={['top', 'bottom']}
     >
-      <View style={styles.header}>
-        <View style={styles.titlePlaque}>
-          <Text style={styles.title}>{SPIKE_LEVEL.name}</Text>
+      <View style={[styles.header, compactViewport && styles.headerCompact]}>
+        <View
+          style={[
+            styles.titlePlaque,
+            highContrast && styles.outlineHighContrast,
+          ]}
+        >
+          <Text style={[styles.title, compactViewport && styles.titleCompact]}>
+            {SPIKE_LEVEL.name}
+          </Text>
         </View>
+        <Pressable
+          testID="game-settings-button"
+          accessibilityRole="button"
+          accessibilityLabel="Open settings"
+          accessibilityState={{ disabled: phase === 'running' }}
+          disabled={phase === 'running'}
+          onPress={handleOpenSettings}
+          style={({ pressed }) => [
+            styles.settingsButton,
+            highContrast && styles.outlineHighContrast,
+            phase === 'running' && styles.settingsButtonDisabled,
+            pressed && phase !== 'running' && styles.settingsButtonPressed,
+          ]}
+        >
+          <Ionicons name="settings-outline" size={23} color="#173746" />
+        </Pressable>
       </View>
 
-      <View style={styles.hudRow}>
-        <View style={styles.hudPill}>
+      <View style={[styles.hudRow, compactViewport && styles.hudRowCompact]}>
+        <View
+          style={[styles.hudPill, highContrast && styles.outlineHighContrast]}
+        >
           <Text testID="stitch-count" style={styles.hudValue}>
             {stitches.length} / {SPIKE_LEVEL.maxStitches}
           </Text>
           <Text style={styles.hudLabel}>STITCHES</Text>
         </View>
-        <View style={styles.hudPill}>
+        <View
+          style={[styles.hudPill, highContrast && styles.outlineHighContrast]}
+        >
           <Text style={styles.hudValue}>
             {displayedThread} / {SPIKE_LEVEL.threadBudget}
           </Text>
@@ -332,7 +488,9 @@ export function SpikeLevelScreen() {
         </View>
       </View>
 
-      <View style={styles.statusRow}>
+      <View
+        style={[styles.statusRow, compactViewport && styles.statusRowCompact]}
+      >
         <View style={styles.statusNeedle} />
         <Text
           testID={phase === 'planning' ? 'planning-status' : 'run-status'}
@@ -343,9 +501,33 @@ export function SpikeLevelScreen() {
         </Text>
       </View>
 
+      {showTutorial ? (
+        <View
+          style={[
+            styles.tutorialSlot,
+            compactViewport && styles.tutorialSlotCompact,
+          ]}
+        >
+          <TutorialCoachmark
+            step={tutorial.step}
+            compact={compactViewport}
+            onSkip={handleSkipTutorial}
+            onNext={
+              tutorial.step === 'route' ? handleNextTutorial : undefined
+            }
+            nextDisabled={route.outcome.status !== 'success'}
+          />
+        </View>
+      ) : null}
+
       <View
         testID="fabric-playfield"
-        style={styles.playfieldFrame}
+        style={[
+          styles.playfieldFrame,
+          showTutorial && styles.playfieldWithTutorial,
+          compactViewport && styles.playfieldCompact,
+          highContrast && styles.playfieldHighContrast,
+        ]}
         onLayout={onPlayfieldLayout}
       >
         <GestureDetector gesture={stitchGesture}>
@@ -361,10 +543,31 @@ export function SpikeLevelScreen() {
               travelerX={session.travelerX}
               travelerY={session.travelerY}
               travelerSpeed={session.speed}
+              highContrast={highContrast}
             />
           </View>
         </GestureDetector>
-        {outcome ? <OutcomeBanner outcome={outcome} /> : null}
+        {showTutorial && tutorial.step === 'pull' ? (
+          <View
+            testID="tutorial-stitch-anchor"
+            accessible
+            accessibilityLabel="Tutorial stitch guide. Start here and drag upward."
+            pointerEvents="none"
+            style={[
+              styles.tutorialStitchAnchor,
+              TUTORIAL_STITCH_ANCHOR_STYLE,
+            ]}
+          >
+            <View style={styles.tutorialStitchAnchorDot} />
+          </View>
+        ) : null}
+        {outcome ? (
+          <OutcomeBanner
+            outcome={outcome}
+            highContrast={highContrast}
+            reducedMotion={reducedMotion}
+          />
+        ) : null}
       </View>
 
       <GameControls
@@ -374,6 +577,8 @@ export function SpikeLevelScreen() {
         onReset={handleReset}
         onRelease={handleRelease}
         onRetry={handleRetry}
+        onResults={handleResults}
+        compact={compactViewport}
       />
     </SafeAreaView>
   );
@@ -381,6 +586,7 @@ export function SpikeLevelScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#162f3a' },
+  screenHighContrast: { backgroundColor: '#071e27' },
   header: {
     minHeight: 56,
     flexDirection: 'row',
@@ -388,6 +594,10 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
     paddingTop: spacing.xs,
+  },
+  headerCompact: {
+    minHeight: 48,
+    paddingTop: 0,
   },
   titlePlaque: {
     flex: 1,
@@ -400,17 +610,41 @@ const styles = StyleSheet.create({
     backgroundColor: '#f2e2c5',
     ...shadows.soft,
   },
+  settingsButton: {
+    width: touchTargets.comfortable,
+    height: touchTargets.comfortable,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.md,
+    borderWidth: 2,
+    borderColor: '#c8a979',
+    backgroundColor: '#f2e2c5',
+    ...shadows.soft,
+  },
+  settingsButtonPressed: {
+    transform: [{ translateY: 2 }],
+    backgroundColor: '#e6d2ac',
+  },
+  settingsButtonDisabled: {
+    opacity: 0.5,
+  },
   title: {
     color: colors.textPrimary,
     fontFamily: 'Fraunces_700Bold',
     fontSize: 25,
     letterSpacing: -0.3,
   },
+  titleCompact: {
+    fontSize: 22,
+  },
   hudRow: {
     flexDirection: 'row',
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
     paddingTop: spacing.sm,
+  },
+  hudRowCompact: {
+    paddingTop: spacing.xs,
   },
   hudPill: {
     flex: 1,
@@ -445,6 +679,9 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingHorizontal: spacing.lg,
   },
+  statusRowCompact: {
+    minHeight: 26,
+  },
   statusNeedle: {
     width: 18,
     height: 2,
@@ -460,6 +697,14 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     textAlign: 'center',
   },
+  tutorialSlot: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+  },
+  tutorialSlotCompact: {
+    paddingHorizontal: spacing.sm,
+    paddingBottom: spacing.xs,
+  },
   playfieldFrame: {
     flex: 1,
     minHeight: 300,
@@ -471,5 +716,32 @@ const styles = StyleSheet.create({
     borderColor: '#315868',
     backgroundColor: '#eddfc4',
     ...shadows.raised,
+  },
+  playfieldWithTutorial: { minHeight: 244 },
+  playfieldCompact: {
+    minHeight: 180,
+    marginHorizontal: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  playfieldHighContrast: { borderColor: highContrastColors.fabricOutline },
+  outlineHighContrast: { borderColor: highContrastColors.fabricOutline },
+  tutorialStitchAnchor: {
+    position: 'absolute',
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#a93238',
+    backgroundColor: 'rgba(242, 226, 197, 0.88)',
+    transform: [{ translateX: -12 }, { translateY: -12 }],
+    ...shadows.soft,
+  },
+  tutorialStitchAnchorDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#a93238',
   },
 });

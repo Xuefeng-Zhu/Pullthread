@@ -1,0 +1,49 @@
+appId: com.xuefengzhu.pullthread
+name: Pullthread failure, retry, undo, and reset regression
+tags:
+  - regression
+  - milestone-2
+---
+- launchApp:
+    clearState: true
+
+- assertVisible:
+    id: "spike-level-screen"
+- tapOn:
+    id: "release-button"
+- extendedWaitUntil:
+    visible:
+      id: "retry-button"
+    timeout: 20000
+- tapOn:
+    id: "retry-button"
+
+- assertVisible:
+    id: "planning-status"
+- swipe:
+    from:
+      id: "tutorial-stitch-anchor"
+    direction: UP
+    duration: 800
+- assertVisible:
+    id: "stitch-count"
+    text: ".*1.*"
+- tapOn:
+    id: "undo-button"
+- assertVisible:
+    id: "stitch-count"
+    text: ".*0.*"
+
+- swipe:
+    from:
+      id: "tutorial-stitch-anchor"
+    direction: UP
+    duration: 800
+- assertVisible:
+    id: "stitch-count"
+    text: ".*1.*"
+- tapOn:
+    id: "reset-button"
+- assertVisible:
+    id: "stitch-count"
+    text: ".*0.*"
