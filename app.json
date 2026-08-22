@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Pullthread",
+    "slug": "pullthread",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "pullthread",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#162F3A",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.xuefengzhu.pullthread"
+    },
+    "android": {
+      "package": "com.xuefengzhu.pullthread",
+      "adaptiveIcon": {
+        "backgroundColor": "#162F3A",
+        "foregroundImage": "./assets/icon.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": false
+        }
+      ],
+      "expo-font",
+      "expo-asset"
+    ]
+  }
+}

@@ -1,0 +1,73 @@
+appId: com.xuefengzhu.pullthread
+name: Pullthread spike planning and run smoke
+tags:
+  - smoke
+  - spike
+---
+- launchApp:
+    clearState: true
+
+- assertVisible:
+    id: "spike-level-screen"
+- assertVisible:
+    id: "fabric-playfield"
+- assertVisible:
+    id: "planning-status"
+- assertVisible:
+    id: "stitch-count"
+    text: ".*0.*"
+- assertVisible:
+    id: "release-button"
+- assertVisible:
+    id: "undo-button"
+- assertVisible:
+    id: "reset-button"
+
+# Percentage coordinates keep the reference drag stable across portrait phone
+# resolutions. Update them with the level's documented reference stitch if the
+# playfield layout or spike level intentionally changes.
+- swipe:
+    start: 27%, 58%
+    end: 70%, 34%
+    duration: 800
+
+- assertVisible:
+    id: "stitch-count"
+    text: ".*1.*"
+- tapOn:
+    id: "release-button"
+
+- extendedWaitUntil:
+    visible:
+      id: "outcome-banner"
+    timeout: 20000
+- assertVisible:
+    id: "retry-button"
+- tapOn:
+    id: "retry-button"
+
+- assertVisible:
+    id: "planning-status"
+- assertVisible:
+    id: "stitch-count"
+    text: ".*1.*"
+- tapOn:
+    id: "undo-button"
+- assertVisible:
+    id: "stitch-count"
+    text: ".*0.*"
+
+- swipe:
+    start: 27%, 58%
+    end: 70%, 34%
+    duration: 800
+- assertVisible:
+    id: "stitch-count"
+    text: ".*1.*"
+- tapOn:
+    id: "reset-button"
+- assertVisible:
+    id: "stitch-count"
+    text: ".*0.*"
+- assertVisible:
+    id: "planning-status"
