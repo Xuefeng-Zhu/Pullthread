@@ -64,4 +64,73 @@ describe('game planning store', () => {
       outcome: null,
     });
   });
+
+  test('captures a versioned successful replay until an explicit reset', () => {
+    const limits = { maxStitches: 2, threadBudget: 120 };
+    useGameStore.getState().commitStitch(STITCH, limits);
+    useGameStore.getState().release();
+    useGameStore.getState().resolve({
+      status: 'success',
+      tick: 276,
+      completionMs: 2300,
+    });
+
+    const completedRun = useGameStore.getState().completedRun;
+    expect(completedRun).toMatchObject({
+      replay: { stitches: [STITCH] },
+      outcome: { status: 'success', completionMs: 2300 },
+      isNewBest: true,
+      bestMetrics: {
+        threadUsed: 60,
+        stitchesUsed: 1,
+        completionMs: 2300,
+      },
+    });
+
+    useGameStore.getState().resetSession();
+    expect(useGameStore.getState().completedRun).toBeNull();
+    expect(useGameStore.getState().bestRun).toEqual({
+      threadUsed: 60,
+      stitchesUsed: 1,
+      completionMs: 2300,
+    });
+  });
+
+  test('compares successful attempts by thread, stitches, then time', () => {
+    const limits = { maxStitches: 2, threadBudget: 120 };
+    useGameStore.getState().commitStitch(STITCH, limits);
+    useGameStore.getState().release();
+    useGameStore.getState().resolve({
+      status: 'success',
+      tick: 276,
+      completionMs: 2300,
+    });
+    useGameStore.getState().resetSession();
+    useGameStore.getState().commitStitch(STITCH, limits);
+    useGameStore.getState().release();
+    useGameStore.getState().resolve({
+      status: 'success',
+      tick: 300,
+      completionMs: 2500,
+    });
+
+    expect(useGameStore.getState().completedRun).toMatchObject({
+      isNewBest: false,
+      bestMetrics: { completionMs: 2300 },
+    });
+  });
+
+  test('ignores late outcomes once the run is no longer active', () => {
+    useGameStore.getState().resolve({
+      status: 'success',
+      tick: 1,
+      completionMs: 8,
+    });
+
+    expect(useGameStore.getState()).toMatchObject({
+      phase: 'planning',
+      outcome: null,
+      completedRun: null,
+    });
+  });
 });

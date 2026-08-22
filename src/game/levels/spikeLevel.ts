@@ -19,6 +19,8 @@ import type {
 
 export interface SpikeLevelDefinition {
   readonly id: string;
+  /** Increment whenever authored geometry or simulation rules change. */
+  readonly version: number;
   readonly name: string;
   readonly fabricBounds: Rect;
   readonly gridColumns: number;
@@ -32,6 +34,7 @@ export interface SpikeLevelDefinition {
 
 export const SPIKE_LEVEL: SpikeLevelDefinition = Object.freeze({
   id: 'technical-spike',
+  version: 1,
   name: 'First Pull',
   fabricBounds: Object.freeze({ x: 0, y: 0, width: 1, height: 1.5 }),
   gridColumns: 24,
@@ -81,6 +84,24 @@ export const REFERENCE_PINCH_STITCH: Stitch = Object.freeze({
   tension: 1,
   radius: 0.19,
   threadCost: calculateThreadCost(referenceStart, referenceEnd),
+});
+
+const tutorialGuideStart = Object.freeze({ x: 0.23, y: 1 });
+const tutorialGuideEnd = Object.freeze({ x: 0.23, y: 0 });
+
+/**
+ * The element-relative tutorial gesture starts at this authored guide and
+ * travels upward beyond the field. Input clamping produces the deterministic
+ * endpoint below on every portrait screen size.
+ */
+export const TUTORIAL_GUIDED_PINCH_STITCH: Stitch = Object.freeze({
+  id: 'tutorial-guided-pinch',
+  type: 'pinch',
+  start: tutorialGuideStart,
+  end: tutorialGuideEnd,
+  tension: 1,
+  radius: 0.19,
+  threadCost: calculateThreadCost(tutorialGuideStart, tutorialGuideEnd),
 });
 
 /**

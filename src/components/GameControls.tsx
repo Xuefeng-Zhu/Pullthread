@@ -11,6 +11,8 @@ interface GameControlsProps {
   readonly onReset: () => void;
   readonly onRelease: () => void;
   readonly onRetry: () => void;
+  readonly onResults: () => void;
+  readonly compact?: boolean;
 }
 
 interface UtilityButtonProps {
@@ -18,6 +20,7 @@ interface UtilityButtonProps {
   readonly label: string;
   readonly icon: keyof typeof Ionicons.glyphMap;
   readonly disabled?: boolean;
+  readonly compact?: boolean;
   readonly onPress: () => void;
 }
 
@@ -26,6 +29,7 @@ function UtilityButton({
   label,
   icon,
   disabled = false,
+  compact = false,
   onPress,
 }: UtilityButtonProps) {
   return (
@@ -38,6 +42,7 @@ function UtilityButton({
       onPress={onPress}
       style={({ pressed }) => [
         styles.utilityButton,
+        compact && styles.utilityButtonCompact,
         disabled && styles.disabled,
         pressed && !disabled && styles.pressed,
       ]}
@@ -55,47 +60,81 @@ export function GameControls({
   onReset,
   onRelease,
   onRetry,
+  onResults,
+  compact = false,
 }: GameControlsProps) {
   const planning = phase === 'planning';
   const running = phase === 'running';
-  const terminal = phase === 'succeeded' || phase === 'failed';
+  const succeeded = phase === 'succeeded';
+  const failed = phase === 'failed';
+  const primaryTestID = succeeded
+    ? 'results-button'
+    : failed
+      ? 'retry-button'
+      : 'release-button';
+  const primaryLabel = succeeded
+    ? 'View results'
+    : failed
+      ? 'Retry with these stitches'
+      : 'Release traveler';
+  const primaryIcon = succeeded
+    ? 'ribbon'
+    : failed
+      ? 'reload'
+      : running
+        ? 'ellipsis-horizontal'
+        : 'play';
+  const primaryCopy = succeeded
+    ? 'RESULTS'
+    : failed
+      ? 'RETRY'
+      : running
+        ? 'ROLLING'
+        : 'RELEASE';
+  const primaryAction = succeeded ? onResults : failed ? onRetry : onRelease;
 
   return (
-    <View style={styles.shelf} accessibilityLabel="Game controls">
+    <View
+      style={[styles.shelf, compact && styles.shelfCompact]}
+      accessibilityLabel="Game controls"
+    >
       <UtilityButton
         testID="undo-button"
         label="UNDO"
         icon="arrow-undo"
         disabled={!planning || !canUndo}
+        compact={compact}
         onPress={onUndo}
       />
       <UtilityButton
         testID="reset-button"
         label="RESET"
         icon="refresh"
-        disabled={running}
+        disabled={running || succeeded}
+        compact={compact}
         onPress={onReset}
       />
       <Pressable
-        testID={terminal ? 'retry-button' : 'release-button'}
+        testID={primaryTestID}
         accessibilityRole="button"
-        accessibilityLabel={terminal ? 'Retry with these stitches' : 'Release traveler'}
+        accessibilityLabel={primaryLabel}
         accessibilityState={{ disabled: running }}
         disabled={running}
-        onPress={terminal ? onRetry : onRelease}
+        onPress={primaryAction}
         style={({ pressed }) => [
           styles.primaryButton,
+          compact && styles.primaryButtonCompact,
           running && styles.primaryDisabled,
           pressed && !running && styles.primaryPressed,
         ]}
       >
         <Ionicons
-          name={terminal ? 'reload' : running ? 'ellipsis-horizontal' : 'play'}
+          name={primaryIcon}
           size={24}
           color={colors.textOnDark}
         />
         <Text style={styles.primaryLabel}>
-          {terminal ? 'RETRY' : running ? 'ROLLING' : 'RELEASE'}
+          {primaryCopy}
         </Text>
       </Pressable>
     </View>
@@ -127,6 +166,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#f3e3c4',
     ...shadows.soft,
   },
+  utilityButtonCompact: {
+    width: 56,
+  },
   utilityLabel: {
     color: colors.textPrimary,
     fontFamily: 'NunitoSans_800ExtraBold',
@@ -147,6 +189,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#a93238',
     ...shadows.raised,
   },
+  primaryButtonCompact: {
+    minWidth: 0,
+  },
   primaryLabel: {
     color: colors.textOnDark,
     fontFamily: 'NunitoSans_800ExtraBold',
@@ -160,4 +205,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#8d2930',
   },
   primaryDisabled: { opacity: 0.72, backgroundColor: '#6f5250' },
+  shelfCompact: {
+    minHeight: 76,
+    gap: 6,
+    paddingHorizontal: spacing.sm,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.sm,
+  },
 });

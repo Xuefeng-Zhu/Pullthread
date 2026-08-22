@@ -1,16 +1,17 @@
-# Milestone 1 Architecture
+# Pullthread Vertical-Slice Architecture
 
 ## Scope
 
-Milestone 1 is a single-level mechanic proof, not a small version of the entire
+The current Milestone 2 build is a single-level vertical slice, not a small version of the entire
 product. It must demonstrate one causal statement:
 
 > Given the same level and traveler state, the zero-stitch route fails and a
 > recorded pinch stitch deforms the fabric enough to make the route succeed.
 
-The spike includes a rectangular playfield, one traveler, one goal, one pinch
+The slice includes a rectangular playfield, one traveler, one goal, one pinch
 stitch type, planning and simulation phases, terminal outcomes, Undo, Reset,
-Retry, and placeholder feedback. Menus, progression, persistence, RevenueCat,
+Retry, guided onboarding, Results, compact replay, locally persisted
+preferences, and placeholder feedback. Campaign progression, RevenueCat,
 InsForge, Daily Scrap, campaign content, and the pocket stitch are deferred.
 
 ## Dependency direction
@@ -47,6 +48,8 @@ src/
     navigation/RootNavigator.tsx
   screens/
     SpikeLevelScreen/SpikeLevelScreen.tsx
+    ResultsScreen/
+    SettingsScreen/
   game/
     core/
       types.ts
@@ -62,6 +65,10 @@ src/
       stitchGesture.ts
     runtime/
       useGameSession.ts
+    replay/
+      spikeReplay.ts
+    tutorial/
+      tutorialFlow.ts
     rendering/
       FabricCanvas.tsx
       FabricTexture.tsx
@@ -75,6 +82,9 @@ src/
       __tests__/
   store/
     useGameStore.ts
+    usePreferencesStore.ts
+  accessibility/
+    useEffectiveReducedMotion.ts
   theme/
     tokens.ts
     typography.ts
@@ -181,6 +191,7 @@ Zustand holds coarse, user-observable session state:
 - committed stitches and current preview metadata
 - outcome reason and low-frequency summary
 - development overlay flags
+- the last successful replay/outcome snapshot and process-local best metrics
 
 Zustand does not receive traveler coordinates or mesh arrays every simulation
 step. `useGameSession` publishes traveler render values through Reanimated to
@@ -196,6 +207,11 @@ Control semantics are deliberately distinct:
 - **Retry:** restore the traveler and return to planning while retaining stitches.
 
 Editing gestures are ignored outside `planning`.
+
+A separate persisted Zustand store owns only local preferences and the completed
+tutorial version. It hydrates before gameplay renders, sanitizes stored values,
+and never contains the simulation, traveler position, route, or completed-run
+snapshot. Campaign progression and durable best results remain Milestone 3 work.
 
 ## Determinism contract
 
@@ -228,6 +244,19 @@ The automated proof establishes core repeatability. The phone recording must
 separately show the baseline failure and reference-stitch success so the visible
 surface, interaction, and tested core are demonstrably connected.
 
+## Replay boundary
+
+`SpikeReplayV1` stores the schema version, authored level id/version, and a
+detached copy of canonical stitch inputs. Parsing treats JSON as untrusted: it
+rejects unsupported versions/types, non-finite or out-of-bounds coordinates,
+forged thread costs, duplicate ids, and stitch/thread-limit violations.
+
+Planning preview and Results playback both run this replay input through the
+same fixed-step world. Results uses local playback phase so replay completion
+cannot call `useGameStore.resolve` or mutate the captured run. The visible
+tightening pre-roll animates only thread presentation; physics begins from the
+canonical start after the authored stitch input is fully reconstructed.
+
 ## Rendering and performance
 
 Skia draws the textile background, readable height contours or displaced guide
@@ -257,7 +286,15 @@ spike provides distinct placement and terminal cues.
 Release, Undo, Reset, and Retry remain normal accessible controls with labels,
 disabled states, and at least 48 dp targets. Outcome and phase are communicated
 with text/shape as well as animation or color. Full screen-reader gameplay for
-the Skia canvas is outside the Milestone 1 scope.
+the Skia canvas is outside the current scope.
+
+Milestone 2 adds persisted Sound, Haptics, Reduced motion, High contrast, and
+Tutorial hints controls. OS reduced motion is always honored; the in-app toggle
+can add reduction but cannot override an enabled OS preference. Reduced motion
+removes decorative entrances and replay autoplay without changing fixed-step
+physics. High contrast selects a complete Skia gameplay palette so route,
+thread, goal, traveler, grid, and frame change together rather than only
+restyling React Native chrome.
 
 ## Deferred service boundaries
 

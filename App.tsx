@@ -9,11 +9,20 @@ import { NunitoSans_700Bold } from '@expo-google-fonts/nunito-sans/700Bold';
 import { NunitoSans_800ExtraBold } from '@expo-google-fonts/nunito-sans/800ExtraBold';
 import { useFonts } from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import {
+  ReduceMotion,
+  ReducedMotionConfig,
+} from 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { RootNavigator } from './src/app/navigation/RootNavigator';
+import {
+  hydratePreferences,
+  usePreferencesStore,
+} from './src/store/usePreferencesStore';
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -25,8 +34,28 @@ export default function App() {
     NunitoSans_700Bold,
     NunitoSans_800ExtraBold,
   });
+  const [preferencesLoaded, setPreferencesLoaded] = useState(
+    usePreferencesStore.persist.hasHydrated(),
+  );
+  const reducedMotionEnabled = usePreferencesStore(
+    (state) => state.reducedMotionEnabled,
+  );
 
-  if (!fontsLoaded) {
+  useEffect(() => {
+    let mounted = true;
+
+    void hydratePreferences()
+      .catch(() => undefined)
+      .finally(() => {
+        if (mounted) setPreferencesLoaded(true);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  if (!fontsLoaded || !preferencesLoaded) {
     return (
       <View style={styles.loading} accessibilityLabel="Loading Pullthread">
         <View style={styles.loadingButton} />
@@ -38,6 +67,13 @@ export default function App() {
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
+        <ReducedMotionConfig
+          mode={
+            reducedMotionEnabled
+              ? ReduceMotion.Always
+              : ReduceMotion.System
+          }
+        />
         <StatusBar style="light" />
         <RootNavigator />
       </SafeAreaProvider>

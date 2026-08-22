@@ -1,14 +1,24 @@
 import { Circle, Group } from '@shopify/react-native-skia';
 import { useDerivedValue, type SharedValue } from 'react-native-reanimated';
 
+import { getGamePalette } from '../../theme/gamePalette';
+
 interface TravelerProps {
   readonly x: SharedValue<number>;
   readonly y: SharedValue<number>;
   readonly speed: SharedValue<number>;
   readonly radius: number;
+  readonly highContrast?: boolean;
 }
 
-export function Traveler({ x, y, speed, radius }: TravelerProps) {
+export function Traveler({
+  x,
+  y,
+  speed,
+  radius,
+  highContrast = false,
+}: TravelerProps) {
+  const palette = getGamePalette(highContrast);
   const transform = useDerivedValue(() => [
     { translateX: x.value },
     { translateY: y.value },
@@ -25,12 +35,12 @@ export function Traveler({ x, y, speed, radius }: TravelerProps) {
         r={radius * 1.08}
         color="rgba(42,31,25,0.32)"
       />
-      <Circle cx={0} cy={0} r={radius} color="#214f59" />
+      <Circle cx={0} cy={0} r={radius} color={palette.travelerOuter} />
       <Circle
         cx={0}
         cy={0}
         r={radius * 0.79}
-        color="#619aa0"
+        color={palette.travelerInner}
       />
       <Circle
         cx={-radius * 0.2}
@@ -45,7 +55,7 @@ export function Traveler({ x, y, speed, radius }: TravelerProps) {
             cx={column * holeOffset}
             cy={row * holeOffset}
             r={holeRadius}
-            color="#17333a"
+            color={palette.travelerHole}
           />
         )),
       )}

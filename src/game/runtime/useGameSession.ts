@@ -13,7 +13,6 @@ import {
   createFixedStepClock,
   releaseSimulation,
   resetSimulation,
-  stepSimulation,
 } from '../core/simulation';
 import type {
   Point,
@@ -21,6 +20,10 @@ import type {
   SimulationPhase,
   Stitch,
 } from '../core/types';
+import {
+  createSpikeReplay,
+  simulateSpikeReplay,
+} from '../replay';
 
 export interface GameSessionView {
   readonly travelerX: SharedValue<number>;
@@ -43,26 +46,11 @@ export function simulateRoute(
   stitches: readonly Stitch[],
   sampleEveryTicks = 8,
 ): RoutePreview {
-  const simulation = createSpikeSimulation();
-  const world = createSpikeWorld(stitches);
-  const points: Point[] = [{ ...simulation.traveler.position }];
-
-  releaseSimulation(simulation);
-  while (simulation.phase === 'running') {
-    stepSimulation(simulation, world, SPIKE_PHYSICS_CONFIG);
-    if (
-      simulation.tick % sampleEveryTicks === 0 ||
-      simulation.phase !== 'running'
-    ) {
-      points.push({ ...simulation.traveler.position });
-    }
-  }
-
-  if (!simulation.outcome) {
-    throw new Error('The deterministic route ended without an outcome.');
-  }
-
-  return { points, outcome: simulation.outcome };
+  const run = simulateSpikeReplay(
+    createSpikeReplay(stitches),
+    sampleEveryTicks,
+  );
+  return { points: run.points, outcome: run.outcome };
 }
 
 export function useGameSession({

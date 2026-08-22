@@ -4,7 +4,7 @@
 
 **Status: NOT RUN / UNVERIFIED**
 
-Milestone 1 is not device-complete until a human completes this document on at
+Milestones 1 and 2 are not device-complete until a human completes this document on at
 least one real iOS or Android phone. CI, Expo export, web, iOS Simulator, and
 Android Emulator results are valuable but cannot replace this gate.
 
@@ -39,6 +39,8 @@ identifiers, or account credentials.
 - [ ] `npm ci` completed with Node 24.x.
 - [ ] `npm run lint`, `npm run typecheck`, `npm test`, and `npm run export` pass.
 - [ ] The project development build, not Expo Go, is installed.
+- [ ] The development build was rebuilt after the Milestone 2 AsyncStorage and
+      Expo SDK 57 patch dependency changes.
 - [ ] The phone trusts the development host and can reach Metro if the build
       depends on Metro.
 - [ ] Screen recording is enabled before the mechanic proof.
@@ -72,7 +74,7 @@ npm start
       cutout, status area, and home/navigation indicator.
 - [ ] Traveler, goal, stitch preview, committed thread, and fabric deformation
       are visible at normal viewing distance.
-- [ ] Release, Undo, Reset, and Retry labels are readable and their targets feel
+- [ ] Release, Undo, Reset, Retry, Results, and Settings controls are readable and their targets feel
       at least 48 dp/comfortable under a thumb.
 - [ ] The layout remains usable at the phone's configured text/display scale.
 
@@ -143,7 +145,39 @@ Cycle count and notes:
 Pending.
 ```
 
-## 5. Repeated outcome check
+## 5. Tutorial, results, replay, and preferences
+
+Start once from cleared app data, then repeat after relaunching without clearing
+data.
+
+- [ ] The tutorial first shows `Pull the cloth` without covering the stitch
+      gesture area.
+- [ ] A valid stitch advances to `Read the route`; that step remains visible
+      until Next is tapped.
+- [ ] Next advances to `Let gravity work`, and successful Release completes the
+      tutorial.
+- [ ] Results show the exact thread, stitch, and simulated completion-time
+      values for the successful run.
+- [ ] Watch Replay first draws/tightens the saved thread, then releases the
+      traveler without player input, and finishes at the same goal.
+- [ ] Watch Replay can be restarted at least five times without stale position,
+      feedback stacking, or memory/latency growth.
+- [ ] Reduced motion removes the tightening/traveler autoplay and presents the
+      completed replay state immediately.
+- [ ] High contrast visibly strengthens thread, route, goal, traveler, grid,
+      and playfield outlines without hiding texture or copy.
+- [ ] Sound and Haptics toggles independently suppress their corresponding
+      cues, then restore them when re-enabled.
+- [ ] Settings and tutorial completion survive a cold app relaunch.
+- [ ] Try Again clears the completed run and returns to zero-stitch planning.
+
+Notes and replay-cycle count:
+
+```text
+Pending.
+```
+
+## 6. Repeated outcome check
 
 The Jest suite is the authoritative 30-run deterministic core proof. Hardware
 testing connects that core result to the rendered and interactive app.
@@ -167,7 +201,7 @@ Observed stitched outcomes:
 Pending.
 ```
 
-## 6. Audio and haptics
+## 7. Audio and haptics
 
 These checks require a human holding the phone. Simulator logs or successful API
 calls are not substitutes.
@@ -188,7 +222,7 @@ Notes:
 Pending.
 ```
 
-## 7. Performance and lifecycle
+## 8. Performance and lifecycle
 
 - [ ] Observe at least 60 continuous seconds of planning preview and simulation.
 - [ ] Frame pacing remains visually stable while drawing, tightening, rolling,
@@ -212,26 +246,27 @@ The brief prefers stable 60 FPS, but the evidence must report what the phone
 actually produced. Do not turn a simulator number into a phone performance
 claim.
 
-## 8. Maestro installed-app smoke
+## 9. Maestro installed-app smoke
 
 With the development build installed and available to Maestro:
 
 ```sh
 maestro test .maestro/spike-smoke.yaml
+maestro test .maestro/failure-retry.yaml
 ```
 
 - [ ] The flow launches a clean app state.
-- [ ] It finds the screen, playfield, planning status, counter, and four controls
-      by stable IDs.
-- [ ] The percentage drag commits one stitch.
-- [ ] Release reaches a terminal outcome before timeout.
-- [ ] Retry, Undo, a second placement, and Reset complete.
-- [ ] The final stitch counter is zero.
+- [ ] The main flow completes all three tutorial beats, the authored reference
+      stitch, Results, replay completion, Try Again, and tutorial persistence.
+- [ ] The regression flow completes baseline failure, Retry, Undo, and Reset.
+- [ ] Both final stitch counters are zero.
 - [ ] The Maestro report/video path is recorded in the evidence header.
 
-If the percentage drag no longer represents the authored reference stitch after
-a deliberate layout/level change, update the flow and record why. Do not weaken
-terminal assertions merely to make the smoke flow green.
+The flows begin at the code-authored `tutorial-stitch-anchor` and swipe upward,
+so their gesture is relative to the playfield instead of global screen
+percentages. If the authored guide or level geometry changes deliberately,
+update both together and record why. Do not weaken terminal assertions merely
+to make the smoke flow green.
 
 ## Offline evidence boundary
 
