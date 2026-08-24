@@ -60,7 +60,7 @@ tags:
     id: "watch-replay-button"
 - extendedWaitUntil:
     visible:
-      id: "replay-status"
+      id: "replay-stage"
       text: ".*REPLAY COMPLETE.*"
     timeout: 20000
 

@@ -164,7 +164,7 @@ The flows expect an installed app with identifier
 - `results-button`
 - `results-screen`
 - `watch-replay-button`
-- `replay-status`
+- `replay-stage`
 - `try-again-button`
 - `settings-screen`
 - `undo-button`
