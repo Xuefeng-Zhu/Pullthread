@@ -152,6 +152,9 @@ describe('ResultsScreen', () => {
       playingOptions.onOutcome(outcome);
     });
     expect(view.getByText('REPLAY COMPLETE')).toBeTruthy();
+    expect(view.getByTestId('replay-stage').props.accessibilityLabel).toBe(
+      'Deterministic replay of the completed pull. REPLAY COMPLETE',
+    );
 
     await fireEvent.press(view.getByTestId('watch-replay-button'));
     expect(view.getByText('TIGHTENING THREAD')).toBeTruthy();
