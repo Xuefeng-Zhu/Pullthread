@@ -6,6 +6,7 @@ import {
   stepSimulation,
 } from '../../core/simulation';
 import type { Stitch } from '../../core/types';
+import { createStitch } from '../../input/stitchGesture';
 import {
   createSpikeSimulation,
   createSpikeWorld,
@@ -65,17 +66,16 @@ describe('spike replay records', () => {
   });
 
   test('deep-copies and freezes authored inputs', () => {
+    const authored = createStitch(
+      'mutable-stitch',
+      'pinch',
+      { x: 0.23, y: 0.1 },
+      { x: 0.23, y: 1 },
+    );
     const mutableStitch = {
-      id: 'mutable-stitch',
-      type: 'pinch' as const,
-      start: { x: 0.23, y: 0.1 },
-      end: { x: 0.23, y: 1 },
-      tension: 1,
-      radius: 0.19,
-      threadCost: calculateThreadCost(
-        { x: 0.23, y: 0.1 },
-        { x: 0.23, y: 1 },
-      ),
+      ...authored,
+      start: { ...authored.start },
+      end: { ...authored.end },
     };
     const source = [mutableStitch];
     const replay = createSpikeReplay(source);
@@ -83,7 +83,7 @@ describe('spike replay records', () => {
     mutableStitch.start.x = 0.8;
     source.length = 0;
 
-    expect(replay.stitches[0].start.x).toBe(0.23);
+    expect(replay.stitches[0].start.x).toBe(authored.start.x);
     expect(replay.stitches).toHaveLength(1);
     expect(Object.isFrozen(replay)).toBe(true);
     expect(Object.isFrozen(replay.stitches)).toBe(true);

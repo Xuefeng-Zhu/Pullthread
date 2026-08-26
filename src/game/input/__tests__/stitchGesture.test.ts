@@ -2,7 +2,9 @@ import { describe, expect, test } from '@jest/globals';
 
 import {
   MINIMUM_STITCH_LENGTH,
+  POCKET_STITCH_RADIUS,
   SPIKE_STITCH_RADIUS,
+  createStitch,
   createPinchStitch,
   createValidPinchStitch,
   fabricPointToView,
@@ -56,6 +58,23 @@ describe('stitch gestures', () => {
       threadCost: 128,
     });
     expect(Number.isInteger(stitch.threadCost)).toBe(true);
+  });
+
+  test('creates a pocket with the canonical input radius', () => {
+    const stitch = createStitch(
+      'pocket',
+      'pocket',
+      { x: 0.25, y: 0.5 },
+      { x: 0.5, y: 0.5 },
+    );
+
+    expect(stitch).toMatchObject({
+      id: 'pocket',
+      type: 'pocket',
+      tension: 1,
+      radius: POCKET_STITCH_RADIUS,
+      threadCost: 25,
+    });
   });
 
   test('rejects short drags and accepts the exact minimum length', () => {

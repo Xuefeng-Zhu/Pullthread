@@ -20,6 +20,10 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { RootNavigator } from './src/app/navigation/RootNavigator';
 import {
+  hydrateCampaignProgress,
+  useCampaignProgressStore,
+} from './src/store/useCampaignProgressStore';
+import {
   hydratePreferences,
   usePreferencesStore,
 } from './src/store/usePreferencesStore';
@@ -34,8 +38,9 @@ export default function App() {
     NunitoSans_700Bold,
     NunitoSans_800ExtraBold,
   });
-  const [preferencesLoaded, setPreferencesLoaded] = useState(
-    usePreferencesStore.persist.hasHydrated(),
+  const [storedStateLoaded, setStoredStateLoaded] = useState(
+    usePreferencesStore.persist.hasHydrated() &&
+      useCampaignProgressStore.persist.hasHydrated(),
   );
   const reducedMotionEnabled = usePreferencesStore(
     (state) => state.reducedMotionEnabled,
@@ -44,10 +49,10 @@ export default function App() {
   useEffect(() => {
     let mounted = true;
 
-    void hydratePreferences()
+    void Promise.all([hydratePreferences(), hydrateCampaignProgress()])
       .catch(() => undefined)
       .finally(() => {
-        if (mounted) setPreferencesLoaded(true);
+        if (mounted) setStoredStateLoaded(true);
       });
 
     return () => {
@@ -55,7 +60,7 @@ export default function App() {
     };
   }, []);
 
-  if (!fontsLoaded || !preferencesLoaded) {
+  if (!fontsLoaded || !storedStateLoaded) {
     return (
       <View style={styles.loading} accessibilityLabel="Loading Pullthread">
         <View style={styles.loadingButton} />

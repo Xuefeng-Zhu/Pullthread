@@ -3,12 +3,6 @@ import { AppState } from 'react-native';
 import { useSharedValue, type SharedValue } from 'react-native-reanimated';
 
 import {
-  SPIKE_LEVEL,
-  SPIKE_PHYSICS_CONFIG,
-  createSpikeSimulation,
-  createSpikeWorld,
-} from '../levels/spikeLevel';
-import {
   advanceSimulation,
   createFixedStepClock,
   releaseSimulation,
@@ -21,9 +15,14 @@ import type {
   Stitch,
 } from '../core/types';
 import {
-  createSpikeReplay,
-  simulateSpikeReplay,
+  createLevelReplay,
+  simulateLevelReplay,
 } from '../replay';
+import {
+  createLevelSimulation,
+  createLevelWorld,
+} from '../levels/levelLoader';
+import type { LevelDefinition } from '../levels/schema';
 
 export interface GameSessionView {
   readonly travelerX: SharedValue<number>;
@@ -36,46 +35,50 @@ export interface RoutePreview {
   readonly outcome: SimulationOutcome;
 }
 
-interface UseGameSessionOptions {
+export interface UseGameSessionOptions {
+  readonly level: LevelDefinition;
   readonly phase: SimulationPhase;
   readonly stitches: readonly Stitch[];
   readonly onOutcome: (outcome: SimulationOutcome) => void;
 }
 
 export function simulateRoute(
+  level: LevelDefinition,
   stitches: readonly Stitch[],
   sampleEveryTicks = 8,
 ): RoutePreview {
-  const run = simulateSpikeReplay(
-    createSpikeReplay(stitches),
+  const run = simulateLevelReplay(
+    createLevelReplay(level, stitches),
     sampleEveryTicks,
   );
   return { points: run.points, outcome: run.outcome };
 }
 
 export function useGameSession({
+  level,
   phase,
   stitches,
   onOutcome,
 }: UseGameSessionOptions): GameSessionView {
-  const travelerX = useSharedValue(SPIKE_LEVEL.traveler.start.x);
-  const travelerY = useSharedValue(SPIKE_LEVEL.traveler.start.y);
+  const travelerX = useSharedValue(level.traveler.start.x);
+  const travelerY = useSharedValue(level.traveler.start.y);
   const speed = useSharedValue(0);
   const onOutcomeRef = useRef(onOutcome);
-  const simulationRef = useRef(createSpikeSimulation());
-  const world = useMemo(() => createSpikeWorld(stitches), [stitches]);
+  const simulation = useMemo(() => createLevelSimulation(level), [level]);
+  const world = useMemo(
+    () => createLevelWorld(level, stitches),
+    [level, stitches],
+  );
 
   useEffect(() => {
     onOutcomeRef.current = onOutcome;
   }, [onOutcome]);
 
   useEffect(() => {
-    const simulation = simulationRef.current;
-
     if (phase === 'planning') {
-      resetSimulation(simulation, SPIKE_LEVEL.traveler);
-      travelerX.value = SPIKE_LEVEL.traveler.start.x;
-      travelerY.value = SPIKE_LEVEL.traveler.start.y;
+      resetSimulation(simulation, level.traveler);
+      travelerX.value = level.traveler.start.x;
+      travelerY.value = level.traveler.start.y;
       speed.value = 0;
       return;
     }
@@ -84,7 +87,10 @@ export function useGameSession({
       return;
     }
 
-    resetSimulation(simulation, SPIKE_LEVEL.traveler);
+    resetSimulation(simulation, level.traveler);
+    travelerX.value = level.traveler.start.x;
+    travelerY.value = level.traveler.start.y;
+    speed.value = 0;
     releaseSimulation(simulation);
     const clock = createFixedStepClock();
     let animationFrame = 0;
@@ -117,7 +123,7 @@ export function useGameSession({
         elapsed,
         simulation,
         world,
-        SPIKE_PHYSICS_CONFIG,
+        level.physicsConfig,
       );
 
       travelerX.value = simulation.traveler.position.x;
@@ -139,7 +145,7 @@ export function useGameSession({
       cancelAnimationFrame(animationFrame);
       appStateSubscription.remove();
     };
-  }, [phase, speed, travelerX, travelerY, world]);
+  }, [level, phase, simulation, speed, travelerX, travelerY, world]);
 
   return { travelerX, travelerY, speed };
 }

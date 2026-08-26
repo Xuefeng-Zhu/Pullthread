@@ -9,7 +9,11 @@ import MockReact from 'react';
 import { View as MockView } from 'react-native';
 
 import type { SimulationOutcome } from '../../../game/core/types';
-import { REFERENCE_PINCH_STITCH } from '../../../game/levels/spikeLevel';
+import {
+  REFERENCE_PINCH_STITCH,
+  SPIKE_LEVEL,
+} from '../../../game/levels/spikeLevel';
+import { CAMPAIGN_LEVELS } from '../../../game/levels/campaignLevels';
 import {
   createSpikeReplay,
   simulateSpikeReplay,
@@ -67,6 +71,7 @@ function seedCompletedRun() {
     stitches: [REFERENCE_PINCH_STITCH],
     outcome,
     completedRun: {
+      levelId: SPIKE_LEVEL.id,
       replay,
       outcome,
       isNewBest: true,
@@ -74,6 +79,16 @@ function seedCompletedRun() {
         threadUsed: replay.stitches[0].threadCost,
         stitchesUsed: replay.stitches.length,
         completionMs: outcome.completionMs,
+        collectedPatch: false,
+      },
+      scoredRun: {
+        thimbles: 2,
+        metrics: {
+          threadUsed: replay.stitches[0].threadCost,
+          stitchesUsed: replay.stitches.length,
+          completionMs: outcome.completionMs,
+          collectedPatch: false,
+        },
       },
     },
   });
@@ -103,9 +118,12 @@ describe('ResultsScreen', () => {
     const view = await render(<ResultsScreen navigation={nav.value} />);
 
     expect(view.getByText('Perfect pull!')).toBeTruthy();
-    expect(view.getByText('The button found the embroidery.')).toBeTruthy();
+    expect(view.getByText('First Pull is sewn into the quilt.')).toBeTruthy();
     expect(view.getByText('REPLAY READY')).toBeTruthy();
     expect(view.getByText('NEW BEST')).toBeTruthy();
+    expect(view.getByTestId('results-thimbles').props.accessibilityLabel).toBe(
+      '2 of 2 thimbles earned',
+    );
     expect(view.getByTestId('thread-result').props.children).toBe(
       `${replay.stitches[0].threadCost} / 120`,
     );
@@ -222,7 +240,38 @@ describe('ResultsScreen', () => {
       outcome: null,
       completedRun: null,
     });
-    expect(nav.popTo).toHaveBeenCalledWith('SpikeLevel');
+    expect(nav.popTo).toHaveBeenCalledWith('SpikeLevel', {
+      levelId: SPIKE_LEVEL.id,
+    });
+  });
+
+  test('continues to the next campaign level with a fresh session', async () => {
+    seedCompletedRun();
+    const nav = navigation();
+    const view = await render(<ResultsScreen navigation={nav.value} />);
+
+    await fireEvent.press(view.getByTestId('next-level-button'));
+
+    expect(useGameStore.getState()).toMatchObject({
+      activeLevelId: CAMPAIGN_LEVELS[1].id,
+      phase: 'planning',
+      stitches: [],
+      completedRun: null,
+    });
+    expect(nav.popTo).toHaveBeenCalledWith('SpikeLevel', {
+      levelId: CAMPAIGN_LEVELS[1].id,
+    });
+  });
+
+  test('returns to the quilt map after clearing the transient run', async () => {
+    seedCompletedRun();
+    const nav = navigation();
+    const view = await render(<ResultsScreen navigation={nav.value} />);
+
+    await fireEvent.press(view.getByTestId('results-map-button'));
+
+    expect(useGameStore.getState().completedRun).toBeNull();
+    expect(nav.popTo).toHaveBeenCalledWith('QuiltMap');
   });
 
   test('offers a safe return when opened without a completed run', async () => {
@@ -231,6 +280,8 @@ describe('ResultsScreen', () => {
 
     expect(view.getByText('No completed pull')).toBeTruthy();
     await fireEvent.press(view.getByTestId('try-again-button'));
-    expect(nav.popTo).toHaveBeenCalledWith('SpikeLevel');
+    expect(nav.popTo).toHaveBeenCalledWith('SpikeLevel', {
+      levelId: SPIKE_LEVEL.id,
+    });
   });
 });

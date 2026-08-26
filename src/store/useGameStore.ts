@@ -1,26 +1,31 @@
 import { create } from 'zustand';
 
+import {
+  calculateThreadUsed,
+  type RunMetrics,
+  type ScoredRun,
+} from '../game/core/scoring';
 import type {
   SimulationOutcome,
   SimulationPhase,
   Stitch,
 } from '../game/core/types';
+import { CAMPAIGN_LEVELS } from '../game/levels/campaignLevels';
+import { getCampaignLevel } from '../game/levels/levelLoader';
 import {
-  createSpikeReplay,
-  type SpikeReplayV1,
+  createLevelReplay,
+  type LevelReplayV1,
 } from '../game/replay';
+import { useCampaignProgressStore } from './useCampaignProgressStore';
 
 export interface CompletedRun {
-  readonly replay: SpikeReplayV1;
+  readonly levelId: string;
+  readonly replay: LevelReplayV1;
   readonly outcome: Extract<SimulationOutcome, { status: 'success' }>;
   readonly isNewBest: boolean;
+  readonly scoredRun: ScoredRun;
+  /** Compatibility view used by result tiles and older callers. */
   readonly bestMetrics: RunMetrics;
-}
-
-export interface RunMetrics {
-  readonly threadUsed: number;
-  readonly stitchesUsed: number;
-  readonly completionMs: number;
 }
 
 interface CommitLimits {
@@ -29,11 +34,14 @@ interface CommitLimits {
 }
 
 interface GameStore {
+  activeLevelId: string;
   phase: SimulationPhase;
   stitches: Stitch[];
   outcome: SimulationOutcome | null;
   completedRun: CompletedRun | null;
+  /** Process-local mirror of the active level's durable best metrics. */
   bestRun: RunMetrics | null;
+  startLevel: (levelId: string) => void;
   commitStitch: (stitch: Stitch, limits: CommitLimits) => boolean;
   removeStitch: (id: string) => void;
   undo: () => void;
@@ -44,35 +52,52 @@ interface GameStore {
   resetSession: () => void;
 }
 
-function threadUsed(stitches: readonly Stitch[]): number {
-  return stitches.reduce((total, stitch) => total + stitch.threadCost, 0);
-}
+const FIRST_LEVEL_ID = CAMPAIGN_LEVELS[0].id;
 
-function isBetterRun(candidate: RunMetrics, best: RunMetrics | null): boolean {
-  if (!best) return true;
-
+function scoredRunsDiffer(
+  left: ScoredRun | null,
+  right: ScoredRun,
+): boolean {
   return (
-    candidate.threadUsed < best.threadUsed ||
-    (candidate.threadUsed === best.threadUsed &&
-      (candidate.stitchesUsed < best.stitchesUsed ||
-        (candidate.stitchesUsed === best.stitchesUsed &&
-          candidate.completionMs < best.completionMs)))
+    !left ||
+    left.thimbles !== right.thimbles ||
+    left.metrics.threadUsed !== right.metrics.threadUsed ||
+    left.metrics.stitchesUsed !== right.metrics.stitchesUsed ||
+    left.metrics.completionMs !== right.metrics.completionMs ||
+    left.metrics.collectedPatch !== right.metrics.collectedPatch
   );
 }
 
 export const useGameStore = create<GameStore>((set, get) => ({
+  activeLevelId: FIRST_LEVEL_ID,
   phase: 'planning',
   stitches: [],
   outcome: null,
   completedRun: null,
   bestRun: null,
 
+  startLevel: (levelId) => {
+    getCampaignLevel(levelId);
+    const durableBest =
+      useCampaignProgressStore.getState().progressByLevel[levelId]?.bestRun ??
+      null;
+    set({
+      activeLevelId: levelId,
+      phase: 'planning',
+      stitches: [],
+      outcome: null,
+      completedRun: null,
+      bestRun: durableBest?.metrics ?? null,
+    });
+  },
+
   commitStitch: (stitch, limits) => {
     const state = get();
     if (
       state.phase !== 'planning' ||
       state.stitches.length >= limits.maxStitches ||
-      threadUsed(state.stitches) + stitch.threadCost > limits.threadBudget
+      calculateThreadUsed(state.stitches) + stitch.threadCost >
+        limits.threadBudget
     ) {
       return false;
     }
@@ -90,6 +115,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       state.phase === 'planning'
         ? {
             stitches: state.stitches.filter((stitch) => stitch.id !== id),
+            outcome: null,
             completedRun: null,
           }
         : state,
@@ -139,45 +165,59 @@ export const useGameStore = create<GameStore>((set, get) => ({
         };
       }
 
-      const metrics: RunMetrics = {
-        threadUsed: threadUsed(state.stitches),
+      const level = getCampaignLevel(state.activeLevelId);
+      const metrics: RunMetrics = Object.freeze({
+        threadUsed: calculateThreadUsed(state.stitches),
         stitchesUsed: state.stitches.length,
         completionMs: outcome.completionMs,
-      };
-      const isNewBest = isBetterRun(metrics, state.bestRun);
-      const bestMetrics = isNewBest ? metrics : state.bestRun;
-
-      if (!bestMetrics) {
-        throw new Error('A successful run must produce best-result metrics.');
-      }
+        collectedPatch:
+          Boolean(level.collectible) &&
+          outcome.collectedPatchId === level.collectible?.id,
+      });
+      const priorBest =
+        useCampaignProgressStore.getState().progressByLevel[level.id]?.bestRun ??
+        null;
+      const scoredRun = useCampaignProgressStore
+        .getState()
+        .recordRun(level.id, metrics, level.targetThreadUsage);
 
       return {
         phase: 'succeeded',
         outcome,
         completedRun: {
-          replay: createSpikeReplay(state.stitches),
+          levelId: level.id,
+          replay: createLevelReplay(level, state.stitches),
           outcome: Object.freeze({ ...outcome }),
-          isNewBest,
-          bestMetrics: Object.freeze({ ...bestMetrics }),
+          isNewBest: scoredRunsDiffer(priorBest, scoredRun),
+          scoredRun,
+          bestMetrics: scoredRun.metrics,
         },
-        bestRun: isNewBest ? Object.freeze({ ...metrics }) : state.bestRun,
+        bestRun: scoredRun.metrics,
       };
     }),
 
-  resetSession: () =>
+  resetSession: () => {
+    const activeLevelId = get().activeLevelId;
+    const durableBest =
+      useCampaignProgressStore.getState().progressByLevel[activeLevelId]
+        ?.bestRun ?? null;
     set({
       phase: 'planning',
       stitches: [],
       outcome: null,
       completedRun: null,
-    }),
+      bestRun: durableBest?.metrics ?? null,
+    });
+  },
 }));
 
 export const selectThreadUsed = (state: GameStore): number =>
-  threadUsed(state.stitches);
+  calculateThreadUsed(state.stitches);
 
 export const resetGameStoreForTests = (): void => {
+  useCampaignProgressStore.setState({ progressByLevel: {} });
   useGameStore.setState({
+    activeLevelId: FIRST_LEVEL_ID,
     phase: 'planning',
     stitches: [],
     outcome: null,

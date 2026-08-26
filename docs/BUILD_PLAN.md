@@ -2,14 +2,14 @@
 
 ## Goal
 
-Ship a polished single-level vertical slice: a portrait Expo app in which one
-pinch stitch visibly deforms a quilt, changes a button traveler's deterministic
-route, teaches that mechanic without blocking play, and carries a successful
-run into results and a restartable deterministic replay.
+Extend the proven portrait physics-puzzle slice into a complete local campaign:
+three quilt sections, 15 validated levels, sequential unlocking, durable
+per-level progress, two stitch types, three fabric properties, deterministic
+hazards/collectibles, scoring, best-result comparison, and replay.
 
-The completed slice intentionally excludes the campaign, progression
-persistence, pocket stitch, RevenueCat, InsForge, Daily Scrap, and production
-content. Milestone 2 persists preferences and tutorial completion only.
+Milestone 3 remains offline-first and service-independent. RevenueCat,
+entitlement gates, InsForge, Daily Scrap, remote leaderboards, and production
+content remain later work.
 
 ## Milestone 1 plan
 
@@ -62,24 +62,61 @@ content. Milestone 2 persists preferences and tutorial completion only.
    320 x 568, then repeat lint, strict TypeScript, Jest, Expo Doctor, and
    three-platform export gates.
 
+## Milestone 3 plan
+
+1. Replace the direct-to-level launch with a three-section Quilt Map. Show all
+   15 authored levels, their locked/current/completed state, earned thimbles,
+   and optional patch status. Unlock each level only after its predecessor is
+   completed.
+2. Define a typed, versioned level schema and validate the entire catalog at
+   module load. Keep fabric coordinates, physics, stitch limits, thread limits,
+   regions, hazards, bumpers, collectibles, and reference solutions in data
+   rather than screen conditionals.
+3. Generalize the height-field and physics core for bounded pocket
+   depressions, felt/silk/elastic friction, swept circular bumper collisions,
+   hole/thorn failures, and swept collectible-patch detection.
+4. Generalize input, rendering, runtime, and replay from the Level 1 spike to
+   any catalog level while retaining the backwards-compatible Level 1 replay
+   wrapper and tutorial guide.
+5. Author Bedroom, Attic, and Festival quilts with five levels each. Introduce
+   one mechanic at a time, then combine pinch/pocket stitches, materials,
+   hazards, bumpers, budgets, and patches in later levels.
+6. Award deterministic thimbles for completion, target thread usage, and an
+   optional collectible patch. Rank best runs by thimbles descending, then
+   thread, stitch count, and simulated completion time ascending.
+7. Persist completed levels, merged best runs, and collected-patch achievement
+   through a versioned, fail-soft AsyncStorage store. Hydrate campaign progress
+   with preferences before navigation renders to avoid a lock-state flash.
+8. Expand Jest coverage for catalog validation, every reference solution,
+   materials, pocket deformation, hazards, bumpers, collectibles, scoring,
+   migrations, map states, and campaign replay. Update Maestro to enter Level 1
+   from the map and prove Level 2 unlocks after success.
+9. Repeat lint, strict TypeScript, Jest, Expo Doctor, and three-platform export,
+   then complete the physical campaign checklist on the installed iOS
+   development client.
+
 ## Architecture
 
 ```text
 App.tsx
 src/
   app/navigation/RootNavigator.tsx
-  screens/SpikeLevelScreen/
+  screens/
+    QuiltMapScreen/
+    SpikeLevelScreen/
+    ResultsScreen/
+    SettingsScreen/
   game/
     core/           # pure geometry, height field, physics, simulation, types
     input/          # normalized stitch gesture
-    levels/         # one spike level and reference solution
+    levels/         # validated quilt/level catalog and runtime loaders
     rendering/      # Skia-only drawing components
     runtime/        # fixed-step session and animation loop
-    replay/         # validated compact replay input and fixed-step playback
+    replay/         # campaign replay plus Level 1 compatibility wrapper
     tutorial/       # pure guided-flow reducer and accepted copy
     feedback/       # haptic/audio interface and Expo implementation
-  store/            # planning phase, stitches, outcome, debug flags
-                    # plus separately persisted local preferences
+  store/            # active run plus separately persisted preferences and
+                    # versioned per-level campaign progress
   components/       # reachable controls and outcome UI
   theme/            # textile design tokens
 tests/
@@ -114,14 +151,25 @@ Reference: `docs/design/pullthread-gameplay-concept.png`
 - Lint, typecheck, tests, Expo Doctor, and export complete without errors.
 - A human physical-device pass confirms drag ergonomics, haptic/audio timing,
   and performance before the milestone is called device-complete.
+- The catalog contains exactly three ordered quilts and 15 uniquely identified,
+  consecutively ordered, schema-valid levels.
+- All 15 reference solutions terminate deterministically and campaign replay
+  reproduces each saved fixed-step outcome.
+- Pinch and pocket deformation, felt/silk/elastic behavior, hazards, bumpers,
+  collectible patches, stitch limits, and thread budgets are exercised by
+  focused tests.
+- A clean campaign starts with only Level 1 available; completing it unlocks
+  Level 2, and that state plus the best scored run survives a cold relaunch.
+- Results and the Quilt Map expose earned thimbles and patch state without
+  relying on color alone.
 
 ## Environment tradeoff
 
-This workspace has Node/npm but no active full Xcode installation, Android SDK,
-simulator, ADB, or attached phone tooling. Automated implementation, bundling,
-determinism, browser interaction, and visual checks can be completed here. The
-physical-device gate will remain explicitly outstanding until the app is opened
-in a development build on real iOS or Android hardware.
+This workspace now has a full Xcode installation and successfully signed,
+installed, and launched the Milestone 2 development client on an iPhone 17e.
+The 2026-08-25 owner-reported gameplay smoke remains deliberately limited: it
+does not cover the extended Milestone 1/2 device checklist or the new Milestone
+3 campaign. Android SDK/ADB hardware evidence also remains outstanding.
 
 ## Progress
 
@@ -134,7 +182,10 @@ in a development build on real iOS or Android hardware.
 - [x] Phone-sized browser interaction pass: baseline failure, calibrated stitch
       success, Release, Retry, Undo, and Reset.
 - [x] Lint, strict TypeScript, Jest, Expo Doctor, and three-platform export.
-- [ ] Physical-device mechanic proof and evidence record.
+- [x] Limited physical-iOS smoke: local signed build, install, launch, Metro
+      bundle, and user-reported manual gameplay pass on iPhone 17e / iOS 26.6.
+- [ ] Full physical-device mechanic proof and evidence record, including
+      recordings, extended cycles, lifecycle/performance notes, and Maestro.
 
 ### Milestone 2
 
@@ -151,12 +202,34 @@ in a development build on real iOS or Android hardware.
       Settings persistence, Try Again, and zero warning/error console entries.
 - [x] Compact-phone layout and an element-relative Maestro stitch guide that is
       independent of global screen percentages and native safe-area offsets.
-- [ ] Physical-device Milestone 2 pass and evidence record.
+- [x] Limited physical-iOS smoke pass and evidence record.
+- [ ] Full physical-device Milestone 2 checklist and native Maestro evidence.
+
+### Milestone 3
+
+- [x] Three-section Quilt Map with 15 level nodes and sequential lock states.
+- [x] Typed and versioned campaign schema, catalog validation, runtime lookup,
+      and generic level world/simulation creation.
+- [x] Bedroom, Attic, and Festival catalogs with five authored levels each.
+- [x] Pinch and pocket height-field deformation.
+- [x] Felt, silk, and elastic regions plus deterministic bumpers.
+- [x] Hole and thorn hazards plus collectible embroidered patches.
+- [x] Per-level stitch/thread limits and generic campaign gameplay/runtime.
+- [x] Deterministic thimble scoring and best-run ordering.
+- [x] Versioned, fail-soft local campaign progress with migration/sanitization.
+- [x] Campaign-aware validated replay with a backwards-compatible Level 1
+      wrapper.
+- [x] Maestro routes updated to enter Level 1 from Quilt Map and assert Level 2
+      unlock after a successful result.
+- [ ] Full automated Milestone 3 verification snapshot recorded on the final
+      change set.
+- [ ] Manual physical-device campaign checklist, campaign recording,
+      performance notes, and native Maestro evidence.
 
 ## Completed work and tradeoffs
 
-- The technical spike is a directly launchable single screen with no account,
-  service credential, or network-backed gameplay dependency.
+- The campaign launches at the Quilt Map with no account, service credential,
+  purchase, or network-backed gameplay dependency.
 - Rendering uses the documented procedural fallback: woven Skia paths,
   displaced height-field guides, contour/shadow cues, and the same surface data
   sampled by physics. A dynamically textured vertex mesh remains deferred so
@@ -169,20 +242,23 @@ in a development build on real iOS or Android hardware.
 - The generated visual concept and implementation captures live in
   `docs/design/`. The tuned reference route is also exported as typed level
   data and covered by exact replay tests.
-- This environment cannot compile or install a native binary because it has no
-  full Xcode toolchain, Android SDK, attached phone, or emulator. The milestone
-  therefore remains **provisional** despite passing automated, export, and web
-  interaction gates.
+- A signed iOS development binary has been compiled, installed, and smoke-tested
+  on an iPhone, but that evidence predates Milestone 3 and remains limited. The
+  campaign is therefore not yet device-complete.
 - `npm audit --omit=dev` currently reports 14 transitive findings (10 moderate,
   4 high) in the Expo
   57 build chain (`metro`/`image-size` and `xcode`/`uuid`). A non-mutating
   `npm audit fix --dry-run --omit=dev` leaves the same findings, while the force
   path proposes a breaking Expo 46 downgrade, so no incompatible fix was applied;
   this should be rechecked when Expo publishes an updated compatible chain.
-- Best-run comparison is intentionally process-local in Milestone 2. Campaign
-  progression and durable per-level best results begin in Milestone 3.
+- Milestone 3 stores per-level best runs locally. Scored achievements merge
+  across successful attempts so an earned thread target or collectible patch
+  is not lost when a different run supplies better comparison metrics.
 - AsyncStorage and the SDK 57 patch updates are native dependency changes, so
   an existing development client must be rebuilt before phone verification.
+  The campaign source itself adds no native dependency, but the final integrated
+  change set also aligns Expo SDK 57 patch packages; rebuild the client before
+  recording Milestone 3 device evidence.
 
 ## Verification snapshot — 2026-08-18
 
@@ -210,11 +286,28 @@ in a development build on real iOS or Android hardware.
 - Compact 320 x 568 browser layout — tutorial, fabric gesture target, and all
   three bottom controls remain visible without horizontal or vertical clipping.
 
+## Milestone 3 verification snapshot
+
+The final command results and current suite/test counts must be recorded here
+after the integrated change set is stable. Until then, the implementation
+checkboxes above describe source scope, not a completed device or release gate.
+
+- `npm run lint` — pending final integrated run.
+- `npm run typecheck` — pending final integrated run.
+- `npm test` — pending final integrated run.
+- `npx expo-doctor@latest` — pending final integrated run.
+- `npm run export` — pending final integrated run.
+- `.maestro/spike-smoke.yaml` and `.maestro/failure-retry.yaml` on an installed
+  target — pending.
+- [`CAMPAIGN_SMOKE_TEST.md`](CAMPAIGN_SMOKE_TEST.md) on the iPhone development
+  client — pending.
+
 ## Next milestone
 
-First, rebuild the development client and complete
-`docs/PHYSICAL_DEVICE_TEST.md` on a real iOS or Android phone, including both
-new Maestro flows. Tune the reference drag, feedback timing, replay pre-roll,
-and frame pacing from that evidence. Milestone 3 then adds the quilt map, local
-campaign progression, fabric properties, hazards and patches, pocket stitch,
-campaign content, and durable score/best-result comparisons.
+Run the final automated gates, reload the compatible development client, and
+complete [`CAMPAIGN_SMOKE_TEST.md`](CAMPAIGN_SMOKE_TEST.md) plus the remaining
+extended checks in [`PHYSICAL_DEVICE_TEST.md`](PHYSICAL_DEVICE_TEST.md). Tune
+campaign gestures, map usability, feedback timing, replay pacing, and frame
+pacing only from recorded evidence. After Milestone 3 is device-validated,
+Milestone 4 can add RevenueCat entitlement/restore behavior and later service
+work without weakening the offline campaign.

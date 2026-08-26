@@ -3,21 +3,23 @@
 **Stitch the world. Pull it into shape. Let gravity solve the rest.**
 
 Pullthread is a portrait mobile physics-puzzle game built with Expo and React
-Native. The player draws a pinch stitch across a quilt, the stitch deforms a
-shared height field, and a button-shaped traveler rolls over that changed
-surface toward an embroidered goal.
+Native. The player draws pinch and pocket stitches across a quilt, the stitches
+deform a shared height field, and a button-shaped traveler rolls over that
+changed surface toward an embroidered goal.
 
-The repository now contains the Milestone 2 polished vertical slice: one guided
-level, one stitch type, deterministic movement, immediate retry, a results
-screen, compact restartable replay, persisted feedback/accessibility settings,
-and enough polish to demonstrate the complete mechanic. Campaign progression,
-RevenueCat, InsForge, and production content remain intentionally deferred.
+The repository now contains the Milestone 3 local campaign: a three-quilt map,
+15 authored levels, sequential unlocking, durable per-level progress, pinch and
+pocket stitches, felt/silk/elastic regions, holes, thorns, bumpers, collectible
+patches, deterministic thimble scoring, best-run comparisons, and
+campaign-aware replay. RevenueCat, InsForge, Daily Scrap, and production
+content remain intentionally deferred.
 
-> **Physical-device gate: not yet verified.** Automated checks, exports, and
-> simulator runs cannot establish touch feel, haptic/audio timing, or real-phone
-> performance. Milestone 2 is not device-complete until the checklist in
-> [`docs/PHYSICAL_DEVICE_TEST.md`](docs/PHYSICAL_DEVICE_TEST.md) is completed and
-> its device evidence is recorded.
+> **Physical-device gate: limited iOS smoke passed; full checklist pending.** A
+> locally signed development build installed and ran successfully on an iPhone
+> 17e with a user-reported manual gameplay pass on 2026-08-25. The extended
+> touch, haptic/audio, lifecycle, performance, repetition, recording, and native
+> Maestro checks in [`docs/PHYSICAL_DEVICE_TEST.md`](docs/PHYSICAL_DEVICE_TEST.md)
+> remain open.
 
 ## Technology
 
@@ -26,7 +28,8 @@ RevenueCat, InsForge, and production content remain intentionally deferred.
 - React Native Skia for the playfield
 - React Native Reanimated and Gesture Handler for tactile interaction
 - Zustand for coarse gameplay state
-- AsyncStorage for versioned preferences and tutorial completion
+- AsyncStorage for versioned preferences, tutorial completion, and campaign
+  progress
 - Expo Audio and Expo Haptics behind a feedback abstraction
 - Jest and React Native Testing Library
 - Maestro for the installed-app smoke flow
@@ -44,7 +47,8 @@ development and CI environment more narrowly to **Node 24.x** through
   Xcode, and either a simulator or a trusted phone with Developer Mode enabled
 - Optional for the smoke flow: the [Maestro CLI](https://docs.maestro.dev/)
 
-No RevenueCat or InsForge credentials are needed for Milestone 2.
+No RevenueCat or InsForge credentials are needed for the local Milestone 3
+campaign.
 
 ## Install
 
@@ -59,7 +63,7 @@ Use `npm ci`, not `npm install`, for a reproducible install from
 `package-lock.json`. Use `npx expo install <package>` when adding an Expo/native
 dependency so its version remains compatible with SDK 57.
 
-## Run the spike
+## Run the campaign
 
 This project includes `expo-dev-client` and treats a development build as the
 physical-device path. The scripts `npm run ios` and `npm run android` start
@@ -105,9 +109,10 @@ the first native binary.
    Scan/open the development-client link with the phone.
 
 Rebuild the native development client after changing native dependencies,
-native configuration, or the Expo SDK. Milestone 2 added AsyncStorage and SDK
-57 patch updates, so a client installed from Milestone 1 must be rebuilt. A
-later JavaScript/TypeScript-only edit only needs Metro reload.
+native configuration, or the Expo SDK. The campaign implementation itself is
+JavaScript/TypeScript, but this integrated change set also aligns Expo,
+Expo Asset, Expo Dev Client, and Metro Runtime to the SDK 57 patch matrix.
+Rebuild before recording Milestone 3 physical-device acceptance evidence.
 
 ### Simulator, emulator, and web diagnostics
 
@@ -123,7 +128,7 @@ Web is useful for fast visual inspection, but it does not prove native Skia,
 touch, audio, haptics, lifecycle, or phone performance.
 
 Expo's SDK 57 transition guidance recommends development builds for SDK 57;
-do not use `npm run start:go` or an Expo Go session as Milestone 2 hardware
+do not use `npm run start:go` or an Expo Go session as physical-device
 evidence. Expo Go is a prototyping client with a fixed native runtime, while a
 development build contains this project's native dependencies.
 
@@ -153,6 +158,9 @@ behavior on hardware.
 The flows expect an installed app with identifier
 `com.xuefengzhu.pullthread` and stable React Native `testID` values:
 
+- `quilt-map-screen`
+- `level-node-bedroom-01-first-pull`
+- `level-state-bedroom-02-edge-redirect`
 - `spike-level-screen`
 - `fabric-playfield`
 - `tutorial-stitch-anchor`
@@ -165,6 +173,7 @@ The flows expect an installed app with identifier
 - `results-screen`
 - `watch-replay-button`
 - `replay-stage`
+- `results-map-button`
 - `try-again-button`
 - `settings-screen`
 - `undo-button`
@@ -177,38 +186,46 @@ maestro test .maestro/spike-smoke.yaml
 maestro test .maestro/failure-retry.yaml
 ```
 
-The main flow launches cleanly, starts its pull from the authored in-field guide,
-completes all three tutorial beats, opens Results, watches the replay, verifies
-Try Again, then cold-relaunches without clearing storage to prove tutorial
-completion persisted. The regression flow covers baseline failure, Retry, Undo,
-and Reset. Maestro proves the control path on the selected installed target; it
-does not judge tactile quality or prove physics determinism by itself.
+The main flow launches cleanly on the Quilt Map, enters Level 1, starts its pull
+from the authored in-field guide, completes all three tutorial beats, opens
+Results, watches the replay, returns to the map, and verifies that Level 2 is
+unlocked. It then cold-relaunches without clearing storage to prove campaign
+progress persisted and re-enters Level 1 to verify tutorial completion. The
+regression flow enters Level 1 from the map and covers baseline failure, Retry,
+Undo, and Reset. Maestro proves the control path on the selected installed
+target; it does not judge tactile quality or prove physics determinism by
+itself.
 
 ## Architecture and proof standard
 
-The slice keeps geometry, deformation, physics, replay validation, and tutorial
-state transitions in pure TypeScript. The
+The campaign keeps geometry, deformation, physics, level validation, replay
+validation, scoring, and tutorial state transitions in pure TypeScript. The
 renderer and simulation sample the same height field, while high-frequency
 traveler state stays outside React and Zustand render cycles. See
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the state boundaries,
-fixed-step loop, and baseline-failure/reference-stitch-success proof.
+fixed-step loop, campaign catalog, persistence, and replay boundaries. Level
+authors should also read [`docs/LEVEL_FORMAT.md`](docs/LEVEL_FORMAT.md).
 
 The implementation plan and current tradeoffs live in
-[`docs/BUILD_PLAN.md`](docs/BUILD_PLAN.md).
+[`docs/BUILD_PLAN.md`](docs/BUILD_PLAN.md). The pending physical campaign pass
+is defined in [`docs/CAMPAIGN_SMOKE_TEST.md`](docs/CAMPAIGN_SMOKE_TEST.md).
 
 ## Explicitly deferred
 
-The following are not part of Milestone 2 and should not be inferred from this
-spike:
+The following are not part of the local Milestone 3 campaign and should not be
+inferred from it:
 
 - RevenueCat purchases, restore purchases, and entitlement caching
 - InsForge, Daily Scrap, guest identity, and leaderboards
-- Campaign map, fifteen levels, premium gates, and save migration
-- Pocket stitches, fabric materials, hazards, collectibles, and final scoring
-- Durable campaign best-result and progress persistence
+- Premium level gates and remote/cloud save synchronization
+- Remote content delivery, daily challenge content, and social systems
 - Production audio, final art, store builds, and release signing
+- A completed Milestone 3 physical-device checklist, recording, performance
+  capture, or native Maestro report
 
-Those systems begin only after the physical-phone mechanic proof passes.
+The 2026-08-25 limited phone smoke proves the signed Milestone 2 development
+build and basic gameplay path. It does not by itself prove the new campaign
+flow; use the campaign checklist before calling Milestone 3 device-complete.
 
 ## Current primary references
 

@@ -45,6 +45,9 @@ describe('First Pull technical spike', () => {
     expect(TUTORIAL_GUIDED_PINCH_STITCH.threadCost).toBeLessThanOrEqual(
       SPIKE_LEVEL.threadBudget,
     );
+    expect(TUTORIAL_GUIDED_PINCH_STITCH.threadCost).toBeLessThanOrEqual(
+      SPIKE_LEVEL.targetThreadUsage,
+    );
     expect(runSpike([TUTORIAL_GUIDED_PINCH_STITCH]).outcome?.status).toBe(
       'success',
     );

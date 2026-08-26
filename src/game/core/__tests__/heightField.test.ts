@@ -1,11 +1,13 @@
 import { describe, expect, test } from '@jest/globals';
 
 import {
+  applyPocketStitch,
   createHeightField,
   rebuildHeightField,
   resetHeightField,
   sampleSurface,
   type PinchParameters,
+  type PocketParameters,
 } from '../heightField';
 import { calculateThreadCost } from '../scoring';
 import type { Stitch } from '../types';
@@ -22,6 +24,21 @@ function pinch(overrides: Partial<Stitch> = {}): Stitch {
     end,
     tension: 1,
     radius: 0.25,
+    threadCost: calculateThreadCost(start, end),
+    ...overrides,
+  };
+}
+
+function pocket(overrides: Partial<Stitch> = {}): Stitch {
+  const start = overrides.start ?? { x: 0.4, y: 0.5 };
+  const end = overrides.end ?? { x: 0.6, y: 0.5 };
+  return {
+    id: 'pocket',
+    type: 'pocket',
+    start,
+    end,
+    tension: 1,
+    radius: 0.3,
     threadCost: calculateThreadCost(start, end),
     ...overrides,
   };
@@ -84,6 +101,46 @@ describe('height field', () => {
         Math.hypot(field.offsetX[index], field.offsetY[index]),
       ).toBeLessThanOrEqual(0.010000001);
     }
+  });
+
+  test('creates a symmetric bounded pocket basin around the stitch midpoint', () => {
+    const field = createHeightField(9, 9, bounds);
+    const parameters: PocketParameters = {
+      depth: 1,
+      inwardPull: 10,
+      minHeight: -0.08,
+      maxHeight: 0.08,
+      maxHorizontalDisplacement: 0.012,
+    };
+
+    applyPocketStitch(field, pocket(), parameters);
+
+    expect(sampleSurface(field, 0.5, 0.5).height).toBeCloseTo(-0.08, 7);
+    expect(sampleSurface(field, 0.375, 0.5).height).toBeCloseTo(
+      sampleSurface(field, 0.625, 0.5).height,
+      7,
+    );
+    expect(sampleSurface(field, 0.5, 0.875).height).toBe(0);
+    expect(field.offsetX[4 * field.columns + 3]).toBeGreaterThan(0);
+    expect(field.offsetX[4 * field.columns + 5]).toBeLessThan(0);
+    for (let index = 0; index < field.offsetX.length; index += 1) {
+      expect(
+        Math.hypot(field.offsetX[index], field.offsetY[index]),
+      ).toBeLessThanOrEqual(0.012000001);
+    }
+  });
+
+  test('rebuilds mixed pinch and pocket inputs deterministically', () => {
+    const first = createHeightField(9, 9, bounds);
+    const second = createHeightField(9, 9, bounds);
+    const stitches = [pinch(), pocket()];
+
+    rebuildHeightField(first, stitches);
+    rebuildHeightField(second, stitches);
+
+    expect(Array.from(first.heights)).toEqual(Array.from(second.heights));
+    expect(Array.from(first.offsetX)).toEqual(Array.from(second.offsetX));
+    expect(Array.from(first.offsetY)).toEqual(Array.from(second.offsetY));
   });
 
   test('reset exactly restores the authored base field', () => {

@@ -1,53 +1,57 @@
-# Pullthread Vertical-Slice Architecture
+# Pullthread Campaign Architecture
 
 ## Scope
 
-The current Milestone 2 build is a single-level vertical slice, not a small version of the entire
-product. It must demonstrate one causal statement:
+Milestone 3 extends the proven physics-puzzle slice into a complete local
+campaign. The app launches at a three-quilt map, runs 15 catalog-authored
+levels, persists per-level progress, and keeps every simulation and replay
+deterministic. It supports pinch and pocket stitches, felt/silk/elastic
+materials, holes, thorns, circular bumpers, collectible patches, thimble
+scoring, Results, and campaign-aware replay.
 
-> Given the same level and traveler state, the zero-stitch route fails and a
-> recorded pinch stitch deforms the fabric enough to make the route succeed.
-
-The slice includes a rectangular playfield, one traveler, one goal, one pinch
-stitch type, planning and simulation phases, terminal outcomes, Undo, Reset,
-Retry, guided onboarding, Results, compact replay, locally persisted
-preferences, and placeholder feedback. Campaign progression, RevenueCat,
-InsForge, Daily Scrap, campaign content, and the pocket stitch are deferred.
+The campaign does not depend on an account, RevenueCat, InsForge, remote level
+delivery, or a network-backed leaderboard. Those service boundaries remain
+later milestones.
 
 ## Dependency direction
 
 ```text
-App / screen composition
+App hydration / navigation
         |
-        +--> planning store ------> pure game core <------ immutable level
-        |          |                     |
-        |          |                     v
-        |          +--------------> height field
-        |                                |
-        +--> input mapping --------------+
-        |                                |
-        +--> simulation runtime <---------+
+        +--> Quilt Map <-------- persisted campaign progress
+        |                              ^
+        |                              |
+        +--> gameplay store -------- scoring
+        |          |                   ^
+        |          v                   |
+        |     immutable level ------> pure game core <------ replay parser
+        |          |                       |
+        |          +--> world builder -----+
+        |                                  |
+        +--> input mapping ----------------+
+        |                                  |
+        +--> fixed-step runtime -----------+
         |          |
         |          +--> render snapshot --> Skia renderers
-        |          +--> coarse outcome ---> planning store / controls
+        |          +--> coarse outcome ---> gameplay/progress stores
         |
-        +--> feedback service
+        +--> feedback and accessibility settings
 ```
 
-The dependency arrows point inward toward the pure game core. Geometry,
-deformation, and physics do not import React, React Native, Skia, Reanimated,
-Zustand, Expo APIs, or the wall clock. Rendering consumes state and never owns
-gameplay rules.
+Dependencies point inward toward pure TypeScript. Geometry, deformation,
+physics, level validation, replay validation, and scoring do not import React,
+React Native, Skia, Reanimated, Zustand, Expo APIs, storage, or the wall clock.
+Rendering consumes gameplay state and never owns the rules.
 
-## Spike modules
+## Module map
 
 ```text
 App.tsx
 src/
-  app/
-    navigation/RootNavigator.tsx
+  app/navigation/RootNavigator.tsx
   screens/
-    SpikeLevelScreen/SpikeLevelScreen.tsx
+    QuiltMapScreen/
+    SpikeLevelScreen/
     ResultsScreen/
     SettingsScreen/
   game/
@@ -58,254 +62,197 @@ src/
       physics.ts
       scoring.ts
       simulation.ts
-      __tests__/
     levels/
-      spikeLevel.ts
-    input/
-      stitchGesture.ts
-    runtime/
-      useGameSession.ts
+      schema.ts
+      campaignLevels.ts
+      levelLoader.ts
+      spikeLevel.ts          # Level 1 compatibility exports
+    input/stitchGesture.ts
+    runtime/useGameSession.ts
     replay/
-      spikeReplay.ts
-    tutorial/
-      tutorialFlow.ts
+      levelReplay.ts
+      spikeReplay.ts         # Level 1 compatibility wrapper
+    tutorial/tutorialFlow.ts
     rendering/
-      FabricCanvas.tsx
-      FabricTexture.tsx
-      StitchRenderer.tsx
-      Traveler.tsx
-      GoalRenderer.tsx
-      coordinates.ts
     feedback/
-      FeedbackService.ts
-      ExpoFeedbackService.ts
-      __tests__/
   store/
     useGameStore.ts
     usePreferencesStore.ts
+    useCampaignProgressStore.ts
   accessibility/
-    useEffectiveReducedMotion.ts
+  components/
   theme/
-    tokens.ts
-    typography.ts
 ```
 
-This reflects the spike's intended responsibility map. Keep a responsibility
-together until it becomes large enough to justify the next boundary; do not add
-empty service or future-feature files merely to mirror the full product brief.
+## Coordinates and level catalog
 
-## Coordinate systems
+Authored and persisted gameplay inputs use canonical fabric coordinates. The
+current portrait fabric spans `(0, 0)` to `(1, 1.5)`: `x` increases right, `y`
+increases down, and positive height rises out of the cloth. Screen pixels,
+density, and safe-area offsets never enter level or replay data.
 
-All authored and persisted game inputs use canonical fabric coordinates. The
-technical-spike surface preserves its portrait aspect instead of squeezing both
-axes into a unit square:
+`LevelDefinition` owns every deterministic run input:
 
-```text
-top-left     = (0, 0)
-bottom-right = (1, 1.5)
-x increases right; y increases down; positive height rises out of the cloth
-```
+- stable level id, version, campaign order, quilt id, and player-facing copy
+- fabric bounds, height-field resolution, and base slope
+- traveler and goal geometry
+- material regions, hazards, bumpers, and optional collectible
+- allowed stitch types, stitch limit, thread budget, and scoring target
+- fixed-step physics configuration and canonical reference solution
 
-The input layer is the only layer that converts screen pixels into canonical
-fabric points. Safe-area insets, display density, and playfield layout must not
-leak into level or simulation data. A committed stitch stores canonical start
-and end points, fixed tension, radius, and deterministic thread cost.
+`validateCampaignCatalog` validates all three quilts and all 15 levels when
+`campaignLevels.ts` loads. It checks stable identities, contiguous ordering,
+quilt references, in-bounds geometry, supported types, object-id uniqueness,
+physics values, canonical thread costs, stitch limits, budgets, and reference
+solutions. See [`LEVEL_FORMAT.md`](LEVEL_FORMAT.md) for the authoring contract.
 
-The renderer converts normalized coordinates to canvas coordinates. The core
-converts normalized coordinates to height-field grid coordinates. Both use the
-same fabric bounds and orientation.
+`levelLoader.ts` is the only runtime construction boundary. It performs strict
+catalog lookup, creates the immutable base height field, reapplies committed
+stitches and an optional preview, and attaches the level's materials, hazards,
+bumpers, collectible, goal, and physics configuration.
 
 ## Height field and deformation
 
-The cloth is a small height field, initially around 24 columns by 36 rows. It is
-not a soft-body simulation. Each sample has a rest/base height and a current
-height. The spike may use contour shading, displaced guide lines, highlights,
-and shadows instead of a dynamically textured vertex mesh.
+The cloth remains a small deterministic height field rather than a soft-body
+simulation. Every sample has immutable base height plus rebuildable current
+height and planar offsets.
 
-For each grid point, the pinch stitch:
+- A pinch stitch adds a smooth bounded ridge around its segment and pulls
+  nearby samples toward the segment midpoint.
+- A pocket stitch applies a bounded radial depression and inward pull around
+  its authored stitch geometry.
 
-1. Calculates distance to the committed stitch segment.
-2. Converts distance to a smooth, bounded falloff inside the stitch radius.
-3. Adds a ridge contribution using fixed tension.
-4. Optionally applies a small deterministic planar pull toward the midpoint for
-   rendering.
-5. Clamps the combined value to the documented safe range.
+Every planning edit rebuilds from base plus the ordered committed stitches.
+Undo and Reset never attempt inverse deformation, avoiding accumulated mesh
+drift. Planning preview, visible grid displacement, route prediction, live
+simulation, and replay all consume the same reconstructed surface.
 
-Every planning edit rebuilds the current field from the immutable base field
-plus all remaining stitches. Undo and Reset must not attempt to apply an inverse
-deformation; rebuilding avoids accumulated floating-point and mesh drift.
+## Fixed-step physics and world mechanics
 
-The physics gradient and the visible deformation must derive from this same
-field. Maintaining separate "pretty" and "physical" surfaces would invalidate
-the mechanic proof.
+The runtime accumulates real frame time but advances the core only in the
+level's fixed timestep, with bounded frame delta and maximum substeps. Traveler
+position, velocity, prior position, elapsed ticks, stuck count, collected patch,
+and terminal outcome are deterministic simulation state.
 
-## Fixed-step simulation
+One fixed step:
 
-The simulation state owned by `useGameSession` contains mutable, high-frequency
-state:
+1. Bilinearly samples surface height and gradient.
+2. Applies downhill acceleration.
+3. Applies friction from the first material region containing the traveler.
+4. Integrates velocity and position with speed bounds.
+5. Resolves swept circular bumper collisions in stable authored order; elastic
+   fabric strengthens the bounded bounce response.
+6. Uses swept checks for collectible, goal, and hazard intersections so a fast
+   traveler cannot skip a small circle between frames.
+7. Terminates on goal success, hazard contact, out-of-bounds travel, sustained
+   low speed away from the goal, or maximum simulated time.
 
-- traveler position and velocity
-- fixed-step accumulator
-- simulated elapsed time
-- below-speed/stuck duration
-- current terminal result
-- optional sampled route used for diagnostics
+Felt increases friction, silk reduces it, and elastic retains base friction
+while modifying bumper response. Collecting a patch records its stable id but
+does not itself end the run. Holes and thorns produce the same deterministic
+`hazard` failure class with the authored hazard id retained for diagnosis.
 
-The render loop contributes real elapsed time to an accumulator, but state only
-advances in fixed increments:
+High-frequency traveler coordinates stay in the runtime/Reanimated boundary
+instead of entering React or Zustand on every tick. The gameplay store receives
+only committed input, phase changes, outcomes, and completed-run summaries.
 
-```ts
-accumulator += clampFrameDelta(frameDelta);
+## Session, navigation, and persistence
 
-while (accumulator >= FIXED_STEP && substeps < MAX_SUBSTEPS) {
-  simulation.step(FIXED_STEP);
-  accumulator -= FIXED_STEP;
-  substeps += 1;
-}
+`useGameStore` owns the active level id, planning/running/terminal phase,
+committed stitches, outcome, and latest successful replay/score snapshot.
+Entering a level calls `startLevel(levelId)` and resets transient state while
+loading that level's durable best metrics.
 
-publishRenderSnapshot(simulation.state);
-```
+Control semantics remain explicit:
 
-One step bilinearly samples height and gradient, calculates downhill
-acceleration, applies the local friction model, integrates velocity and
-position, and checks terminal conditions. The renderer may interpolate between
-snapshots, but interpolated draw positions never feed back into physics.
+- **Undo:** remove the latest planning stitch.
+- **Reset:** clear stitches and restore canonical planning state.
+- **Release:** freeze editing and start the fixed-step traveler.
+- **Retry:** return to planning while retaining committed stitches.
+- **Results:** expose only a successful captured run.
+- **Map:** return to the campaign without changing recorded progress.
 
-The spike terminates deterministically when one of these conditions occurs:
+`usePreferencesStore` persists feedback/accessibility settings and tutorial
+completion. `useCampaignProgressStore` separately persists a versioned
+`progressByLevel` record containing completion and the merged best scored run.
+Both stores use fail-soft AsyncStorage adapters: gameplay remains available if
+storage fails, but that in-memory state must not be reported as durable.
 
-- the traveler enters the goal under the accepted-speed rule
-- the traveler leaves the rectangular fabric bounds
-- it remains below the movement threshold away from the goal for the configured
-  stuck duration
-- it reaches the maximum simulated duration
+`App.tsx` awaits explicit hydration of both stores before rendering navigation.
+This prevents a clean-map lock state from flashing before saved progress is
+known. Sanitization treats stored data as untrusted, drops malformed level
+entries, and accepts supported legacy field names through the migration path.
 
-The maximum substep limit protects the UI after a frame stall. Any policy for
-discarding excess real time changes wall-clock playback speed only; it must not
-change the ordered fixed-step state transitions.
+The Quilt Map derives state in campaign order:
 
-## State boundaries
+- a recorded completion is `completed`
+- Level 1 or a level immediately after a completion is `current`
+- every later level is `locked`
 
-Zustand holds coarse, user-observable session state:
+No separate mutable unlock list is stored, so completion data and visible lock
+state cannot drift apart.
 
-- `planning`, `running`, `succeeded`, or `failed`
-- committed stitches and current preview metadata
-- outcome reason and low-frequency summary
-- development overlay flags
-- the last successful replay/outcome snapshot and process-local best metrics
+## Scoring and best-run merge
 
-Zustand does not receive traveler coordinates or mesh arrays every simulation
-step. `useGameSession` publishes traveler render values through Reanimated to
-Skia and reports only phase/outcome transitions back to the store. Pure
-`simulateRoute` output supplies the planning-route preview without coupling the
-physics rules to the canvas.
+A successful run records integer thread used, stitch count, simulated
+completion milliseconds, and whether its level patch was collected. Scoring
+awards up to three thimbles:
 
-Control semantics are deliberately distinct:
+1. reaching the goal
+2. meeting the inclusive target thread usage
+3. collecting the optional patch
 
-- **Undo:** remove the most recent planning stitch and rebuild the field.
-- **Reset:** clear all stitches, rebuild the base field, and restore the traveler.
-- **Release:** freeze editing and start from the canonical traveler state.
-- **Retry:** restore the traveler and return to planning while retaining stitches.
-
-Editing gestures are ignored outside `planning`.
-
-A separate persisted Zustand store owns only local preferences and the completed
-tutorial version. It hydrates before gameplay renders, sanitizes stored values,
-and never contains the simulation, traveler position, route, or completed-run
-snapshot. Campaign progression and durable best results remain Milestone 3 work.
-
-## Determinism contract
-
-A deterministic run is defined by:
-
-- a versioned immutable level definition
-- normalized committed stitch data in a stable order
-- fixed initial position and velocity
-- fixed timestep and physics constants
-- no `Date`, `Math.random`, render-frame delta, animation callback, or device
-  pixel coordinate in the state transition function
-
-The core proof should execute in Jest without React Native or a renderer:
-
-1. Construct the spike level and canonical initial state.
-2. Run the zero-stitch input to termination at least 30 times.
-3. Assert the same failure reason, fixed-step count, and final state/path within
-   the documented numeric tolerance.
-4. Run the exported reference pinch stitch from the identical initial state at
-   least 30 times.
-5. Assert the same success result and equivalent path/final state.
-6. Assert that the baseline and stitched paths diverge by a meaningful amount,
-   rather than merely producing different terminal labels.
-
-Exact equality is appropriate for discrete outcomes and step counts. For
-floating-point positions, use one small documented tolerance consistently; do
-not widen it until a flaky test passes.
-
-The automated proof establishes core repeatability. The phone recording must
-separately show the baseline failure and reference-stitch success so the visible
-surface, interaction, and tested core are demonstrably connected.
+Best comparison is deterministic: more thimbles first, then less thread, fewer
+stitches, and shorter simulated time. Exact ties keep the incumbent. Durable
+merge preserves previously earned thread-target and patch achievements even
+when another attempt provides the better comparison metrics.
 
 ## Replay boundary
 
-`SpikeReplayV1` stores the schema version, authored level id/version, and a
-detached copy of canonical stitch inputs. Parsing treats JSON as untrusted: it
-rejects unsupported versions/types, non-finite or out-of-bounds coordinates,
-forged thread costs, duplicate ids, and stitch/thread-limit violations.
+`LevelReplayV1` stores schema version, catalog level id/version, and detached
+canonical stitch inputs. Parsing rejects unknown/stale levels, unsupported or
+disallowed stitch types, non-finite/out-of-bounds points, wrong tension/radius,
+forged thread costs, short drags, duplicate ids, and stitch/thread-limit
+violations.
 
-Planning preview and Results playback both run this replay input through the
-same fixed-step world. Results uses local playback phase so replay completion
-cannot call `useGameStore.resolve` or mutate the captured run. The visible
-tightening pre-roll animates only thread presentation; physics begins from the
-canonical start after the authored stitch input is fully reconstructed.
+Planning, live simulation, and Results playback reconstruct the same catalog
+world and run through the same fixed-step transition functions. Results keeps
+playback phase local, so watching a replay cannot call `resolve`, record a
+second score, or alter map progress. `spikeReplay.ts` is a compatibility wrapper
+around the generic replay for existing Level 1 callers and tests; new campaign
+code uses `levelReplay.ts` directly.
 
-## Rendering and performance
+## Rendering, feedback, and performance
 
-Skia draws the textile background, readable height contours or displaced guide
-lines, committed/preview thread, traveler, goal, and optional diagnostics. The
-canvas should remain the visual focus.
+Skia draws fabric texture and deformed guides, material regions, route, goal,
+hazards, bumpers, collectible, stitches, and traveler from the current level
+and reconstructed world. Pinch and pocket stitches have distinct visual
+language. Text and shapes communicate lock, phase, outcome, material, and patch
+state without relying on color or animation alone.
 
-Performance rules for the spike:
+Performance rules remain:
 
-- recompute the height field only when planning stitches change
-- reuse fixed-size buffers where practical
-- avoid allocating mesh-sized arrays every frame
-- keep simulation updates out of React render cycles
-- cap visual effects before increasing mesh density
-- pause or safely reset the loop when the app backgrounds
-- expose development-only FPS, fixed-step, velocity, and contour diagnostics
+- rebuild the height field only when level/stitch/preview input changes
+- keep fixed-step traveler updates out of React render cycles
+- reuse bounded buffers and cap visual work before increasing grid density
+- bound frame delta and simulation substeps after stalls
+- keep reduced motion visual-only; it never changes deterministic physics
+- treat browser and simulator performance as diagnostic, not phone evidence
 
-Stable, predictable motion on a mid-range phone matters more than a dense cloth
-mesh. Simulator and web measurements are diagnostic only.
-
-## Feedback and accessibility boundary
-
-The gameplay screen depends on a small feedback interface rather than Expo
-modules directly. Haptics and audio are best-effort and must fail silently when
-unsupported. Final sound assets and nuanced haptic tuning are deferred, but the
-spike provides distinct placement and terminal cues.
-
-Release, Undo, Reset, and Retry remain normal accessible controls with labels,
-disabled states, and at least 48 dp targets. Outcome and phase are communicated
-with text/shape as well as animation or color. Full screen-reader gameplay for
-the Skia canvas is outside the current scope.
-
-Milestone 2 adds persisted Sound, Haptics, Reduced motion, High contrast, and
-Tutorial hints controls. OS reduced motion is always honored; the in-app toggle
-can add reduction but cannot override an enabled OS preference. Reduced motion
-removes decorative entrances and replay autoplay without changing fixed-step
-physics. High contrast selects a complete Skia gameplay palette so route,
-thread, goal, traveler, grid, and frame change together rather than only
-restyling React Native chrome.
+The feedback service applies persisted Sound and Haptics preferences and fails
+silently when an Expo capability is unavailable. High Contrast selects a full
+game palette. OS reduced motion is always honored; the app toggle may add
+reduction but cannot override the OS.
 
 ## Deferred service boundaries
 
-RevenueCat and InsForge are not dependencies of the technical spike:
+RevenueCat and InsForge are not campaign dependencies:
 
-- no SDK initialization
-- no production keys or environment variables
-- no purchase or restore UI
-- no remote level or leaderboard calls
-- no account or guest identity
+- no SDK initialization, production keys, or entitlement cache
+- no purchase/restore UI or premium level gate
+- no remote level, run, leaderboard, or guest-identity call
+- no Daily Scrap generation or remote best result
 
-Entitlement and Daily Scrap abstractions belong to later milestones after the
-physical-device mechanic gate passes. The one-level core must remain runnable
-without either service and without a network-backed game dependency.
+Those integrations begin after the local campaign passes its automated and
+physical-device gates. They must wrap the working offline catalog rather than
+becoming prerequisites for deterministic gameplay.

@@ -8,11 +8,11 @@ import {
 import type { SimulationOutcome, SimulationPhase } from '../../game/core/types';
 import type { CanvasSize } from '../../game/input/stitchGesture';
 import {
-  SPIKE_LEVEL,
-  createSpikeWorld,
-} from '../../game/levels/spikeLevel';
-import type { SpikeReplayV1 } from '../../game/replay';
-import { simulateSpikeReplay } from '../../game/replay';
+  createLevelWorld,
+  getCampaignLevel,
+} from '../../game/levels/levelLoader';
+import type { LevelReplayV1 } from '../../game/replay';
+import { simulateLevelReplay } from '../../game/replay';
 import { FabricCanvas } from '../../game/rendering/FabricCanvas';
 import { useGameSession } from '../../game/runtime/useGameSession';
 import { colors, radii, shadows, spacing } from '../../theme/tokens';
@@ -22,7 +22,7 @@ const EMPTY_SIZE: CanvasSize = { width: 1, height: 1 };
 export type ReplayStatus = 'ready' | 'tightening' | 'playing' | 'complete';
 
 interface ReplayStageProps {
-  readonly replay: SpikeReplayV1;
+  readonly replay: LevelReplayV1;
   readonly highContrast: boolean;
   readonly phase: SimulationPhase;
   readonly status: ReplayStatus;
@@ -51,12 +51,17 @@ export function ReplayStage({
 }: ReplayStageProps) {
   const [size, setSize] = useState(EMPTY_SIZE);
   const stitchProgress = useSharedValue(1);
-  const run = useMemo(() => simulateSpikeReplay(replay), [replay]);
+  const level = useMemo(
+    () => getCampaignLevel(replay.levelId),
+    [replay.levelId],
+  );
+  const run = useMemo(() => simulateLevelReplay(replay), [replay]);
   const world = useMemo(
-    () => createSpikeWorld(replay.stitches),
-    [replay.stitches],
+    () => createLevelWorld(level, replay.stitches),
+    [level, replay.stitches],
   );
   const session = useGameSession({
+    level,
     phase,
     stitches: replay.stitches,
     onOutcome,
@@ -75,8 +80,8 @@ export function ReplayStage({
 
   useLayoutEffect(() => {
     if (status === 'tightening') {
-      session.travelerX.value = SPIKE_LEVEL.traveler.start.x;
-      session.travelerY.value = SPIKE_LEVEL.traveler.start.y;
+      session.travelerX.value = level.traveler.start.x;
+      session.travelerY.value = level.traveler.start.y;
       session.speed.value = 0;
       return;
     }
@@ -88,6 +93,8 @@ export function ReplayStage({
     }
   }, [
     phase,
+    level.traveler.start.x,
+    level.traveler.start.y,
     run.finalPosition.x,
     run.finalPosition.y,
     session.speed,
@@ -112,6 +119,7 @@ export function ReplayStage({
       onLayout={onLayout}
     >
       <FabricCanvas
+        level={level}
         size={size}
         field={world.surface}
         stitches={replay.stitches}

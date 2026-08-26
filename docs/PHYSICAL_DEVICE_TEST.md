@@ -2,7 +2,14 @@
 
 ## Gate status
 
-**Status: NOT RUN / UNVERIFIED**
+**Status: LIMITED iOS SMOKE PASS / FULL CHECKLIST PENDING**
+
+On 2026-08-25, the project owner completed a manual smoke pass on an iPhone
+17e running iOS 26.6. The locally signed development build installed, launched,
+loaded the Metro bundle, and the owner reported that manual gameplay was
+working normally. This proves the local physical-iOS build and basic gameplay
+path only. It does not complete the extended interaction, audio/haptics,
+performance, lifecycle, repetition, recording, or Maestro checks below.
 
 Milestones 1 and 2 are not device-complete until a human completes this document on at
 least one real iOS or Android phone. CI, Expo export, web, iOS Simulator, and
@@ -19,19 +26,32 @@ identifiers, or account credentials.
 
 | Field | Evidence |
 | --- | --- |
-| Date and tester | _pending_ |
-| Commit SHA | _pending_ |
-| Working tree clean or changes recorded | _pending_ |
-| Platform | _pending: iOS or Android_ |
-| Phone make/model | _pending_ |
-| OS version | _pending_ |
-| Build type | _pending: local development build, EAS development build, preview, or release_ |
-| Install source/command | _pending_ |
-| Expo Go used | **Must be No for acceptance** |
-| Metro required during run | _pending_ |
-| Screen-recording path/link | _pending_ |
-| Maestro result path/link | _pending_ |
-| Performance/debug capture path/link | _pending_ |
+| Date and tester | 2026-08-25 — project owner |
+| Commit SHA | `764f9f279c6ff6ca63728bdfd10399ae73d959aa` |
+| Working tree clean or changes recorded | Clean `main`; generated native workspace isolated in a detached temporary worktree |
+| Platform | iOS |
+| Phone make/model | Apple iPhone 17e |
+| OS version | iOS 26.6 (`23G71`) |
+| Build type | Local development build |
+| Install source/command | Signed Xcode Debug build; installed and launched with `xcrun devicectl` |
+| Expo Go used | **No** |
+| Metro required during run | Yes; LAN development-client URL on port 8081 |
+| Screen-recording path/link | Not captured for this smoke pass |
+| Maestro result path/link | Not run on the physical phone |
+| Performance/debug capture path/link | Not captured for this smoke pass |
+
+## 2026-08-25 limited smoke evidence
+
+- [x] A local arm64 iPhoneOS development build completed with automatic signing.
+- [x] The signed app installed with bundle identifier `com.xuefengzhu.pullthread`.
+- [x] Developer Mode/profile trust was enabled and the app launched successfully.
+- [x] Metro served the iOS bundle successfully (1,757 modules; no fatal error).
+- [x] The app process remained running after bundle load.
+- [x] The project owner manually exercised the app and reported that it was
+      working normally.
+- [ ] The detailed sections below have been completed with recordings and
+      observations.
+- [ ] Both installed-app Maestro flows have run on this physical phone.
 
 ## Preconditions
 
@@ -67,15 +87,16 @@ npm start
 
 - [ ] The app installs and launches without a red screen, native crash, or
       missing-bundle error.
-- [ ] A clean launch reaches the spike directly; no account, network service,
-      paywall, or credential is required.
+- [ ] A clean launch reaches the Quilt Map; no account, network service,
+      paywall, or credential is required. Open Level 1 before the mechanic
+      checks below.
 - [ ] The app remains locked to portrait.
 - [ ] The playfield and all controls avoid the notch, Dynamic Island/camera
       cutout, status area, and home/navigation indicator.
 - [ ] Traveler, goal, stitch preview, committed thread, and fabric deformation
       are visible at normal viewing distance.
-- [ ] Release, Undo, Reset, Retry, Results, and Settings controls are readable and their targets feel
-      at least 48 dp/comfortable under a thumb.
+- [ ] Map, Release, Undo, Reset, Retry, Results, and Settings controls are
+      readable and their targets feel at least 48 dp/comfortable under a thumb.
 - [ ] The layout remains usable at the phone's configured text/display scale.
 
 Notes:
@@ -170,6 +191,8 @@ data.
       cues, then restore them when re-enabled.
 - [ ] Settings and tutorial completion survive a cold app relaunch.
 - [ ] Try Again clears the completed run and returns to zero-stitch planning.
+- [ ] Return to Map shows Level 1 completed and Level 2 available without
+      weakening the pending extended Milestones 1/2 checks above.
 
 Notes and replay-cycle count:
 
@@ -256,17 +279,20 @@ maestro test .maestro/failure-retry.yaml
 ```
 
 - [ ] The flow launches a clean app state.
-- [ ] The main flow completes all three tutorial beats, the authored reference
-      stitch, Results, replay completion, Try Again, and tutorial persistence.
-- [ ] The regression flow completes baseline failure, Retry, Undo, and Reset.
-- [ ] Both final stitch counters are zero.
+- [ ] The main flow enters Level 1 from Quilt Map, completes all three tutorial
+      beats, the authored tutorial guide, Results, replay completion, returns
+      to the map, observes Level 2 unlocked, and proves progress/tutorial
+      persistence after cold relaunch.
+- [ ] The regression flow enters Level 1 from Quilt Map and completes baseline
+      failure, Retry, Undo, and Reset.
+- [ ] The regression flow's final stitch counter is zero.
 - [ ] The Maestro report/video path is recorded in the evidence header.
 
-The flows begin at the code-authored `tutorial-stitch-anchor` and swipe upward,
-so their gesture is relative to the playfield instead of global screen
-percentages. If the authored guide or level geometry changes deliberately,
-update both together and record why. Do not weaken terminal assertions merely
-to make the smoke flow green.
+After entering Level 1, the flows begin at the code-authored
+`tutorial-stitch-anchor` and swipe upward, so their gesture is relative to the
+playfield instead of global screen percentages. If the authored guide or level
+geometry changes deliberately, update both together and record why. Do not
+weaken terminal assertions merely to make the smoke flow green.
 
 ## Offline evidence boundary
 
@@ -291,5 +317,6 @@ Choose exactly one result:
 Result, tester, date, and blocking follow-up if any:
 
 ```text
-PROVISIONAL — no physical-device run has been recorded yet.
+PROVISIONAL — limited physical-iOS smoke recorded; full checklist and native
+Maestro evidence remain pending.
 ```

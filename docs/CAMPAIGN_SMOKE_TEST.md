@@ -1,0 +1,189 @@
+# Milestone 3 Physical Campaign Smoke Test
+
+## Status and evidence boundary
+
+**Status: PENDING**
+
+This checklist validates the JavaScript/TypeScript Milestone 3 campaign on an
+installed development client. It supplements, and does not replace, the longer
+mechanic, feedback, lifecycle, repetition, and performance checks in
+[`PHYSICAL_DEVICE_TEST.md`](PHYSICAL_DEVICE_TEST.md).
+
+The limited iPhone smoke recorded there on 2026-08-25 covered commit
+`764f9f279c6ff6ca63728bdfd10399ae73d959aa`, before the campaign changes. Do
+not treat that result as Milestone 3 campaign evidence.
+
+Fill this header without recording credentials, signing material, or device
+identifiers:
+
+| Field | Evidence |
+| --- | --- |
+| Date and tester | Pending |
+| Commit SHA/change set | Pending |
+| Phone and OS | Pending |
+| Development-client/native build | Pending |
+| Metro URL required | Pending |
+| Screen recording | Pending |
+| Maestro report/video | Pending |
+| Result | Pending |
+
+## Preconditions
+
+- [ ] The installed development client is compatible with Expo SDK 57 and the
+      current native dependencies.
+- [ ] Metro is serving the exact change set recorded above.
+- [ ] `npm run lint`, `npm run typecheck`, `npm test`, `npx expo-doctor@latest`,
+      and `npm run export` pass on that change set.
+- [ ] Capture starts before clearing campaign data or beginning a clean run.
+- [ ] No RevenueCat, InsForge, account, paywall, or network-backed gameplay
+      service is expected in this milestone.
+
+## 1. Clean Quilt Map and Level 1
+
+Start from cleared app storage.
+
+- [ ] Launch reaches `Quilt Journey` / `quilt-map-screen`, not gameplay.
+- [ ] Bedroom, Attic, and Festival sections render in campaign order with five
+      level nodes each.
+- [ ] Level 1 is current/available; Levels 2–15 are visibly locked and cannot
+      be opened.
+- [ ] The summary starts at zero thimbles and zero patches.
+- [ ] Open `level-node-bedroom-01-first-pull` and confirm the First Pull title,
+      stitch/thread limits, playfield, and controls fit the safe area.
+- [ ] Complete the three tutorial beats with the authored pinch route and reach
+      Results.
+
+Notes:
+
+```text
+Pending.
+```
+
+## 2. Results, scoring, replay, and unlock
+
+- [ ] Results show exact thread, stitch, and simulated completion-time values.
+- [ ] Completion earns the completion thimble; meeting the inclusive target
+      earns the thread thimble.
+- [ ] Watch Replay reconstructs the saved Level 1 stitches and reaches the same
+      deterministic result.
+- [ ] Tap the Results map action and verify Level 1 is completed and Level 2 is
+      current/available.
+- [ ] The Quilt Map total matches the thimbles displayed for Level 1.
+- [ ] Level 3 remains locked until Level 2 is completed.
+
+Observed Level 1 metrics and thimbles:
+
+```text
+Pending.
+```
+
+## 3. Durable progress and best-run comparison
+
+- [ ] Cold-relaunch without clearing storage; Level 1 completion, Level 2
+      availability, thimbles, and patch totals remain unchanged.
+- [ ] Re-enter Level 1; the completed tutorial does not reappear.
+- [ ] Complete the same level with a worse run; the durable best does not
+      regress.
+- [ ] Complete it with a better run; comparison ranks thimbles first, then less
+      thread, fewer stitches, and shorter simulated time.
+- [ ] Force-close and relaunch once more; the updated best remains visible.
+- [ ] Gameplay stays usable if local persistence is unavailable; record the
+      storage failure separately rather than treating in-memory state as saved.
+
+Notes:
+
+```text
+Pending.
+```
+
+## 4. Fifteen-level campaign route
+
+Progress normally through the map; do not inject progress directly into
+AsyncStorage for this gate.
+
+- [ ] Bedroom Levels 1–5 unlock sequentially and teach ridge, boundary redirect,
+      felt, hole, and thread-budget behavior.
+- [ ] Completing Level 5 makes Attic Level 6 available.
+- [ ] Attic Levels 6–10 unlock sequentially and teach silk, pocket, mixed
+      felt/silk, two-stitch planning, and the hidden patch.
+- [ ] Completing Level 10 makes Festival Level 11 available.
+- [ ] Festival Levels 11–15 unlock sequentially and exercise thorn, elastic,
+      pinch-plus-pocket, a tight stitch limit, and the combined finale.
+- [ ] Every level can fail, Retry, return to planning, and succeed without stale
+      geometry, route, outcome, or active-level data from the previous level.
+- [ ] Completing Level 15 leaves all 15 nodes completed after a cold relaunch.
+
+Completion notes by quilt:
+
+```text
+Bedroom:
+Attic:
+Festival:
+```
+
+## 5. Materials, hazards, bumpers, and stitch types
+
+- [ ] Felt visibly identifies a high-friction area and slows the traveler.
+- [ ] Silk visibly identifies a low-friction area and preserves more speed.
+- [ ] Elastic visibly identifies its region and produces the authored bumper
+      response without tunneling or an unstable collision loop.
+- [ ] Touching a hole or thorn produces a deterministic hazard failure with a
+      readable outcome and working Retry.
+- [ ] Static bumpers redirect the swept traveler consistently on repeated runs.
+- [ ] Pocket-only Level 7 accepts pocket input and renders a bounded depression
+      rather than a pinch ridge.
+- [ ] Levels 13 and 15 expose both `stitch-type-pinch` and
+      `stitch-type-pocket`; changing the selection affects only new stitches.
+- [ ] Stitch-count and thread-budget limits reject excess input without
+      consuming hidden state.
+
+Notes:
+
+```text
+Pending.
+```
+
+## 6. Collectible patches and merged achievements
+
+- [ ] Attic Level 10 exposes an uncollected patch state on the map before play.
+- [ ] A route that intersects the patch records it once and Results awards the
+      patch thimble.
+- [ ] The map changes the level to `PATCH FOUND` and increments the patch total.
+- [ ] A later faster or lower-thread run that misses the patch does not erase
+      the collected-patch achievement.
+- [ ] Festival Level 15 repeats the same collection and persistence behavior.
+- [ ] Patch collection does not change a success/failure outcome except through
+      the route's normal physics interactions.
+
+Notes:
+
+```text
+Pending.
+```
+
+## 7. Installed-app Maestro
+
+With the app installed and Metro reachable when required:
+
+```sh
+maestro test .maestro/spike-smoke.yaml
+maestro test .maestro/failure-retry.yaml
+```
+
+- [ ] The main flow starts at Quilt Map, enters Level 1, succeeds, reaches
+      Results, completes replay, returns to the map, and observes Level 2 as
+      `CURRENT`.
+- [ ] A cold relaunch preserves the Level 2 unlock and tutorial completion.
+- [ ] The regression flow starts at Quilt Map, enters Level 1, and covers
+      baseline failure, Retry, Undo, and Reset.
+- [ ] Report and video paths are recorded in the header.
+
+## Sign-off
+
+Choose exactly one result and copy it into the evidence header:
+
+- [ ] **PASS — Milestone 3 physical campaign smoke complete.**
+- [ ] **PROVISIONAL — automated implementation passes; campaign phone evidence
+      remains incomplete.**
+- [ ] **FAIL — a blocking campaign/device regression was recorded above.**
+
