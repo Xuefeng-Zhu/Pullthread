@@ -156,7 +156,7 @@ function sanitizeScoredRun(
     levelSource.thimbles,
   );
   const minimumThimbles = (1 + Number(collectedPatch)) as ThimbleCount;
-  const maximumThimbles = level.collectible ? 3 : 2;
+  const maximumThimbles = (2 + Number(collectedPatch)) as ThimbleCount;
   const thimbles = Math.max(
     minimumThimbles,
     Math.min(maximumThimbles, rawThimbles ?? minimumThimbles),

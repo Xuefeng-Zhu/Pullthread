@@ -194,6 +194,32 @@ describe('campaign progress persistence', () => {
     });
   });
 
+  test('clamps an impossible persisted patch thimble without patch progress', () => {
+    expect(
+      sanitizeCampaignProgress({
+        progressByLevel: {
+          [PATCH_LEVEL_ID]: {
+            completed: true,
+            bestRun: {
+              metrics: run({ collectedPatch: false }),
+              thimbles: 3,
+            },
+          },
+        },
+      }),
+    ).toMatchObject({
+      progressByLevel: {
+        [PATCH_LEVEL_ID]: {
+          completed: true,
+          bestRun: {
+            metrics: { collectedPatch: false },
+            thimbles: 2,
+          },
+        },
+      },
+    });
+  });
+
   test('migrates a version-zero direct level map without erasing progress', async () => {
     const legacy = {
       'attic-10': {

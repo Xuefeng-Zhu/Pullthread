@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 import {
   calculateThreadUsed,
+  scoreRun,
   type RunMetrics,
   type ScoredRun,
 } from '../game/core/scoring';
@@ -177,7 +178,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const priorBest =
         useCampaignProgressStore.getState().progressByLevel[level.id]?.bestRun ??
         null;
-      const scoredRun = useCampaignProgressStore
+      const scoredRun = scoreRun(metrics, level.targetThreadUsage);
+      const durableBest = useCampaignProgressStore
         .getState()
         .recordRun(level.id, metrics, level.targetThreadUsage);
 
@@ -188,11 +190,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
           levelId: level.id,
           replay: createLevelReplay(level, state.stitches),
           outcome: Object.freeze({ ...outcome }),
-          isNewBest: scoredRunsDiffer(priorBest, scoredRun),
+          isNewBest: scoredRunsDiffer(priorBest, durableBest),
           scoredRun,
-          bestMetrics: scoredRun.metrics,
+          bestMetrics: durableBest.metrics,
         },
-        bestRun: scoredRun.metrics,
+        bestRun: durableBest.metrics,
       };
     }),
 

@@ -13,7 +13,8 @@ specific level id to implement gameplay rules.
 - Quilt, level, stitch, region, hazard, bumper, and collectible ids use stable
   lowercase kebab-case values.
 - Quilt and level `order` values are one-based, unique, and contiguous across
-  their catalogs.
+  their catalogs. Each catalog array must already be in canonical ascending
+  `order`; permutations are invalid even when they contain the same values.
 - Increment a level's `version` whenever authored geometry or simulation rules
   change in a way that would change an existing replay. Replays with an unknown
   level id or stale version are rejected.
@@ -57,8 +58,8 @@ order. A level's `quiltId` must point to one of these definitions.
 
 Every rectangular or circular object must fit inside `fabricBounds`. Object ids
 must be unique within a level. Bumper restitution must be finite and between 0
-and 1.5 as authored; runtime collision handling applies its own bounded material
-rule.
+and 1 inclusive so authored data matches the physics bound. Elastic fabric may
+raise a lower authored value to its documented material minimum at runtime.
 
 ## Stitch and budget rules
 
@@ -91,8 +92,9 @@ validateCampaignCatalog(quilts, levels);
 ```
 
 `validateCampaignCatalog` also rejects duplicate ids/orders, missing quilt
-references, and non-contiguous ordering. `campaignLevels.ts` calls it at module
-load so invalid authored content fails early in development and tests.
+references, non-contiguous ordering, and catalog arrays that are not already in
+canonical ascending order. `campaignLevels.ts` calls it at module load so
+invalid authored content fails early in development and tests.
 
 Runtime consumers use `levelLoader.ts`:
 

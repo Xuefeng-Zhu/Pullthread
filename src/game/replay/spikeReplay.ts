@@ -2,7 +2,6 @@ import type { Stitch } from '../core/types';
 import { SPIKE_LEVEL } from '../levels/spikeLevel';
 import {
   createLevelReplay,
-  deserializeLevelReplay,
   LEVEL_REPLAY_SCHEMA_VERSION,
   parseLevelReplay,
   serializeLevelReplay,
@@ -14,6 +13,9 @@ import {
 
 /** @deprecated Use LEVEL_REPLAY_SCHEMA_VERSION for campaign-aware replays. */
 export const SPIKE_REPLAY_SCHEMA_VERSION = LEVEL_REPLAY_SCHEMA_VERSION;
+
+/** Level id written by the original technical-spike replay format. */
+const LEGACY_SPIKE_LEVEL_ID = 'technical-spike';
 
 /** @deprecated Use LevelReplayStitchV1. */
 export interface ReplayStitchV1 extends LevelReplayStitchV1 {
@@ -37,9 +39,25 @@ function assertSpikeLevel(replay: LevelReplayV1): SpikeReplayV1 {
   return replay as SpikeReplayV1;
 }
 
+function translateLegacySpikeLevelId(value: unknown): unknown {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value) ||
+    !('levelId' in value) ||
+    value.levelId !== LEGACY_SPIKE_LEVEL_ID
+  ) {
+    return value;
+  }
+
+  return { ...value, levelId: SPIKE_LEVEL.id };
+}
+
 /** Backward-compatible Level 1 parser. */
 export function parseSpikeReplay(value: unknown): SpikeReplayV1 {
-  return assertSpikeLevel(parseLevelReplay(value));
+  return assertSpikeLevel(
+    parseLevelReplay(translateLegacySpikeLevelId(value)),
+  );
 }
 
 /** Backward-compatible Level 1 replay factory. */
@@ -52,7 +70,7 @@ export function serializeSpikeReplay(replay: SpikeReplayV1): string {
 }
 
 export function deserializeSpikeReplay(serialized: string): SpikeReplayV1 {
-  return assertSpikeLevel(deserializeLevelReplay(serialized));
+  return parseSpikeReplay(JSON.parse(serialized) as unknown);
 }
 
 /** Backward-compatible Level 1 fixed-step playback. */

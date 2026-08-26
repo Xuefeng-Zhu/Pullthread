@@ -341,8 +341,8 @@ export function validateLevelDefinition(level: LevelDefinition): LevelDefinition
     assertCircle(level.fabricBounds, bumper, bumperContext);
     if (bumper.restitution !== undefined) {
       assertFinite(bumper.restitution, `${bumperContext}.restitution`);
-      if (bumper.restitution < 0 || bumper.restitution > 1.5) {
-        fail(`${bumperContext}.restitution`, 'must be between 0 and 1.5');
+      if (bumper.restitution < 0 || bumper.restitution > 1) {
+        fail(`${bumperContext}.restitution`, 'must be between 0 and 1');
       }
     }
   }
@@ -410,12 +410,20 @@ export function validateCampaignCatalog(
     levelOrders.add(level.order);
   }
 
-  const expectedQuiltOrders = quilts.map(({ order }) => order).sort((a, b) => a - b);
-  expectedQuiltOrders.forEach((order, index) => {
-    if (order !== index + 1) fail('Campaign', 'quilt orders must be contiguous from one');
+  quilts.forEach(({ order }, index) => {
+    if (order !== index + 1) {
+      fail(
+        'Campaign',
+        'quilt orders must be in canonical ascending order and contiguous from one',
+      );
+    }
   });
-  const expectedLevelOrders = levels.map(({ order }) => order).sort((a, b) => a - b);
-  expectedLevelOrders.forEach((order, index) => {
-    if (order !== index + 1) fail('Campaign', 'level orders must be contiguous from one');
+  levels.forEach(({ order }, index) => {
+    if (order !== index + 1) {
+      fail(
+        'Campaign',
+        'level orders must be in canonical ascending order and contiguous from one',
+      );
+    }
   });
 }

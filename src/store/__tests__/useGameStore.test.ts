@@ -177,4 +177,54 @@ describe('game planning store', () => {
       bestRun: { thimbles: 3, metrics: { collectedPatch: true } },
     });
   });
+
+  test('keeps the current run score separate from merged patch progress', () => {
+    const level = CAMPAIGN_LEVELS.find(
+      (candidate) => candidate.id === 'attic-10-hidden-patch',
+    );
+    if (!level?.collectible) throw new Error('Expected the hidden-patch level.');
+
+    const limits = {
+      maxStitches: level.maxStitches,
+      threadBudget: level.threadBudget,
+    };
+    useGameStore.getState().startLevel(level.id);
+    for (const stitch of level.referenceSolution) {
+      expect(useGameStore.getState().commitStitch(stitch, limits)).toBe(true);
+    }
+    useGameStore.getState().release();
+    useGameStore.getState().resolve({
+      status: 'success',
+      tick: 250,
+      completionMs: 2_083,
+      collectedPatchId: level.collectible.id,
+    });
+
+    useGameStore.getState().resetSession();
+    for (const stitch of level.referenceSolution) {
+      expect(useGameStore.getState().commitStitch(stitch, limits)).toBe(true);
+    }
+    useGameStore.getState().release();
+    useGameStore.getState().resolve({
+      status: 'success',
+      tick: 240,
+      completionMs: 2_000,
+    });
+
+    expect(useGameStore.getState().completedRun).toMatchObject({
+      outcome: { status: 'success' },
+      isNewBest: false,
+      scoredRun: {
+        thimbles: 2,
+        metrics: { collectedPatch: false },
+      },
+      bestMetrics: { collectedPatch: true },
+    });
+    expect(
+      useCampaignProgressStore.getState().progressByLevel[level.id]?.bestRun,
+    ).toMatchObject({
+      thimbles: 3,
+      metrics: { collectedPatch: true },
+    });
+  });
 });

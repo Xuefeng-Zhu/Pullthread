@@ -6,6 +6,7 @@ import {
 } from '../../core/simulation';
 import type { Stitch } from '../../core/types';
 import { createStitch } from '../../input/stitchGesture';
+import { getCampaignLevel } from '../../levels/levelLoader';
 import {
   createSpikeSimulation,
   createSpikeWorld,
@@ -13,6 +14,7 @@ import {
   SPIKE_LEVEL,
   SPIKE_PHYSICS_CONFIG,
 } from '../../levels/spikeLevel';
+import { createLevelReplay, parseLevelReplay } from '../levelReplay';
 import {
   createSpikeReplay,
   deserializeSpikeReplay,
@@ -54,6 +56,17 @@ function replayObject(stitches: readonly unknown[] = [REFERENCE_PINCH_STITCH]) {
   };
 }
 
+function legacyReplayObject(
+  stitches: readonly unknown[] = [REFERENCE_PINCH_STITCH],
+) {
+  return {
+    schemaVersion: SPIKE_REPLAY_SCHEMA_VERSION,
+    levelId: 'technical-spike',
+    levelVersion: SPIKE_LEVEL.version,
+    stitches,
+  };
+}
+
 describe('spike replay records', () => {
   test('round-trips through JSON without changing the deterministic run', () => {
     const replay = createSpikeReplay([REFERENCE_PINCH_STITCH]);
@@ -88,6 +101,69 @@ describe('spike replay records', () => {
     expect(Object.isFrozen(replay.stitches)).toBe(true);
     expect(Object.isFrozen(replay.stitches[0])).toBe(true);
     expect(Object.isFrozen(replay.stitches[0].start)).toBe(true);
+  });
+
+  test('parses legacy technical-spike records into canonical Level 1 records', () => {
+    const legacy = legacyReplayObject();
+    const parsed = parseSpikeReplay(legacy);
+
+    expect(parsed).toEqual(createSpikeReplay([REFERENCE_PINCH_STITCH]));
+    expect(parsed.levelId).toBe(SPIKE_LEVEL.id);
+    expect(Object.isFrozen(parsed)).toBe(true);
+    expect(legacy.levelId).toBe('technical-spike');
+    expect(() => parseLevelReplay(legacy)).toThrow('level is not supported');
+  });
+
+  test('deserializes legacy records and rewrites future serialization canonically', () => {
+    const restored = deserializeSpikeReplay(
+      JSON.stringify(legacyReplayObject()),
+    );
+
+    expect(restored.levelId).toBe(SPIKE_LEVEL.id);
+    expect(JSON.parse(serializeSpikeReplay(restored))).toMatchObject({
+      levelId: SPIKE_LEVEL.id,
+      levelVersion: SPIKE_LEVEL.version,
+    });
+  });
+
+  test('simulates legacy records through the current deterministic Level 1 world', () => {
+    const canonical = createSpikeReplay([REFERENCE_PINCH_STITCH]);
+    const legacy = { ...canonical, levelId: 'technical-spike' };
+
+    expect(simulateSpikeReplay(legacy)).toEqual(
+      simulateSpikeReplay(canonical),
+    );
+    expect(simulateSpikeReplay(legacy)).toEqual(
+      directRun([REFERENCE_PINCH_STITCH]),
+    );
+  });
+
+  test('keeps the spike wrapper strict after applying the legacy alias', () => {
+    const secondLevel = getCampaignLevel('bedroom-02-edge-redirect');
+    const secondLevelReplay = createLevelReplay(secondLevel, []);
+    const nonSpikeReplay = secondLevelReplay as unknown as ReturnType<
+      typeof createSpikeReplay
+    >;
+
+    expect(() => parseSpikeReplay(secondLevelReplay)).toThrow(
+      'not supported by the spike wrapper',
+    );
+    expect(() =>
+      deserializeSpikeReplay(JSON.stringify(secondLevelReplay)),
+    ).toThrow('not supported by the spike wrapper');
+    expect(() => simulateSpikeReplay(nonSpikeReplay)).toThrow(
+      'not supported by the spike wrapper',
+    );
+    expect(() =>
+      parseSpikeReplay({ ...legacyReplayObject(), levelVersion: 999 }),
+    ).toThrow('level version is not supported');
+    expect(() =>
+      parseSpikeReplay(
+        legacyReplayObject([
+          { ...REFERENCE_PINCH_STITCH, type: 'pocket' },
+        ]),
+      ),
+    ).toThrow('not allowed by this level');
   });
 
   test.each([
