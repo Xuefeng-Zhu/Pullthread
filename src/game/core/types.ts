@@ -43,6 +43,32 @@ export interface CircularHazard {
   readonly radius: number;
 }
 
+export type FabricType = 'felt' | 'silk' | 'elastic';
+
+/** A rectangular material region. The first authored matching region wins. */
+export interface FabricRegion {
+  readonly id: string;
+  readonly type: FabricType;
+  readonly bounds: Rect;
+}
+
+export interface BumperDefinition {
+  readonly id: string;
+  readonly center: Point;
+  readonly radius: number;
+  /** Optional authored coefficient in the inclusive range 0...1. */
+  readonly restitution?: number;
+}
+
+/** Backward-friendly descriptive alias for the currently circular bumper. */
+export type CircularBumper = BumperDefinition;
+
+export interface CollectibleDefinition {
+  readonly id: string;
+  readonly center: Point;
+  readonly radius: number;
+}
+
 export interface TravelerDefinition {
   readonly start: Point;
   readonly radius: number;
@@ -66,6 +92,7 @@ export type SimulationOutcome =
       readonly status: 'success';
       readonly tick: number;
       readonly completionMs: number;
+      readonly collectedPatchId?: string;
     }
   | {
       readonly status: 'failure';
@@ -73,6 +100,7 @@ export type SimulationOutcome =
       readonly tick: number;
       readonly completionMs: number;
       readonly hazardId?: string;
+      readonly collectedPatchId?: string;
     };
 
 export type SimulationPhase =

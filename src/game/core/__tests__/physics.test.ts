@@ -3,9 +3,12 @@ import { describe, expect, test } from '@jest/globals';
 import { createHeightField } from '../heightField';
 import {
   DEFAULT_PHYSICS_CONFIG,
+  detectCollectible,
   detectGoal,
   detectHazard,
+  fabricRegionAtPoint,
   integrateTraveler,
+  resolveBumperCollisions,
   type PhysicsConfig,
   type PhysicsWorld,
 } from '../physics';
@@ -16,7 +19,7 @@ import {
   releaseSimulation,
   stepSimulation,
 } from '../simulation';
-import type { TravelerState } from '../types';
+import type { FabricRegion, TravelerState } from '../types';
 
 const bounds = { x: 0, y: 0, width: 10, height: 10 } as const;
 
@@ -86,6 +89,65 @@ describe('traveler physics', () => {
     expect(stopping.velocity).toEqual({ x: 0, y: 0 });
   });
 
+  test('uses rectangular material regions for location-aware friction', () => {
+    const surface = createHeightField(2, 2, bounds);
+    const regions: FabricRegion[] = [
+      {
+        id: 'felt',
+        type: 'felt',
+        bounds: { x: 0, y: 0, width: 3, height: 10 },
+      },
+      {
+        id: 'silk',
+        type: 'silk',
+        bounds: { x: 3, y: 0, width: 4, height: 10 },
+      },
+      {
+        id: 'elastic',
+        type: 'elastic',
+        bounds: { x: 7, y: 0, width: 3, height: 10 },
+      },
+    ];
+    const integrateAt = (x: number) => {
+      const state = traveler(x, x, 1);
+      integrateTraveler(
+        state,
+        surface,
+        config({ fixedDt: 0.5, rollingFriction: 0.2, maxSpeed: 2 }),
+        { height: 0, gradientX: 0, gradientY: 0 },
+        regions,
+      );
+      return state.velocity.x;
+    };
+
+    expect(fabricRegionAtPoint({ x: 1, y: 5 }, regions)?.type).toBe('felt');
+    expect(integrateAt(1)).toBeCloseTo(0.775, 6);
+    expect(integrateAt(5)).toBeCloseTo(0.965, 6);
+    expect(integrateAt(8)).toBeCloseTo(0.9, 6);
+  });
+
+  test('reflects swept bumper hits deterministically with extra elastic bounce', () => {
+    const bumper = { id: 'button', center: { x: 5, y: 5 }, radius: 0.1 };
+    const bounce = (regions: FabricRegion[] = []) => {
+      const state = traveler(4.8, 5.2, 1);
+      const hit = resolveBumperCollisions(state, [bumper], regions);
+      return { hit, state };
+    };
+    const regular = bounce();
+    const elastic = bounce([
+      {
+        id: 'elastic',
+        type: 'elastic',
+        bounds: { x: 4, y: 4, width: 2, height: 2 },
+      },
+    ]);
+
+    expect(regular.hit).toBe(bumper);
+    expect(regular.state.velocity.x).toBeCloseTo(-0.65, 6);
+    expect(elastic.state.velocity.x).toBeCloseTo(-0.9, 6);
+    expect(bounce()).toEqual(regular);
+  });
+
   test('uses swept goal detection and enforces entry speed', () => {
     const state = traveler(4, 6, 0.2);
     const goal = { center: { x: 5, y: 5 }, radius: 0.1, maxEntrySpeed: 0.2 };
@@ -104,6 +166,68 @@ describe('traveler physics', () => {
       radius: 0.08,
     };
     expect(detectHazard(state, [hazard])).toBe(hazard);
+  });
+
+  test('uses the traveler radius in swept collectible detection', () => {
+    const state = traveler(4, 6, 0.2);
+    const collectible = {
+      id: 'patch',
+      center: { x: 5, y: 5.12 },
+      radius: 0.08,
+    };
+    expect(detectCollectible(state, collectible)).toBe(collectible);
+  });
+
+  test('retains a collected patch in successful and failed outcomes', () => {
+    const run = (hazard: boolean) => {
+      const surface = createHeightField(2, 2, bounds);
+      const state = createSimulation({ start: { x: 4, y: 5 }, radius: 0.05 });
+      const world: PhysicsWorld = {
+        surface,
+        bounds,
+        goal: {
+          center: { x: hazard ? 9 : 5, y: 5 },
+          radius: 0.1,
+          maxEntrySpeed: 2,
+        },
+        hazards: hazard
+          ? [
+              {
+                id: 'thorn',
+                type: 'thorn',
+                center: { x: 5, y: 5 },
+                radius: 0.1,
+              },
+            ]
+          : [],
+        collectible: {
+          id: 'hidden-patch',
+          center: { x: 4.5, y: 5 },
+          radius: 0.05,
+        },
+      };
+      releaseSimulation(state);
+      state.traveler.velocity.x = 1;
+      stepSimulation(
+        state,
+        world,
+        config({ fixedDt: 1, gravityScale: 0, rollingFriction: 0, maxSpeed: 2 }),
+      );
+      return state;
+    };
+
+    const success = run(false);
+    const failure = run(true);
+    expect(success.collectedPatchId).toBe('hidden-patch');
+    expect(success.outcome).toMatchObject({
+      status: 'success',
+      collectedPatchId: 'hidden-patch',
+    });
+    expect(failure.outcome).toMatchObject({
+      status: 'failure',
+      reason: 'hazard',
+      collectedPatchId: 'hidden-patch',
+    });
   });
 
   test('produces exactly equal state across repeated fixed-step runs', () => {

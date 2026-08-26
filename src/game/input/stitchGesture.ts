@@ -5,10 +5,11 @@ import {
   quantizePoint,
 } from '../core/geometry';
 import { calculateThreadCost } from '../core/scoring';
-import type { Point, Rect, Stitch } from '../core/types';
+import type { Point, Rect, Stitch, StitchType } from '../core/types';
 
 export const MINIMUM_STITCH_LENGTH = 0.12;
 export const SPIKE_STITCH_RADIUS = 0.19;
+export const POCKET_STITCH_RADIUS = 0.24;
 
 export interface CanvasSize {
   readonly width: number;
@@ -49,8 +50,9 @@ export function isValidStitchDrag(start: Point, end: Point): boolean {
   return distanceSquared(start, end) >= MINIMUM_STITCH_LENGTH ** 2;
 }
 
-export function createPinchStitch(
+export function createStitch(
   id: string,
+  type: StitchType,
   start: Point,
   end: Point,
 ): Stitch {
@@ -59,13 +61,33 @@ export function createPinchStitch(
 
   return {
     id,
-    type: 'pinch',
+    type,
     start: quantizedStart,
     end: quantizedEnd,
     tension: 1,
-    radius: SPIKE_STITCH_RADIUS,
+    radius:
+      type === 'pocket' ? POCKET_STITCH_RADIUS : SPIKE_STITCH_RADIUS,
     threadCost: calculateThreadCost(quantizedStart, quantizedEnd),
   };
+}
+
+export function createPinchStitch(
+  id: string,
+  start: Point,
+  end: Point,
+): Stitch {
+  return createStitch(id, 'pinch', start, end);
+}
+
+/** Creates only a stitch that remains valid after canonical quantization. */
+export function createValidStitch(
+  id: string,
+  type: StitchType,
+  start: Point,
+  end: Point,
+): Stitch | null {
+  const stitch = createStitch(id, type, start, end);
+  return isValidStitchDrag(stitch.start, stitch.end) ? stitch : null;
 }
 
 /** Creates only a stitch that remains valid after canonical quantization. */
@@ -74,8 +96,7 @@ export function createValidPinchStitch(
   start: Point,
   end: Point,
 ): Stitch | null {
-  const stitch = createPinchStitch(id, start, end);
-  return isValidStitchDrag(stitch.start, stitch.end) ? stitch : null;
+  return createValidStitch(id, 'pinch', start, end);
 }
 
 export function findStitchNearPoint(

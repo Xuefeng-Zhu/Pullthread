@@ -13,7 +13,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useEffectiveReducedMotion } from '../../accessibility/useEffectiveReducedMotion';
 import type { RootStackParamList } from '../../app/navigation/RootNavigator';
 import type { SimulationOutcome, SimulationPhase } from '../../game/core/types';
-import { SPIKE_LEVEL } from '../../game/levels/spikeLevel';
+import {
+  getCampaignLevel,
+  getNextCampaignLevel,
+} from '../../game/levels/levelLoader';
 import { useGameStore } from '../../store/useGameStore';
 import { usePreferencesStore } from '../../store/usePreferencesStore';
 import {
@@ -64,6 +67,8 @@ function StatTile({
 
 export function ResultsScreen({ navigation }: ResultsScreenProps) {
   const completedRun = useGameStore((state) => state.completedRun);
+  const activeLevelId = useGameStore((state) => state.activeLevelId);
+  const startLevel = useGameStore((state) => state.startLevel);
   const resetSession = useGameStore((state) => state.resetSession);
   const highContrast = usePreferencesStore(
     (state) => state.highContrastEnabled,
@@ -107,9 +112,26 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
   }, [reducedMotionCompletion]);
 
   const handleTryAgain = useCallback(() => {
+    const levelId = completedRun?.levelId ?? activeLevelId;
+    startLevel(levelId);
+    navigation.popTo('SpikeLevel', { levelId });
+  }, [activeLevelId, completedRun?.levelId, navigation, startLevel]);
+
+  const handleMap = useCallback(() => {
     resetSession();
-    navigation.popTo('SpikeLevel');
+    navigation.popTo('QuiltMap');
   }, [navigation, resetSession]);
+
+  const handleNextLevel = useCallback(() => {
+    if (!completedRun) return;
+    const nextLevel = getNextCampaignLevel(completedRun.levelId);
+    if (!nextLevel) {
+      handleMap();
+      return;
+    }
+    startLevel(nextLevel.id);
+    navigation.popTo('SpikeLevel', { levelId: nextLevel.id });
+  }, [completedRun, handleMap, navigation, startLevel]);
 
   const handleSettings = useCallback(() => {
     navigation.navigate('Settings');
@@ -172,6 +194,9 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
     (total, stitch) => total + stitch.threadCost,
     0,
   );
+  const level = getCampaignLevel(completedRun.levelId);
+  const nextLevel = getNextCampaignLevel(level.id);
+  const availableThimbles = level.collectible ? 3 : 2;
   const timeSeconds = `${(completedRun.outcome.completionMs / 1000).toFixed(1)}s`;
   return (
     <SafeAreaView
@@ -196,7 +221,7 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
           <Ionicons name="flower-outline" size={22} color="#a93238" />
         </View>
         <Text style={styles.subtitle}>
-          The button found the embroidery.
+          {level.name} is sewn into the quilt.
         </Text>
 
         <ReplayStage
@@ -211,13 +236,13 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
           <StatTile
             testID="thread-result"
             label="THREAD"
-            value={`${threadUsed} / ${SPIKE_LEVEL.threadBudget}`}
+            value={`${threadUsed} / ${level.threadBudget}`}
             highContrast={highContrast}
           />
           <StatTile
             testID="stitches-result"
             label="STITCHES"
-            value={`${completedRun.replay.stitches.length} / ${SPIKE_LEVEL.maxStitches}`}
+            value={`${completedRun.replay.stitches.length} / ${level.maxStitches}`}
             highContrast={highContrast}
           />
           <StatTile
@@ -226,6 +251,37 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
             value={timeSeconds}
             highContrast={highContrast}
           />
+        </View>
+
+        <View style={styles.rewardRow}>
+          <View
+            testID="results-thimbles"
+            accessibilityLabel={`${completedRun.scoredRun.thimbles} of ${availableThimbles} thimbles earned`}
+            style={styles.rewardPill}
+          >
+            <Ionicons name="medal" size={18} color="#664917" />
+            <Text style={styles.rewardText}>
+              {completedRun.scoredRun.thimbles} / {availableThimbles} THIMBLES
+            </Text>
+          </View>
+          {level.collectible ? (
+            <View testID="results-patch" style={styles.rewardPill}>
+              <Ionicons
+                name={
+                  completedRun.scoredRun.metrics.collectedPatch
+                    ? 'sparkles'
+                    : 'ellipse-outline'
+                }
+                size={17}
+                color="#664917"
+              />
+              <Text style={styles.rewardText}>
+                {completedRun.scoredRun.metrics.collectedPatch
+                  ? 'PATCH FOUND'
+                  : 'PATCH MISSED'}
+              </Text>
+            </View>
+          ) : null}
         </View>
 
         <View
@@ -259,11 +315,46 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
           <Text style={styles.primaryLabel}>WATCH REPLAY</Text>
         </Pressable>
 
+        {nextLevel ? (
+          <Pressable
+            testID="next-level-button"
+            accessibilityRole="button"
+            accessibilityLabel={`Play next level, ${nextLevel.name}`}
+            accessibilityState={{ disabled: replayControlsLocked }}
+            disabled={replayControlsLocked}
+            onPress={handleNextLevel}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              styles.nextButton,
+              replayControlsLocked && styles.primaryDisabled,
+              pressed && !replayControlsLocked && styles.primaryPressed,
+            ]}
+          >
+            <Text style={styles.primaryLabel}>NEXT LEVEL</Text>
+            <Ionicons name="arrow-forward" size={22} color={colors.textOnDark} />
+          </Pressable>
+        ) : null}
+
         <View style={styles.bottomActions}>
+          <Pressable
+            testID="results-map-button"
+            accessibilityRole="button"
+            accessibilityLabel="Return to quilt map"
+            accessibilityState={{ disabled: replayControlsLocked }}
+            disabled={replayControlsLocked}
+            onPress={handleMap}
+            style={({ pressed }) => [
+              styles.settingsButton,
+              replayControlsLocked && styles.primaryDisabled,
+              pressed && !replayControlsLocked && styles.secondaryPressed,
+            ]}
+          >
+            <Ionicons name="map" size={27} color="#173746" />
+          </Pressable>
           <Pressable
             testID="try-again-button"
             accessibilityRole="button"
-            accessibilityLabel="Reset and try First Pull again"
+            accessibilityLabel={`Reset and try ${level.name} again`}
             onPress={handleTryAgain}
             style={({ pressed }) => [
               styles.secondaryButton,
@@ -378,6 +469,30 @@ const styles = StyleSheet.create({
     fontSize: 12,
     letterSpacing: 0.8,
   },
+  rewardRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  rewardPill: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.pill,
+    borderWidth: 2,
+    borderColor: '#8b6828',
+    backgroundColor: '#f0d783',
+  },
+  rewardText: {
+    color: '#493816',
+    fontFamily: 'NunitoSans_800ExtraBold',
+    fontSize: 11,
+    letterSpacing: 0.6,
+  },
   primaryButton: {
     minHeight: touchTargets.primary,
     flexDirection: 'row',
@@ -403,6 +518,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     letterSpacing: 0.8,
   },
+  nextButton: { backgroundColor: '#356e61', borderColor: '#79aa92' },
   bottomActions: {
     minHeight: touchTargets.primary,
     flexDirection: 'row',

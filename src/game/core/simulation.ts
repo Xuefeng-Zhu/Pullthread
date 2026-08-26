@@ -1,9 +1,11 @@
 import type { SurfaceSample } from './heightField';
 import {
   DEFAULT_PHYSICS_CONFIG,
+  detectCollectible,
   detectGoal,
   detectHazard,
   integrateTraveler,
+  resolveBumperCollisions,
   travelerInsideBounds,
   travelerSpeedSquared,
   type PhysicsConfig,
@@ -21,6 +23,7 @@ export interface SimulationState {
   readonly traveler: TravelerState;
   tick: number;
   lowSpeedTicks: number;
+  collectedPatchId: string | null;
   outcome: SimulationOutcome | null;
   readonly scratchSurfaceSample: SurfaceSample;
 }
@@ -56,6 +59,7 @@ export function createSimulation(
     },
     tick: 0,
     lowSpeedTicks: 0,
+    collectedPatchId: null,
     outcome: null,
     scratchSurfaceSample: { height: 0, gradientX: 0, gradientY: 0 },
   };
@@ -68,6 +72,7 @@ export function releaseSimulation(state: SimulationState): void {
 
   state.tick = 0;
   state.lowSpeedTicks = 0;
+  state.collectedPatchId = null;
   state.outcome = null;
   state.traveler.previousPosition.x = state.traveler.position.x;
   state.traveler.previousPosition.y = state.traveler.position.y;
@@ -85,6 +90,7 @@ export function resetSimulation(
   state.phase = 'planning';
   state.tick = 0;
   state.lowSpeedTicks = 0;
+  state.collectedPatchId = null;
   state.outcome = null;
   state.traveler.position.x = definition.start.x;
   state.traveler.position.y = definition.start.y;
@@ -111,6 +117,14 @@ function finish(
   state.traveler.velocity.y = 0;
 }
 
+function collectedPatchResult(
+  state: SimulationState,
+): { readonly collectedPatchId: string } | Record<string, never> {
+  return state.collectedPatchId
+    ? { collectedPatchId: state.collectedPatchId }
+    : {};
+}
+
 export function stepSimulation(
   state: SimulationState,
   world: PhysicsWorld,
@@ -125,8 +139,21 @@ export function stepSimulation(
     world.surface,
     config,
     state.scratchSurfaceSample,
+    world.fabricRegions,
+  );
+  resolveBumperCollisions(
+    state.traveler,
+    world.bumpers,
+    world.fabricRegions,
   );
   state.tick += 1;
+
+  if (!state.collectedPatchId) {
+    const collected = detectCollectible(state.traveler, world.collectible);
+    if (collected) {
+      state.collectedPatchId = collected.id;
+    }
+  }
 
   const stuckSpeedSquared = config.stuckSpeed * config.stuckSpeed;
   if (travelerSpeedSquared(state.traveler) <= stuckSpeedSquared) {
@@ -144,6 +171,7 @@ export function stepSimulation(
       hazardId: hazard.id,
       tick: state.tick,
       completionMs,
+      ...collectedPatchResult(state),
     });
     return;
   }
@@ -154,6 +182,7 @@ export function stepSimulation(
       reason: 'out_of_bounds',
       tick: state.tick,
       completionMs,
+      ...collectedPatchResult(state),
     });
     return;
   }
@@ -163,6 +192,7 @@ export function stepSimulation(
       status: 'success',
       tick: state.tick,
       completionMs,
+      ...collectedPatchResult(state),
     });
     return;
   }
@@ -173,6 +203,7 @@ export function stepSimulation(
       reason: 'stuck',
       tick: state.tick,
       completionMs,
+      ...collectedPatchResult(state),
     });
     return;
   }
@@ -183,6 +214,7 @@ export function stepSimulation(
       reason: 'timeout',
       tick: state.tick,
       completionMs,
+      ...collectedPatchResult(state),
     });
   }
 }

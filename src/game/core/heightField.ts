@@ -33,9 +33,26 @@ export interface PinchParameters {
   readonly maxHorizontalDisplacement: number;
 }
 
+export interface PocketParameters {
+  /** Positive depth carved into the height field at the pocket center. */
+  readonly depth: number;
+  readonly inwardPull: number;
+  readonly minHeight: number;
+  readonly maxHeight: number;
+  readonly maxHorizontalDisplacement: number;
+}
+
 export const DEFAULT_PINCH_PARAMETERS: PinchParameters = Object.freeze({
   ridgeHeight: 0.065,
   horizontalPull: 0.08,
+  minHeight: -0.2,
+  maxHeight: 0.2,
+  maxHorizontalDisplacement: 0.025,
+});
+
+export const DEFAULT_POCKET_PARAMETERS: PocketParameters = Object.freeze({
+  depth: 0.075,
+  inwardPull: 0.055,
   minHeight: -0.2,
   maxHeight: 0.2,
   maxHorizontalDisplacement: 0.025,
@@ -111,15 +128,42 @@ export function resetHeightField(field: HeightField): void {
   field.revision += 1;
 }
 
-function assertPinchStitch(stitch: Stitch): void {
-  if (stitch.type !== 'pinch') {
-    throw new Error(`Stitch type "${stitch.type}" is not implemented yet.`);
-  }
+function assertStitchShape(stitch: Stitch): void {
   if (!Number.isFinite(stitch.radius) || stitch.radius <= 0) {
-    throw new RangeError('Pinch radius must be a positive finite number.');
+    throw new RangeError('Stitch radius must be a positive finite number.');
   }
   if (!Number.isFinite(stitch.tension)) {
-    throw new RangeError('Pinch tension must be finite.');
+    throw new RangeError('Stitch tension must be finite.');
+  }
+}
+
+function assertPinchStitch(stitch: Stitch): void {
+  if (stitch.type !== 'pinch') {
+    throw new Error(`Expected a pinch stitch, received "${stitch.type}".`);
+  }
+  assertStitchShape(stitch);
+}
+
+function assertPocketStitch(stitch: Stitch): void {
+  if (stitch.type !== 'pocket') {
+    throw new Error(`Expected a pocket stitch, received "${stitch.type}".`);
+  }
+  assertStitchShape(stitch);
+}
+
+function assertPocketParameters(parameters: PocketParameters): void {
+  if (
+    !Number.isFinite(parameters.depth) ||
+    parameters.depth < 0 ||
+    !Number.isFinite(parameters.inwardPull) ||
+    parameters.inwardPull < 0 ||
+    !Number.isFinite(parameters.minHeight) ||
+    !Number.isFinite(parameters.maxHeight) ||
+    parameters.minHeight > parameters.maxHeight ||
+    !Number.isFinite(parameters.maxHorizontalDisplacement) ||
+    parameters.maxHorizontalDisplacement < 0
+  ) {
+    throw new RangeError('Pocket deformation parameters must be finite and bounded.');
   }
 }
 
@@ -179,18 +223,58 @@ function accumulatePinch(
   }
 }
 
+function accumulatePocket(
+  field: HeightField,
+  stitch: Stitch,
+  parameters: PocketParameters,
+): void {
+  const tension = clamp(stitch.tension, 0, 1);
+  if (tension === 0) {
+    return;
+  }
+
+  const centerX = (stitch.start.x + stitch.end.x) * 0.5;
+  const centerY = (stitch.start.y + stitch.end.y) * 0.5;
+  const radiusSquared = stitch.radius * stitch.radius;
+
+  for (let row = 0; row < field.rows; row += 1) {
+    const y = field.bounds.y + row * field.cellHeight;
+    const rowOffset = row * field.columns;
+
+    for (let column = 0; column < field.columns; column += 1) {
+      const x = field.bounds.x + column * field.cellWidth;
+      const deltaX = centerX - x;
+      const deltaY = centerY - y;
+      const distanceSquared = deltaX * deltaX + deltaY * deltaY;
+      if (distanceSquared >= radiusSquared) {
+        continue;
+      }
+
+      const distance = Math.sqrt(distanceSquared);
+      const falloff = smoothstep01(1 - distance / stitch.radius);
+      const index = rowOffset + column;
+      const pull = parameters.inwardPull * tension * falloff;
+
+      field.heights[index] -= parameters.depth * tension * falloff;
+      field.offsetX[index] += deltaX * pull;
+      field.offsetY[index] += deltaY * pull;
+    }
+  }
+}
+
 function finalizeDeformation(
   field: HeightField,
-  parameters: PinchParameters,
+  minHeight: number,
+  maxHeight: number,
+  maximumDisplacement: number,
 ): void {
-  const maximumDisplacement = parameters.maxHorizontalDisplacement;
   const maximumDisplacementSquared = maximumDisplacement * maximumDisplacement;
 
   for (let index = 0; index < field.heights.length; index += 1) {
     field.heights[index] = clamp(
       field.heights[index],
-      parameters.minHeight,
-      parameters.maxHeight,
+      minHeight,
+      maxHeight,
     );
 
     const x = field.offsetX[index];
@@ -215,33 +299,86 @@ export function applyPinchStitch(
 ): void {
   assertPinchStitch(stitch);
   accumulatePinch(field, stitch, parameters);
-  finalizeDeformation(field, parameters);
+  finalizeDeformation(
+    field,
+    parameters.minHeight,
+    parameters.maxHeight,
+    parameters.maxHorizontalDisplacement,
+  );
+  field.revision += 1;
+}
+
+export function applyPocketStitch(
+  field: HeightField,
+  stitch: Stitch,
+  parameters: PocketParameters = DEFAULT_POCKET_PARAMETERS,
+): void {
+  assertPocketStitch(stitch);
+  assertPocketParameters(parameters);
+  accumulatePocket(field, stitch, parameters);
+  finalizeDeformation(
+    field,
+    parameters.minHeight,
+    parameters.maxHeight,
+    parameters.maxHorizontalDisplacement,
+  );
   field.revision += 1;
 }
 
 export function rebuildHeightField(
   field: HeightField,
   stitches: readonly Stitch[],
-  parameters: PinchParameters = DEFAULT_PINCH_PARAMETERS,
+  pinchParameters: PinchParameters = DEFAULT_PINCH_PARAMETERS,
   preview?: Stitch,
+  pocketParameters: PocketParameters = DEFAULT_POCKET_PARAMETERS,
 ): void {
-  for (const stitch of stitches) {
-    assertPinchStitch(stitch);
-  }
-  if (preview) {
-    assertPinchStitch(preview);
+  assertPocketParameters(pocketParameters);
+  const allStitches = preview ? [...stitches, preview] : stitches;
+  let includesPinch = false;
+  let includesPocket = false;
+
+  for (const stitch of allStitches) {
+    assertStitchShape(stitch);
+    includesPinch ||= stitch.type === 'pinch';
+    includesPocket ||= stitch.type === 'pocket';
   }
 
   restoreBase(field);
 
   for (const stitch of stitches) {
-    accumulatePinch(field, stitch, parameters);
+    if (stitch.type === 'pinch') {
+      accumulatePinch(field, stitch, pinchParameters);
+    } else {
+      accumulatePocket(field, stitch, pocketParameters);
+    }
   }
   if (preview) {
-    accumulatePinch(field, preview, parameters);
+    if (preview.type === 'pinch') {
+      accumulatePinch(field, preview, pinchParameters);
+    } else {
+      accumulatePocket(field, preview, pocketParameters);
+    }
   }
 
-  finalizeDeformation(field, parameters);
+  const minHeight = includesPocket
+    ? includesPinch
+      ? Math.min(pinchParameters.minHeight, pocketParameters.minHeight)
+      : pocketParameters.minHeight
+    : pinchParameters.minHeight;
+  const maxHeight = includesPocket
+    ? includesPinch
+      ? Math.max(pinchParameters.maxHeight, pocketParameters.maxHeight)
+      : pocketParameters.maxHeight
+    : pinchParameters.maxHeight;
+  const maximumDisplacement = includesPocket
+    ? includesPinch
+      ? Math.max(
+          pinchParameters.maxHorizontalDisplacement,
+          pocketParameters.maxHorizontalDisplacement,
+        )
+      : pocketParameters.maxHorizontalDisplacement
+    : pinchParameters.maxHorizontalDisplacement;
+  finalizeDeformation(field, minHeight, maxHeight, maximumDisplacement);
   field.revision += 1;
 }
 

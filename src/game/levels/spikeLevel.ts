@@ -1,57 +1,19 @@
-import {
-  createHeightField,
-  rebuildHeightField,
-  type PinchParameters,
-} from '../core/heightField';
-import {
-  type PhysicsConfig,
-  type PhysicsWorld,
-} from '../core/physics';
-import { calculateThreadCost } from '../core/scoring';
-import { createSimulation, type SimulationState } from '../core/simulation';
-import type {
-  CircularHazard,
-  GoalDefinition,
-  Rect,
-  Stitch,
-  TravelerDefinition,
-} from '../core/types';
+import type { PinchParameters } from '../core/heightField';
+import type { PhysicsConfig, PhysicsWorld } from '../core/physics';
+import type { Stitch } from '../core/types';
+import { createStitch } from '../input/stitchGesture';
+import { CAMPAIGN_LEVELS } from './campaignLevels';
+import { createLevelSimulation, createLevelWorld } from './levelLoader';
+import type { LevelDefinition } from './schema';
 
-export interface SpikeLevelDefinition {
-  readonly id: string;
-  /** Increment whenever authored geometry or simulation rules change. */
-  readonly version: number;
-  readonly name: string;
-  readonly fabricBounds: Rect;
-  readonly gridColumns: number;
-  readonly gridRows: number;
-  readonly traveler: TravelerDefinition;
-  readonly goal: GoalDefinition;
-  readonly hazards: readonly CircularHazard[];
-  readonly maxStitches: number;
-  readonly threadBudget: number;
-}
+/**
+ * Backward-compatible name for callers built against the original technical
+ * spike. New campaign code should consume LevelDefinition directly.
+ */
+export type SpikeLevelDefinition = LevelDefinition;
 
-export const SPIKE_LEVEL: SpikeLevelDefinition = Object.freeze({
-  id: 'technical-spike',
-  version: 1,
-  name: 'First Pull',
-  fabricBounds: Object.freeze({ x: 0, y: 0, width: 1, height: 1.5 }),
-  gridColumns: 24,
-  gridRows: 36,
-  traveler: Object.freeze({
-    start: Object.freeze({ x: 0.3, y: 0.14 }),
-    radius: 0.035,
-  }),
-  goal: Object.freeze({
-    center: Object.freeze({ x: 0.78, y: 0.51 }),
-    radius: 0.075,
-    maxEntrySpeed: 0.7,
-  }),
-  hazards: Object.freeze([]),
-  maxStitches: 2,
-  threadBudget: 120,
-});
+/** Level 1 remains the exact entry point used by the Milestone 2 UI. */
+export const SPIKE_LEVEL: LevelDefinition = CAMPAIGN_LEVELS[0];
 
 export const SPIKE_PINCH_PARAMETERS: PinchParameters = Object.freeze({
   ridgeHeight: 0.065,
@@ -61,30 +23,10 @@ export const SPIKE_PINCH_PARAMETERS: PinchParameters = Object.freeze({
   maxHorizontalDisplacement: 0.025,
 });
 
-export const SPIKE_PHYSICS_CONFIG: PhysicsConfig = Object.freeze({
-  fixedDt: 1 / 120,
-  gravityScale: 2.2,
-  rollingFriction: 0.08,
-  maxSpeed: 1.2,
-  stuckSpeed: 0.012,
-  stuckTicks: 180,
-  maxRunTicks: 2400,
-  maxSubsteps: 8,
-  maxFrameDelta: 0.1,
-});
+export const SPIKE_PHYSICS_CONFIG: PhysicsConfig = SPIKE_LEVEL.physicsConfig;
 
-const referenceStart = Object.freeze({ x: 0.23, y: 0.1 });
-const referenceEnd = Object.freeze({ x: 0.23, y: 1 });
-
-export const REFERENCE_PINCH_STITCH: Stitch = Object.freeze({
-  id: 'reference-pinch',
-  type: 'pinch',
-  start: referenceStart,
-  end: referenceEnd,
-  tension: 1,
-  radius: 0.19,
-  threadCost: calculateThreadCost(referenceStart, referenceEnd),
-});
+export const REFERENCE_PINCH_STITCH: Stitch =
+  SPIKE_LEVEL.referenceSolution[0];
 
 const tutorialGuideStart = Object.freeze({ x: 0.23, y: 1 });
 const tutorialGuideEnd = Object.freeze({ x: 0.23, y: 0 });
@@ -94,39 +36,24 @@ const tutorialGuideEnd = Object.freeze({ x: 0.23, y: 0 });
  * travels upward beyond the field. Input clamping produces the deterministic
  * endpoint below on every portrait screen size.
  */
+const tutorialGuidedStitch = createStitch(
+  'tutorial-guided-pinch',
+  'pinch',
+  tutorialGuideStart,
+  tutorialGuideEnd,
+);
 export const TUTORIAL_GUIDED_PINCH_STITCH: Stitch = Object.freeze({
-  id: 'tutorial-guided-pinch',
-  type: 'pinch',
-  start: tutorialGuideStart,
-  end: tutorialGuideEnd,
-  tension: 1,
-  radius: 0.19,
-  threadCost: calculateThreadCost(tutorialGuideStart, tutorialGuideEnd),
+  ...tutorialGuidedStitch,
+  start: Object.freeze(tutorialGuidedStitch.start),
+  end: Object.freeze(tutorialGuidedStitch.end),
 });
 
-/**
- * Builds a fresh deterministic world. The subtle downward base drape makes the
- * no-stitch route miss the goal; the reference ridge redirects that same start.
- */
 export function createSpikeWorld(
   stitches: readonly Stitch[] = [],
 ): PhysicsWorld {
-  const surface = createHeightField(
-    SPIKE_LEVEL.gridColumns,
-    SPIKE_LEVEL.gridRows,
-    SPIKE_LEVEL.fabricBounds,
-    (_x, y) => -0.11 * y,
-  );
-  rebuildHeightField(surface, stitches, SPIKE_PINCH_PARAMETERS);
-
-  return {
-    surface,
-    bounds: SPIKE_LEVEL.fabricBounds,
-    goal: SPIKE_LEVEL.goal,
-    hazards: SPIKE_LEVEL.hazards,
-  };
+  return createLevelWorld(SPIKE_LEVEL, stitches);
 }
 
-export function createSpikeSimulation(): SimulationState {
-  return createSimulation(SPIKE_LEVEL.traveler);
+export function createSpikeSimulation() {
+  return createLevelSimulation(SPIKE_LEVEL);
 }

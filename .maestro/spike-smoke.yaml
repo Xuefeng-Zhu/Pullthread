@@ -1,11 +1,22 @@
 appId: com.xuefengzhu.pullthread
-name: Pullthread Milestone 2 tutorial, results, and replay smoke
+name: Pullthread Milestone 3 campaign unlock and replay smoke
 tags:
   - smoke
-  - milestone-2
+  - milestone-3
 ---
 - launchApp:
     clearState: true
+
+- assertVisible:
+    id: "quilt-map-screen"
+- assertVisible:
+    id: "level-state-bedroom-01-first-pull"
+    text: "CURRENT"
+- assertVisible:
+    id: "level-state-bedroom-02-edge-redirect"
+    text: "LOCKED"
+- tapOn:
+    id: "level-node-bedroom-01-first-pull"
 
 - assertVisible:
     id: "spike-level-screen"
@@ -56,28 +67,67 @@ tags:
     id: "stitches-result"
 - assertVisible:
     id: "time-result"
+- scrollUntilVisible:
+    element:
+      id: "watch-replay-button"
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: "watch-replay-button"
+- scrollUntilVisible:
+    element:
+      id: "replay-stage"
+    direction: UP
+    timeout: 10000
 - extendedWaitUntil:
     visible:
       id: "replay-stage"
       text: ".*REPLAY COMPLETE.*"
     timeout: 20000
 
+- scrollUntilVisible:
+    element:
+      id: "results-map-button"
+    direction: DOWN
+    timeout: 10000
 - tapOn:
-    id: "try-again-button"
+    id: "results-map-button"
 - assertVisible:
-    id: "planning-status"
+    id: "quilt-map-screen"
 - assertVisible:
-    id: "stitch-count"
-    text: ".*0.*"
-- assertNotVisible:
-    id: "tutorial-coachmark"
+    id: "level-state-bedroom-01-first-pull"
+    text: "COMPLETED"
+- scrollUntilVisible:
+    element:
+      id: "level-state-bedroom-02-edge-redirect"
+    direction: DOWN
+    timeout: 10000
+- assertVisible:
+    id: "level-state-bedroom-02-edge-redirect"
+    text: "CURRENT"
 
 # A default launch stops and relaunches the process without clearing storage.
-# This proves completion survives a native cold restart, not only navigation.
+# This proves campaign progress survives a native cold restart, not only
+# navigation. Re-enter Level 1 to verify tutorial completion persisted too.
 - stopApp
 - launchApp
+- assertVisible:
+    id: "quilt-map-screen"
+- scrollUntilVisible:
+    element:
+      id: "level-state-bedroom-02-edge-redirect"
+    direction: DOWN
+    timeout: 10000
+- assertVisible:
+    id: "level-state-bedroom-02-edge-redirect"
+    text: "CURRENT"
+- scrollUntilVisible:
+    element:
+      id: "level-node-bedroom-01-first-pull"
+    direction: UP
+    timeout: 10000
+- tapOn:
+    id: "level-node-bedroom-01-first-pull"
 - assertVisible:
     id: "spike-level-screen"
 - assertNotVisible:

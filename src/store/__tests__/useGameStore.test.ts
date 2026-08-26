@@ -1,21 +1,22 @@
 import { beforeEach, describe, expect, test } from '@jest/globals';
 
 import type { Stitch } from '../../game/core/types';
+import { createStitch } from '../../game/input/stitchGesture';
+import { CAMPAIGN_LEVELS } from '../../game/levels/campaignLevels';
+import { createLevelReplay, simulateLevelReplay } from '../../game/replay';
+import { useCampaignProgressStore } from '../useCampaignProgressStore';
 import {
   resetGameStoreForTests,
   selectThreadUsed,
   useGameStore,
 } from '../useGameStore';
 
-const STITCH: Stitch = {
-  id: 'test-stitch',
-  type: 'pinch',
-  start: { x: 0.2, y: 0.2 },
-  end: { x: 0.2, y: 0.8 },
-  tension: 1,
-  radius: 0.19,
-  threadCost: 60,
-};
+const STITCH: Stitch = createStitch(
+  'test-stitch',
+  'pinch',
+  { x: 0.2, y: 0.2 },
+  { x: 0.2, y: 0.8 },
+);
 
 describe('game planning store', () => {
   beforeEach(resetGameStoreForTests);
@@ -24,7 +25,7 @@ describe('game planning store', () => {
     const limits = { maxStitches: 2, threadBudget: 120 };
 
     expect(useGameStore.getState().commitStitch(STITCH, limits)).toBe(true);
-    expect(selectThreadUsed(useGameStore.getState())).toBe(60);
+    expect(selectThreadUsed(useGameStore.getState())).toBe(STITCH.threadCost);
 
     useGameStore.getState().undo();
     expect(useGameStore.getState().stitches).toHaveLength(0);
@@ -81,7 +82,7 @@ describe('game planning store', () => {
       outcome: { status: 'success', completionMs: 2300 },
       isNewBest: true,
       bestMetrics: {
-        threadUsed: 60,
+        threadUsed: STITCH.threadCost,
         stitchesUsed: 1,
         completionMs: 2300,
       },
@@ -90,9 +91,10 @@ describe('game planning store', () => {
     useGameStore.getState().resetSession();
     expect(useGameStore.getState().completedRun).toBeNull();
     expect(useGameStore.getState().bestRun).toEqual({
-      threadUsed: 60,
+      threadUsed: STITCH.threadCost,
       stitchesUsed: 1,
       completionMs: 2300,
+      collectedPatch: false,
     });
   });
 
@@ -131,6 +133,98 @@ describe('game planning store', () => {
       phase: 'planning',
       outcome: null,
       completedRun: null,
+    });
+  });
+
+  test('records a level-specific replay, thimbles, and collectible progress', () => {
+    const level = CAMPAIGN_LEVELS.find(
+      (candidate) => candidate.id === 'attic-10-hidden-patch',
+    );
+    if (!level?.collectible) throw new Error('Expected the hidden-patch level.');
+
+    const game = useGameStore.getState();
+    game.startLevel(level.id);
+    for (const stitch of level.referenceSolution) {
+      expect(
+        useGameStore.getState().commitStitch(stitch, {
+          maxStitches: level.maxStitches,
+          threadBudget: level.threadBudget,
+        }),
+      ).toBe(true);
+    }
+    const replayOutcome = simulateLevelReplay(
+      createLevelReplay(level, level.referenceSolution),
+    ).outcome;
+    if (replayOutcome.status !== 'success') {
+      throw new Error('Expected the hidden-patch reference run to succeed.');
+    }
+
+    useGameStore.getState().release();
+    useGameStore.getState().resolve(replayOutcome);
+
+    expect(useGameStore.getState().completedRun).toMatchObject({
+      levelId: level.id,
+      replay: { levelId: level.id },
+      scoredRun: {
+        thimbles: 3,
+        metrics: { collectedPatch: true },
+      },
+    });
+    expect(
+      useCampaignProgressStore.getState().progressByLevel[level.id],
+    ).toMatchObject({
+      completed: true,
+      bestRun: { thimbles: 3, metrics: { collectedPatch: true } },
+    });
+  });
+
+  test('keeps the current run score separate from merged patch progress', () => {
+    const level = CAMPAIGN_LEVELS.find(
+      (candidate) => candidate.id === 'attic-10-hidden-patch',
+    );
+    if (!level?.collectible) throw new Error('Expected the hidden-patch level.');
+
+    const limits = {
+      maxStitches: level.maxStitches,
+      threadBudget: level.threadBudget,
+    };
+    useGameStore.getState().startLevel(level.id);
+    for (const stitch of level.referenceSolution) {
+      expect(useGameStore.getState().commitStitch(stitch, limits)).toBe(true);
+    }
+    useGameStore.getState().release();
+    useGameStore.getState().resolve({
+      status: 'success',
+      tick: 250,
+      completionMs: 2_083,
+      collectedPatchId: level.collectible.id,
+    });
+
+    useGameStore.getState().resetSession();
+    for (const stitch of level.referenceSolution) {
+      expect(useGameStore.getState().commitStitch(stitch, limits)).toBe(true);
+    }
+    useGameStore.getState().release();
+    useGameStore.getState().resolve({
+      status: 'success',
+      tick: 240,
+      completionMs: 2_000,
+    });
+
+    expect(useGameStore.getState().completedRun).toMatchObject({
+      outcome: { status: 'success' },
+      isNewBest: false,
+      scoredRun: {
+        thimbles: 2,
+        metrics: { collectedPatch: false },
+      },
+      bestMetrics: { collectedPatch: true },
+    });
+    expect(
+      useCampaignProgressStore.getState().progressByLevel[level.id]?.bestRun,
+    ).toMatchObject({
+      thimbles: 3,
+      metrics: { collectedPatch: true },
     });
   });
 });

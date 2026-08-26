@@ -11,10 +11,11 @@ import {
   getGamePalette,
   type GamePalette,
 } from '../../theme/gamePalette';
-import type { Point } from '../core/types';
+import type { Point, StitchType } from '../core/types';
 
 interface CanvasStitch {
   readonly id: string;
+  readonly type: StitchType;
   readonly start: Point;
   readonly end: Point;
   readonly radius: number;
@@ -65,9 +66,27 @@ function StitchVisual({ stitch, palette, progress }: StitchVisualProps) {
   const endpointShadowY = useDerivedValue(() => endY.value + 2);
   const endpointGlintX = useDerivedValue(() => endX.value - 2);
   const endpointGlintY = useDerivedValue(() => endY.value - 2);
+  const pocketCenterX = (stitch.start.x + stitch.end.x) * 0.5;
+  const pocketCenterY = (stitch.start.y + stitch.end.y) * 0.5;
 
   return (
     <Group opacity={stitch.preview ? 0.74 : 1}>
+      {stitch.type === 'pocket' ? (
+        <Group>
+          <Circle
+            cx={pocketCenterX}
+            cy={pocketCenterY + 4}
+            r={stitch.radius}
+            color="rgba(38,52,60,0.24)"
+          />
+          <Circle
+            cx={pocketCenterX}
+            cy={pocketCenterY}
+            r={stitch.radius * 0.72}
+            color="rgba(89,135,151,0.20)"
+          />
+        </Group>
+      ) : null}
       <Line
         p1={vec(
           stitch.start.x + normalX * 7,
