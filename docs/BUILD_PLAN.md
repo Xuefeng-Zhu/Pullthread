@@ -221,7 +221,7 @@ does not cover the extended Milestone 1/2 device checklist or the new Milestone
       wrapper.
 - [x] Maestro routes updated to enter Level 1 from Quilt Map and assert Level 2
       unlock after a successful result.
-- [ ] Full automated Milestone 3 verification snapshot recorded on the final
+- [x] Full automated Milestone 3 verification snapshot recorded on the final
       change set.
 - [ ] Manual physical-device campaign checklist, campaign recording,
       performance notes, and native Maestro evidence.
@@ -286,17 +286,21 @@ does not cover the extended Milestone 1/2 device checklist or the new Milestone
 - Compact 320 x 568 browser layout — tutorial, fabric gesture target, and all
   three bottom controls remain visible without horizontal or vertical clipping.
 
-## Milestone 3 verification snapshot
+## Milestone 3 verification snapshot — 2026-08-26
 
-The final command results and current suite/test counts must be recorded here
-after the integrated change set is stable. Until then, the implementation
-checkboxes above describe source scope, not a completed device or release gate.
-
-- `npm run lint` — pending final integrated run.
-- `npm run typecheck` — pending final integrated run.
-- `npm test` — pending final integrated run.
-- `npx expo-doctor@latest` — pending final integrated run.
-- `npm run export` — pending final integrated run.
+- `npm run lint` — passed with no warnings.
+- `npm run typecheck` — passed.
+- `npm test -- --runInBand` — 23 suites and 188 tests passed.
+- `npx expo-doctor@latest` — 21 of 21 checks passed.
+- `npm run export` — web, Android, and iOS bundles exported successfully.
+- Maestro YAML parse — both installed-app flows are valid YAML.
+- Codex in-app browser at 390 x 844 and the default desktop viewport — Quilt
+  Map exposed all 15 levels with Level 1 current and Level 2 locked, Level 1
+  opened into the three-step tutorial, and no warning/error console entries
+  were recorded.
+- Independent catalog audit — every baseline failed and reference succeeded;
+  named materials, bumpers, hazards, patches, and each multi-stitch solution
+  were exercised by deterministic counterfactual tests.
 - `.maestro/spike-smoke.yaml` and `.maestro/failure-retry.yaml` on an installed
   target — pending.
 - [`CAMPAIGN_SMOKE_TEST.md`](CAMPAIGN_SMOKE_TEST.md) on the iPhone development
@@ -304,9 +308,10 @@ checkboxes above describe source scope, not a completed device or release gate.
 
 ## Next milestone
 
-Run the final automated gates, reload the compatible development client, and
-complete [`CAMPAIGN_SMOKE_TEST.md`](CAMPAIGN_SMOKE_TEST.md) plus the remaining
-extended checks in [`PHYSICAL_DEVICE_TEST.md`](PHYSICAL_DEVICE_TEST.md). Tune
+Rebuild the development client for the integrated Expo/AsyncStorage changes,
+then complete [`CAMPAIGN_SMOKE_TEST.md`](CAMPAIGN_SMOKE_TEST.md) plus the
+remaining extended checks in
+[`PHYSICAL_DEVICE_TEST.md`](PHYSICAL_DEVICE_TEST.md). Tune
 campaign gestures, map usability, feedback timing, replay pacing, and frame
 pacing only from recorded evidence. After Milestone 3 is device-validated,
 Milestone 4 can add RevenueCat entitlement/restore behavior and later service

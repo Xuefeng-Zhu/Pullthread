@@ -143,6 +143,7 @@ interface LevelOptions {
   readonly maxStitches?: number;
   readonly threadBudget?: number;
   readonly targetThreadUsage?: number;
+  readonly physicsConfig?: PhysicsConfig;
 }
 
 function level(options: LevelOptions): LevelDefinition {
@@ -174,7 +175,7 @@ function level(options: LevelOptions): LevelDefinition {
     threadBudget: options.threadBudget ?? Math.max(120, referenceThread),
     targetThreadUsage:
       options.targetThreadUsage ?? Math.max(90, referenceThread),
-    physicsConfig: CAMPAIGN_PHYSICS_CONFIG,
+    physicsConfig: options.physicsConfig ?? CAMPAIGN_PHYSICS_CONFIG,
     referenceSolution: Object.freeze([...options.referenceSolution]),
   };
   return Object.freeze(definition);
@@ -230,9 +231,9 @@ const combinationTop = pinch(
 );
 const combinationBottom = pinch(
   'combination-bottom-reference',
-  0.23,
-  0.45,
-  1,
+  0.65,
+  0.25,
+  0.9,
 );
 const patchPull = pinch('patch-pull-reference', 0.23, 0.08, 1.02);
 const thornPull = pinch('thorn-pull-reference', 0.21, 0.08, 1.02);
@@ -250,7 +251,7 @@ const pinchPocketCatch = pocket(
 );
 const tightPull = pinch('tight-pull-reference', 0.23, 0.1, 1);
 const finaleTop = pinch('finale-top-reference', 0.22, 0.08, 0.56);
-const finaleBottom = pinch('finale-bottom-reference', 0.22, 0.56, 1.02);
+const finaleBottom = pinch('finale-bottom-reference', 0.45, 0.35, 0.8);
 const finalePocket = pocket(
   'finale-pocket-reference',
   point(0.66, 0.44),
@@ -276,7 +277,6 @@ export const CAMPAIGN_LEVELS: readonly LevelDefinition[] = Object.freeze([
     name: 'Edge Redirect',
     mechanic: 'Redirect around a boundary',
     referenceSolution: [edgeRedirect],
-    bumpers: [bumper('edge-button', point(0.9, 1.08), 0.06)],
     maxStitches: 2,
     threadBudget: 125,
     targetThreadUsage: edgeRedirect.threadCost,
@@ -288,6 +288,10 @@ export const CAMPAIGN_LEVELS: readonly LevelDefinition[] = Object.freeze([
     name: 'Felt Landing',
     mechanic: 'Stop on felt',
     referenceSolution: [feltLanding],
+    goal: Object.freeze({
+      ...DEFAULT_GOAL,
+      maxEntrySpeed: 0.38,
+    }),
     fabricRegions: [
       region('felt-landing', 'felt', {
         x: 0.52,
@@ -332,12 +336,16 @@ export const CAMPAIGN_LEVELS: readonly LevelDefinition[] = Object.freeze([
     referenceSolution: [silkPull],
     fabricRegions: [
       region('silk-runway', 'silk', {
-        x: 0.46,
-        y: 0.28,
-        width: 0.5,
-        height: 0.48,
+        x: 0,
+        y: 0,
+        width: 0.96,
+        height: 0.8,
       }),
     ],
+    physicsConfig: Object.freeze({
+      ...CAMPAIGN_PHYSICS_CONFIG,
+      rollingFriction: 0.2,
+    }),
     maxStitches: 2,
     threadBudget: 125,
     targetThreadUsage: silkPull.threadCost,
@@ -366,6 +374,10 @@ export const CAMPAIGN_LEVELS: readonly LevelDefinition[] = Object.freeze([
     name: 'Felt and Silk',
     mechanic: 'Felt and silk in one level',
     referenceSolution: [mixedPull],
+    goal: Object.freeze({
+      ...DEFAULT_GOAL,
+      maxEntrySpeed: 0.35,
+    }),
     fabricRegions: [
       region('mixed-silk', 'silk', {
         x: 0.42,
@@ -380,6 +392,10 @@ export const CAMPAIGN_LEVELS: readonly LevelDefinition[] = Object.freeze([
         height: 0.3,
       }),
     ],
+    physicsConfig: Object.freeze({
+      ...CAMPAIGN_PHYSICS_CONFIG,
+      rollingFriction: 0.16,
+    }),
     maxStitches: 2,
     threadBudget: 125,
     targetThreadUsage: mixedPull.threadCost,
@@ -391,6 +407,11 @@ export const CAMPAIGN_LEVELS: readonly LevelDefinition[] = Object.freeze([
     name: 'Two-Stitch Turn',
     mechanic: 'Two-stitch combination',
     referenceSolution: [combinationTop, combinationBottom],
+    goal: Object.freeze({
+      center: point(0.51, 0.69),
+      radius: 0.06,
+      maxEntrySpeed: 1.2,
+    }),
     maxStitches: 2,
     threadBudget: 180,
     targetThreadUsage: combinationTop.threadCost + combinationBottom.threadCost,
@@ -453,6 +474,11 @@ export const CAMPAIGN_LEVELS: readonly LevelDefinition[] = Object.freeze([
     name: 'Pinch and Pocket',
     mechanic: 'Pinch and pocket combination',
     referenceSolution: [pinchPocketRidge, pinchPocketCatch],
+    goal: Object.freeze({
+      center: point(0.76, 1.27),
+      radius: 0.065,
+      maxEntrySpeed: 1.2,
+    }),
     allowedStitchTypes: ['pinch', 'pocket'],
     maxStitches: 2,
     threadBudget: 130,
@@ -479,9 +505,9 @@ export const CAMPAIGN_LEVELS: readonly LevelDefinition[] = Object.freeze([
     mechanic: 'Multi-stage finale',
     referenceSolution: [finaleTop, finaleBottom, finalePocket],
     goal: Object.freeze({
-      center: point(0.69, 0.49),
-      radius: 0.05,
-      maxEntrySpeed: 0.7,
+      center: point(0.62, 0.62),
+      radius: 0.04,
+      maxEntrySpeed: 0.4,
     }),
     fabricRegions: [
       region('finale-silk', 'silk', {
@@ -504,7 +530,6 @@ export const CAMPAIGN_LEVELS: readonly LevelDefinition[] = Object.freeze([
       }),
     ],
     hazards: [
-      hazard('finale-hole', 'hole', point(0.12, 0.66), 0.05),
       hazard('finale-thorn', 'thorn', point(0.9, 0.66), 0.045),
     ],
     bumpers: [bumper('finale-button', point(0.78, 0.9), 0.055, 0.35)],

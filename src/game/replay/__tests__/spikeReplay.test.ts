@@ -1,6 +1,5 @@
 import { describe, expect, test } from '@jest/globals';
 
-import { calculateThreadCost } from '../../core/scoring';
 import {
   releaseSimulation,
   stepSimulation,

@@ -122,6 +122,81 @@ describe('campaign catalog', () => {
     });
   });
 
+  test.each([
+    { levelId: 'bedroom-03-felt-landing', fabricType: 'felt' },
+    { levelId: 'attic-06-silk-slide', fabricType: 'silk' },
+  ] as const)('$levelId requires its teaching material', ({
+    levelId,
+    fabricType,
+  }) => {
+    const level = getCampaignLevel(levelId);
+    const withoutMaterial: LevelDefinition = {
+      ...level,
+      fabricRegions: level.fabricRegions.filter(
+        (region) => region.type !== fabricType,
+      ),
+    };
+
+    expect(runLevel(level, level.referenceSolution).outcome?.status).toBe(
+      'success',
+    );
+    expect(
+      runLevel(withoutMaterial, level.referenceSolution).outcome,
+    ).toMatchObject({ status: 'failure' });
+  });
+
+  test('Felt and Silk traverses and requires both materials', () => {
+    const level = getCampaignLevel('attic-08-felt-and-silk');
+    const state = createLevelSimulation(level);
+    const world = createLevelWorld(level, level.referenceSolution);
+    const visited = new Set<string>();
+    releaseSimulation(state);
+    while (state.phase === 'running') {
+      stepSimulation(state, world, level.physicsConfig);
+      const material = fabricRegionAtPoint(
+        state.traveler.position,
+        level.fabricRegions,
+      );
+      if (material) visited.add(material.type);
+    }
+
+    expect(state.outcome?.status).toBe('success');
+    expect(visited).toEqual(new Set(['silk', 'felt']));
+    for (const fabricType of ['silk', 'felt'] as const) {
+      expect(
+        runLevel(
+          {
+            ...level,
+            fabricRegions: level.fabricRegions.filter(
+              (region) => region.type !== fabricType,
+            ),
+          },
+          level.referenceSolution,
+        ).outcome,
+      ).toMatchObject({ status: 'failure' });
+    }
+  });
+
+  test.each([
+    'attic-09-two-stitches',
+    'festival-13-pinch-pocket',
+    'festival-15-finale',
+  ])('%s requires every reference stitch', (levelId) => {
+    const level = getCampaignLevel(levelId);
+    expect(runLevel(level, level.referenceSolution).outcome?.status).toBe(
+      'success',
+    );
+
+    for (const removedIndex of level.referenceSolution.keys()) {
+      const incomplete = level.referenceSolution.filter(
+        (_, index) => index !== removedIndex,
+      );
+      expect(runLevel(level, incomplete).outcome).toMatchObject({
+        status: 'failure',
+      });
+    }
+  });
+
   test('Elastic Bounce requires an impact in elastic fabric', () => {
     const level = getCampaignLevel('festival-12-elastic-bounce');
     const { bumper, nearestDistance, nearestPoint, state } =
@@ -151,7 +226,7 @@ describe('campaign catalog', () => {
     ).toMatchObject({ status: 'failure' });
   });
 
-  test('Festival Finale combines its pocket, patch, and elastic bumper', () => {
+  test('Festival Finale requires its stitches, patch route, materials, and bumper', () => {
     const level = getCampaignLevel('festival-15-finale');
     const { bumper, nearestDistance, nearestPoint, state } =
       runReferenceWithBumperTrace(level);
@@ -172,17 +247,19 @@ describe('campaign catalog', () => {
     expect(
       runLevel({ ...level, bumpers: [] }, level.referenceSolution).outcome,
     ).toMatchObject({ status: 'failure' });
-    expect(
-      runLevel(
-        {
-          ...level,
-          fabricRegions: level.fabricRegions.filter(
-            (region) => region.type !== 'elastic',
-          ),
-        },
-        level.referenceSolution,
-      ).outcome,
-    ).toMatchObject({ status: 'failure' });
+    for (const fabricType of ['silk', 'felt', 'elastic'] as const) {
+      expect(
+        runLevel(
+          {
+            ...level,
+            fabricRegions: level.fabricRegions.filter(
+              (region) => region.type !== fabricType,
+            ),
+          },
+          level.referenceSolution,
+        ).outcome,
+      ).toMatchObject({ status: 'failure' });
+    }
   });
 });
 
