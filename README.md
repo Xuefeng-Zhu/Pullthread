@@ -14,12 +14,13 @@ patches, deterministic thimble scoring, best-run comparisons, and
 campaign-aware replay. RevenueCat, InsForge, Daily Scrap, and production
 content remain intentionally deferred.
 
-> **Physical-device gate: limited iOS smoke passed; full checklist pending.** A
-> locally signed development build installed and ran successfully on an iPhone
-> 17e with a user-reported manual gameplay pass on 2026-08-25. The extended
-> touch, haptic/audio, lifecycle, performance, repetition, recording, and native
-> Maestro checks in [`docs/PHYSICAL_DEVICE_TEST.md`](docs/PHYSICAL_DEVICE_TEST.md)
-> remain open.
+> **Physical-device gate: limited Milestone 3 iOS smoke passed; full checklist
+> pending.** A locally signed Release build with an embedded Hermes bundle for
+> the final Milestone 3 change set installed and launched successfully on an
+> iPhone 17e. The project owner reported manual verification on 2026-08-26. The
+> detailed
+> campaign, touch, haptic/audio, lifecycle, performance, repetition, recording,
+> and native Maestro checks remain open.
 
 ## Technology
 
@@ -112,7 +113,8 @@ Rebuild the native development client after changing native dependencies,
 native configuration, or the Expo SDK. The campaign implementation itself is
 JavaScript/TypeScript, but this integrated change set also aligns Expo,
 Expo Asset, Expo Dev Client, and Metro Runtime to the SDK 57 patch matrix.
-Rebuild before recording Milestone 3 physical-device acceptance evidence.
+The recorded 2026-08-26 Release build includes that alignment. Rebuild before
+relying on later device evidence whenever native dependencies change.
 
 ### Simulator, emulator, and web diagnostics
 
@@ -207,8 +209,9 @@ fixed-step loop, campaign catalog, persistence, and replay boundaries. Level
 authors should also read [`docs/LEVEL_FORMAT.md`](docs/LEVEL_FORMAT.md).
 
 The implementation plan and current tradeoffs live in
-[`docs/BUILD_PLAN.md`](docs/BUILD_PLAN.md). The pending physical campaign pass
-is defined in [`docs/CAMPAIGN_SMOKE_TEST.md`](docs/CAMPAIGN_SMOKE_TEST.md).
+[`docs/BUILD_PLAN.md`](docs/BUILD_PLAN.md). The limited physical campaign pass
+and remaining checklist are recorded in
+[`docs/CAMPAIGN_SMOKE_TEST.md`](docs/CAMPAIGN_SMOKE_TEST.md).
 
 ## Explicitly deferred
 
@@ -223,9 +226,10 @@ inferred from it:
 - A completed Milestone 3 physical-device checklist, recording, performance
   capture, or native Maestro report
 
-The 2026-08-25 limited phone smoke proves the signed Milestone 2 development
-build and basic gameplay path. It does not by itself prove the new campaign
-flow; use the campaign checklist before calling Milestone 3 device-complete.
+The 2026-08-26 limited phone smoke proves the signed Milestone 3 Release build,
+install/launch path, startup stability, and owner-reported manual verification.
+It does not prove every detailed campaign flow or the remaining evidence gates;
+complete the campaign checklist before calling Milestone 3 device-complete.
 
 ## Current primary references
 

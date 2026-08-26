@@ -166,10 +166,13 @@ Reference: `docs/design/pullthread-gameplay-concept.png`
 ## Environment tradeoff
 
 This workspace now has a full Xcode installation and successfully signed,
-installed, and launched the Milestone 2 development client on an iPhone 17e.
-The 2026-08-25 owner-reported gameplay smoke remains deliberately limited: it
-does not cover the extended Milestone 1/2 device checklist or the new Milestone
-3 campaign. Android SDK/ADB hardware evidence also remains outstanding.
+installed, and launched both the earlier Milestone 2 development client and a
+Release build with an embedded Hermes bundle for the final Milestone 3 change
+set on an iPhone 17e. The 2026-08-26 owner-reported Milestone 3 manual smoke
+remains deliberately limited:
+it does not complete the detailed campaign, recording, performance/lifecycle,
+or native Maestro checks. Android SDK/ADB hardware evidence also remains
+outstanding.
 
 ## Progress
 
@@ -223,6 +226,9 @@ does not cover the extended Milestone 1/2 device checklist or the new Milestone
       unlock after a successful result.
 - [x] Full automated Milestone 3 verification snapshot recorded on the final
       change set.
+- [x] Limited physical-iOS Milestone 3 smoke: locally signed Release build with
+      an embedded Hermes bundle, install, launch, startup stability, and
+      owner-reported manual verification on iPhone 17e / iOS 26.6.
 - [ ] Manual physical-device campaign checklist, campaign recording,
       performance notes, and native Maestro evidence.
 
@@ -242,9 +248,11 @@ does not cover the extended Milestone 1/2 device checklist or the new Milestone
 - The generated visual concept and implementation captures live in
   `docs/design/`. The tuned reference route is also exported as typed level
   data and covered by exact replay tests.
-- A signed iOS development binary has been compiled, installed, and smoke-tested
-  on an iPhone, but that evidence predates Milestone 3 and remains limited. The
-  campaign is therefore not yet device-complete.
+- A signed Milestone 3 iOS Release binary with an embedded Hermes bundle has
+  been compiled, installed, launched, and manually smoke-tested by the project
+  owner. The evidence remains limited because the detailed campaign checklist,
+  recording, performance/lifecycle observations, and native Maestro flows are
+  still pending, so the campaign is not yet device-complete.
 - `npm audit --omit=dev` currently reports 14 transitive findings (10 moderate,
   4 high) in the Expo
   57 build chain (`metro`/`image-size` and `xcode`/`uuid`). A non-mutating
@@ -254,11 +262,10 @@ does not cover the extended Milestone 1/2 device checklist or the new Milestone
 - Milestone 3 stores per-level best runs locally. Scored achievements merge
   across successful attempts so an earned thread target or collectible patch
   is not lost when a different run supplies better comparison metrics.
-- AsyncStorage and the SDK 57 patch updates are native dependency changes, so
-  an existing development client must be rebuilt before phone verification.
-  The campaign source itself adds no native dependency, but the final integrated
-  change set also aligns Expo SDK 57 patch packages; rebuild the client before
-  recording Milestone 3 device evidence.
+- AsyncStorage and the SDK 57 patch updates are native dependency changes. The
+  recorded Milestone 3 Release build includes those updates; rebuild the client
+  again whenever native dependencies change before relying on later phone
+  evidence.
 
 ## Verification snapshot — 2026-08-18
 
@@ -303,14 +310,14 @@ does not cover the extended Milestone 1/2 device checklist or the new Milestone
   were exercised by deterministic counterfactual tests.
 - `.maestro/spike-smoke.yaml` and `.maestro/failure-retry.yaml` on an installed
   target — pending.
-- [`CAMPAIGN_SMOKE_TEST.md`](CAMPAIGN_SMOKE_TEST.md) on the iPhone development
-  client — pending.
+- [`CAMPAIGN_SMOKE_TEST.md`](CAMPAIGN_SMOKE_TEST.md) on iPhone 17e / iOS 26.6 —
+  limited owner-reported manual smoke passed; detailed checklist, recording,
+  performance/lifecycle observations, and native Maestro remain pending.
 
 ## Next milestone
 
-Rebuild the development client for the integrated Expo/AsyncStorage changes,
-then complete [`CAMPAIGN_SMOKE_TEST.md`](CAMPAIGN_SMOKE_TEST.md) plus the
-remaining extended checks in
+Complete the remaining detailed sections in
+[`CAMPAIGN_SMOKE_TEST.md`](CAMPAIGN_SMOKE_TEST.md) plus the extended checks in
 [`PHYSICAL_DEVICE_TEST.md`](PHYSICAL_DEVICE_TEST.md). Tune
 campaign gestures, map usability, feedback timing, replay pacing, and frame
 pacing only from recorded evidence. After Milestone 3 is device-validated,

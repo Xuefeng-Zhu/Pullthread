@@ -2,36 +2,44 @@
 
 ## Status and evidence boundary
 
-**Status: PENDING**
+**Status: LIMITED iOS MANUAL SMOKE PASS / FULL CHECKLIST PENDING**
 
 This checklist validates the JavaScript/TypeScript Milestone 3 campaign on an
-installed development client. It supplements, and does not replace, the longer
+installed native build. It supplements, and does not replace, the longer
 mechanic, feedback, lifecycle, repetition, and performance checks in
 [`PHYSICAL_DEVICE_TEST.md`](PHYSICAL_DEVICE_TEST.md).
 
-The limited iPhone smoke recorded there on 2026-08-25 covered commit
-`764f9f279c6ff6ca63728bdfd10399ae73d959aa`, before the campaign changes. Do
-not treat that result as Milestone 3 campaign evidence.
+On 2026-08-26, a locally signed iOS Release build of commit
+`84d73bcda9d8b147516147ee55852f89de859640` was built, installed, and launched
+on an Apple iPhone 17e running iOS 26.6. The Release app contained its embedded
+Hermes bundle and remained in the device process table for more than 15 minutes.
+The project owner then manually verified the installed app. This records a
+limited Milestone 3 campaign smoke pass on that phone only. The owner did not
+enumerate the checklist items below, and no screen recording,
+performance/lifecycle run, or native Maestro report was recorded, so those
+items remain unchecked and the full physical-device gate remains pending.
 
 Fill this header without recording credentials, signing material, or device
 identifiers:
 
 | Field | Evidence |
 | --- | --- |
-| Date and tester | Pending |
-| Commit SHA/change set | Pending |
-| Phone and OS | Pending |
-| Development-client/native build | Pending |
-| Metro URL required | Pending |
-| Screen recording | Pending |
-| Maestro report/video | Pending |
-| Result | Pending |
+| Date and tester | 2026-08-26 — project owner |
+| Commit SHA/change set | `84d73bcda9d8b147516147ee55852f89de859640` |
+| Phone and OS | Apple iPhone 17e / iOS 26.6 |
+| Development-client/native build | Locally signed iOS Release build; build, install, and launch succeeded |
+| Metro URL required | No; the Release app used its embedded Hermes bundle |
+| Screen recording | Not captured |
+| Maestro report/video | Not run on the physical phone |
+| Result | LIMITED manual smoke pass; full checklist pending |
 
 ## Preconditions
 
-- [ ] The installed development client is compatible with Expo SDK 57 and the
+- [ ] The installed native build is compatible with Expo SDK 57 and the
       current native dependencies.
-- [ ] Metro is serving the exact change set recorded above.
+- [ ] Metro is serving the exact change set recorded above when required, or
+      the installed Release app contains the embedded bundle for that change
+      set.
 - [ ] `npm run lint`, `npm run typecheck`, `npm test`, `npx expo-doctor@latest`,
       and `npm run export` pass on that change set.
 - [ ] Capture starts before clearing campaign data or beginning a clean run.
@@ -183,7 +191,6 @@ maestro test .maestro/failure-retry.yaml
 Choose exactly one result and copy it into the evidence header:
 
 - [ ] **PASS — Milestone 3 physical campaign smoke complete.**
-- [ ] **PROVISIONAL — automated implementation passes; campaign phone evidence
-      remains incomplete.**
+- [x] **PROVISIONAL — limited manual iOS smoke passed; the detailed campaign
+      checklist and native Maestro evidence remain incomplete.**
 - [ ] **FAIL — a blocking campaign/device regression was recorded above.**
-

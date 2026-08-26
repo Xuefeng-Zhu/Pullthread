@@ -11,6 +11,11 @@ working normally. This proves the local physical-iOS build and basic gameplay
 path only. It does not complete the extended interaction, audio/haptics,
 performance, lifecycle, repetition, recording, or Maestro checks below.
 
+A separate limited Milestone 3 manual iOS smoke pass for commit `84d73bc` was
+recorded on 2026-08-26 in
+[`CAMPAIGN_SMOKE_TEST.md`](CAMPAIGN_SMOKE_TEST.md). That report likewise does
+not complete the detailed checklist in this document.
+
 Milestones 1 and 2 are not device-complete until a human completes this document on at
 least one real iOS or Android phone. CI, Expo export, web, iOS Simulator, and
 Android Emulator results are valuable but cannot replace this gate.
