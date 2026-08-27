@@ -10,6 +10,10 @@ import { View as MockView } from 'react-native';
 
 import type { SimulationOutcome } from '../../../game/core/types';
 import {
+  createDailyRun,
+  getDailyChallengeForDate,
+} from '../../../game/daily';
+import {
   REFERENCE_PINCH_STITCH,
   SPIKE_LEVEL,
 } from '../../../game/levels/spikeLevel';
@@ -24,6 +28,7 @@ import {
   type CampaignLevelProgress,
   useCampaignProgressStore,
 } from '../../../store/useCampaignProgressStore';
+import { useDailyChallengeStore } from '../../../store/useDailyChallengeStore';
 import { useEntitlementStore } from '../../../store/useEntitlementStore';
 import {
   resetGameStoreForTests,
@@ -135,6 +140,59 @@ function seedCompletedRunForLevel(levelIndex: number) {
       scoredRun: { thimbles: 2, metrics },
     },
   });
+}
+
+function seedDailyCompletedRun() {
+  const challenge = getDailyChallengeForDate('2026-08-27');
+  const level = CAMPAIGN_LEVELS.find(
+    (candidate) => candidate.id === challenge.levelId,
+  );
+  if (!level) throw new Error('Daily challenge level must be in the catalog.');
+  const replay = createLevelReplay(level, level.referenceSolution);
+  const outcome = simulateLevelReplay(replay).outcome;
+  if (outcome.status !== 'success') {
+    throw new Error('The Daily Scrap reference replay must succeed.');
+  }
+  const threadUsed = replay.stitches.reduce(
+    (total, stitch) => total + stitch.threadCost,
+    0,
+  );
+  const metrics = {
+    threadUsed,
+    stitchesUsed: replay.stitches.length,
+    completionMs: outcome.completionMs,
+    collectedPatch: false,
+  } as const;
+  const personalBest = createDailyRun(challenge, replay, {
+    clientRunId: 'daily-results-current-best',
+    createdAt: '2026-08-27T12:00:00.000Z',
+  });
+
+  useDailyChallengeStore.setState({
+    challenge,
+    submitStatus: 'saved',
+    statusMessage: 'Saved on this device.',
+    personalBest,
+  });
+  useGameStore.setState({
+    activeLevelId: level.id,
+    activeSession: { kind: 'daily', challenge },
+    phase: 'succeeded',
+    stitches: [...level.referenceSolution],
+    outcome,
+    completedRun: {
+      session: { kind: 'daily', challenge },
+      levelId: level.id,
+      replay,
+      outcome,
+      isNewBest: true,
+      bestMetrics: metrics,
+      scoredRun: { thimbles: 2, metrics },
+    },
+    bestRun: metrics,
+  });
+
+  return { challenge, level };
 }
 
 function completedThrough(levelCount: number) {
@@ -391,6 +449,102 @@ describe('ResultsScreen', () => {
 
     expect(useGameStore.getState().completedRun).toBeNull();
     expect(nav.popTo).toHaveBeenCalledWith('QuiltMap');
+  });
+
+  test('presents Daily Scrap results without campaign rewards or next-level routing', async () => {
+    const { challenge } = seedDailyCompletedRun();
+    const nav = navigation();
+    const view = await render(<ResultsScreen navigation={nav.value} />);
+
+    expect(view.getByText('Scrap complete!')).toBeTruthy();
+    expect(
+      view.getByText(`${challenge.title} is recorded for today.`),
+    ).toBeTruthy();
+    expect(view.getByTestId('daily-run-submit-status')).toBeTruthy();
+    expect(view.getByText('Saved on this device.')).toBeTruthy();
+    expect(view.queryByTestId('results-thimbles')).toBeNull();
+    expect(view.queryByTestId('results-patch')).toBeNull();
+    expect(view.queryByTestId('next-level-button')).toBeNull();
+    expect(
+      view.getByTestId('results-map-button').props.accessibilityLabel,
+    ).toBe('Return to Daily Scrap');
+
+    await fireEvent.press(view.getByTestId('results-map-button'));
+
+    expect(nav.popTo).toHaveBeenCalledWith('DailyScrap');
+    expect(useGameStore.getState().completedRun).toBeNull();
+    expect(useCampaignProgressStore.getState().progressByLevel).toEqual({});
+  });
+
+  test('truthfully reports a Daily Scrap local-save failure', async () => {
+    seedDailyCompletedRun();
+    useDailyChallengeStore.setState({
+      submitStatus: 'error',
+      statusMessage: 'Shared standings are up to date.',
+      errorMessage: 'This pull could not be saved. Please try again.',
+    });
+    const nav = navigation();
+    const view = await render(<ResultsScreen navigation={nav.value} />);
+
+    expect(
+      view.getByText('The pull finished, but its result could not be saved.'),
+    ).toBeTruthy();
+    expect(
+      view.getByText('This pull could not be saved. Please try again.'),
+    ).toBeTruthy();
+    expect(view.queryByText('Shared standings are up to date.')).toBeNull();
+  });
+
+  test('labels an in-memory-only Daily Scrap result as session-volatile', async () => {
+    seedDailyCompletedRun();
+    useDailyChallengeStore.setState({
+      submitStatus: 'volatile',
+      statusMessage:
+        'Kept for this session only. Device storage is unavailable.',
+      errorMessage: null,
+    });
+    const nav = navigation();
+    const view = await render(<ResultsScreen navigation={nav.value} />);
+
+    expect(
+      view.getByText('The pull finished, but it is kept only for this session.'),
+    ).toBeTruthy();
+    expect(
+      view.getByText(
+        'Kept for this session only. Device storage is unavailable.',
+      ),
+    ).toBeTruthy();
+    expect(
+      view.queryByText(
+        `${getDailyChallengeForDate('2026-08-27').title} is recorded for today.`,
+      ),
+    ).toBeNull();
+  });
+
+  test('retries a Daily Scrap run in daily context without touching campaign progress', async () => {
+    const { challenge, level } = seedDailyCompletedRun();
+    const nav = navigation();
+    const view = await render(<ResultsScreen navigation={nav.value} />);
+
+    await fireEvent.press(view.getByTestId('try-again-button'));
+
+    expect(nav.popTo).toHaveBeenCalledWith('SpikeLevel', {
+      levelId: level.id,
+      mode: 'daily',
+      challengeId: challenge.id,
+    });
+    expect(useGameStore.getState()).toMatchObject({
+      activeLevelId: level.id,
+      activeSession: {
+        kind: 'daily',
+        challenge: { id: challenge.id },
+      },
+      phase: 'planning',
+      stitches: [],
+      completedRun: null,
+    });
+    expect(useCampaignProgressStore.getState().progressByLevel).toEqual({});
+    expect(nav.navigate).not.toHaveBeenCalledWith('Paywall', expect.anything());
   });
 
   test('offers a safe return when opened without a completed run', async () => {

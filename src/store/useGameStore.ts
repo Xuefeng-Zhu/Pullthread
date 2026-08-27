@@ -11,6 +11,11 @@ import type {
   SimulationPhase,
   Stitch,
 } from '../game/core/types';
+import {
+  compareDailyMetrics,
+  parseDailyChallenge,
+  type DailyChallenge,
+} from '../game/daily';
 import { CAMPAIGN_LEVELS } from '../game/levels/campaignLevels';
 import { getCampaignLevel } from '../game/levels/levelLoader';
 import {
@@ -18,8 +23,15 @@ import {
   type LevelReplayV1,
 } from '../game/replay';
 import { useCampaignProgressStore } from './useCampaignProgressStore';
+import { useDailyChallengeStore } from './useDailyChallengeStore';
+
+export type GameSession =
+  | { readonly kind: 'campaign' }
+  | { readonly kind: 'daily'; readonly challenge: DailyChallenge };
 
 export interface CompletedRun {
+  /** Older persisted/test fixtures without a session are campaign runs. */
+  readonly session?: GameSession;
   readonly levelId: string;
   readonly replay: LevelReplayV1;
   readonly outcome: Extract<SimulationOutcome, { status: 'success' }>;
@@ -36,13 +48,14 @@ interface CommitLimits {
 
 interface GameStore {
   activeLevelId: string;
+  activeSession: GameSession;
   phase: SimulationPhase;
   stitches: Stitch[];
   outcome: SimulationOutcome | null;
   completedRun: CompletedRun | null;
   /** Process-local mirror of the active level's durable best metrics. */
   bestRun: RunMetrics | null;
-  startLevel: (levelId: string) => void;
+  startLevel: (levelId: string, session?: GameSession) => void;
   commitStitch: (stitch: Stitch, limits: CommitLimits) => boolean;
   removeStitch: (id: string) => void;
   undo: () => void;
@@ -54,6 +67,7 @@ interface GameStore {
 }
 
 const FIRST_LEVEL_ID = CAMPAIGN_LEVELS[0].id;
+const CAMPAIGN_SESSION: GameSession = Object.freeze({ kind: 'campaign' });
 
 function scoredRunsDiffer(
   left: ScoredRun | null,
@@ -71,24 +85,41 @@ function scoredRunsDiffer(
 
 export const useGameStore = create<GameStore>((set, get) => ({
   activeLevelId: FIRST_LEVEL_ID,
+  activeSession: CAMPAIGN_SESSION,
   phase: 'planning',
   stitches: [],
   outcome: null,
   completedRun: null,
   bestRun: null,
 
-  startLevel: (levelId) => {
+  startLevel: (levelId, requestedSession = CAMPAIGN_SESSION) => {
     getCampaignLevel(levelId);
+    const activeSession =
+      requestedSession.kind === 'daily'
+        ? Object.freeze({
+            kind: 'daily' as const,
+            challenge: parseDailyChallenge(requestedSession.challenge),
+          })
+        : CAMPAIGN_SESSION;
+    if (
+      activeSession.kind === 'daily' &&
+      activeSession.challenge.levelId !== levelId
+    ) {
+      throw new RangeError('Daily Scrap session does not match its level.');
+    }
     const durableBest =
-      useCampaignProgressStore.getState().progressByLevel[levelId]?.bestRun ??
-      null;
+      activeSession.kind === 'daily'
+        ? useDailyChallengeStore.getState().personalBest?.metrics ?? null
+        : useCampaignProgressStore.getState().progressByLevel[levelId]?.bestRun
+            ?.metrics ?? null;
     set({
       activeLevelId: levelId,
+      activeSession,
       phase: 'planning',
       stitches: [],
       outcome: null,
       completedRun: null,
-      bestRun: durableBest?.metrics ?? null,
+      bestRun: durableBest,
     });
   },
 
@@ -175,10 +206,41 @@ export const useGameStore = create<GameStore>((set, get) => ({
           Boolean(level.collectible) &&
           outcome.collectedPatchId === level.collectible?.id,
       });
+      const replay = createLevelReplay(level, state.stitches);
+      const scoredRun = scoreRun(metrics, level.targetThreadUsage);
+      if (state.activeSession.kind === 'daily') {
+        const challenge = state.activeSession.challenge;
+        const priorBest =
+          useDailyChallengeStore.getState().personalBest?.challengeId ===
+          challenge.id
+            ? useDailyChallengeStore.getState().personalBest
+            : null;
+        const isNewBest =
+          !priorBest || compareDailyMetrics(metrics, priorBest.metrics) < 0;
+        const bestMetrics = isNewBest ? metrics : priorBest.metrics;
+        void useDailyChallengeStore
+          .getState()
+          .submitCompletedReplay(challenge, replay);
+
+        return {
+          phase: 'succeeded',
+          outcome,
+          completedRun: {
+            session: state.activeSession,
+            levelId: level.id,
+            replay,
+            outcome: Object.freeze({ ...outcome }),
+            isNewBest,
+            scoredRun,
+            bestMetrics,
+          },
+          bestRun: bestMetrics,
+        };
+      }
+
       const priorBest =
         useCampaignProgressStore.getState().progressByLevel[level.id]?.bestRun ??
         null;
-      const scoredRun = scoreRun(metrics, level.targetThreadUsage);
       const durableBest = useCampaignProgressStore
         .getState()
         .recordRun(level.id, metrics, level.targetThreadUsage);
@@ -187,8 +249,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
         phase: 'succeeded',
         outcome,
         completedRun: {
+          session: CAMPAIGN_SESSION,
           levelId: level.id,
-          replay: createLevelReplay(level, state.stitches),
+          replay,
           outcome: Object.freeze({ ...outcome }),
           isNewBest: scoredRunsDiffer(priorBest, durableBest),
           scoredRun,
@@ -199,16 +262,18 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }),
 
   resetSession: () => {
-    const activeLevelId = get().activeLevelId;
+    const { activeLevelId, activeSession } = get();
     const durableBest =
-      useCampaignProgressStore.getState().progressByLevel[activeLevelId]
-        ?.bestRun ?? null;
+      activeSession.kind === 'daily'
+        ? useDailyChallengeStore.getState().personalBest?.metrics ?? null
+        : useCampaignProgressStore.getState().progressByLevel[activeLevelId]
+            ?.bestRun?.metrics ?? null;
     set({
       phase: 'planning',
       stitches: [],
       outcome: null,
       completedRun: null,
-      bestRun: durableBest?.metrics ?? null,
+      bestRun: durableBest,
     });
   },
 }));
@@ -220,6 +285,7 @@ export const resetGameStoreForTests = (): void => {
   useCampaignProgressStore.setState({ progressByLevel: {} });
   useGameStore.setState({
     activeLevelId: FIRST_LEVEL_ID,
+    activeSession: CAMPAIGN_SESSION,
     phase: 'planning',
     stitches: [],
     outcome: null,

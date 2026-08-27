@@ -1,17 +1,18 @@
-# Pullthread Campaign and Entitlement Architecture
+# Pullthread Campaign, Entitlement, and Daily Architecture
 
 ## Scope
 
-Milestones 3 and 4 extend the proven physics-puzzle slice into a complete local
-campaign with a fail-soft one-time purchase boundary. The app launches at a
-three-quilt map, runs 15 catalog-authored levels, persists per-level progress,
-keeps every simulation and replay deterministic, and gates Levels 7–15 behind
-the Full Atelier entitlement without making gameplay depend on a network.
+Milestones 3–5 extend the proven physics-puzzle slice into a complete local
+campaign, a fail-soft one-time purchase boundary, and an optional local-first
+daily mode. The app launches at a three-quilt map, runs 15 catalog-authored
+levels, persists separate campaign/Daily progress, keeps every simulation and
+replay deterministic, and gates Levels 7–15 behind Full Atelier without making
+campaign gameplay depend on a network.
 
-The campaign does not require an account, remote level delivery, InsForge, or a
-network-backed leaderboard. RevenueCat wraps the premium access boundary, but
-its initialization, offer retrieval, purchase, and restore calls are never
-prerequisites for Levels 1–6 or already verified offline access.
+The campaign does not require an account, remote level delivery, Firebase, or a
+network-backed leaderboard. RevenueCat wraps premium access and Firebase wraps
+Daily Scrap sharing, but neither initializes as a prerequisite for campaign
+play or already verified offline access.
 
 ## Dependency direction
 
@@ -27,6 +28,14 @@ App hydration / navigation
         +--> Paywall / Settings --> entitlement store --> service interface
         |                                                /              \
         |                                       development mock     RevenueCat
+        |
+        +--> Daily hub --> Daily store --> local service --> AsyncStorage
+        |                    |                  |
+        |                    |                  +--> lazy Firebase decorator
+        |                    |                         |
+        |                    |                  anonymous Auth / Firestore
+        |                    |                         |
+        |                    +--> Daily session --> verified callable function
         |
         +--> gameplay store -------- scoring
         |          |                   ^
@@ -58,6 +67,8 @@ src/
   app/navigation/RootNavigator.tsx
   screens/
     QuiltMapScreen/
+    DailyScrapScreen/
+    DailyReplayScreen/
     SpikeLevelScreen/
     ResultsScreen/
     PaywallScreen/
@@ -70,6 +81,8 @@ src/
       physics.ts
       scoring.ts
       simulation.ts
+    daily/
+      dailyChallenge.ts      # UTC pool, replay envelope, ranking contract
     levels/
       schema.ts
       campaignLevels.ts
@@ -88,8 +101,13 @@ src/
     useGameStore.ts
     usePreferencesStore.ts
     useCampaignProgressStore.ts
+    useDailyChallengeStore.ts
     useEntitlementStore.ts
   services/
+    dailyChallenges/
+      DailyChallengeService.ts
+      LocalDailyChallengeService.ts
+      FirebaseDailyChallengeService.ts
     entitlements/
       EntitlementService.ts
       MockEntitlementService.ts
@@ -98,6 +116,10 @@ src/
   accessibility/
   components/
   theme/
+functions/
+  src/                        # trusted replay validation + best transaction
+firestore.rules
+firestore.indexes.json
 ```
 
 ## Coordinates and level catalog
@@ -224,6 +246,45 @@ all use this policy. A locked premium route is replaced by Paywall; an entitled
 but out-of-sequence route returns to the map. This makes the access boundary a
 gameplay invariant rather than a cosmetic map state.
 
+## Daily Scrap boundary
+
+Daily Scrap derives `YYYY-MM-DD` from UTC and selects the latest append-only
+template pool whose `effectiveFrom` covers that day. FNV-1a hashes the pool
+version and date into an unsigned seed; the seed indexes an explicit list of
+the six free catalog templates. The challenge identity includes date, pool,
+template, template version, and level version so content changes cannot silently
+reuse a prior identity.
+
+`DailyReplayV1` wraps `LevelReplayV1` with challenge id/date and seed. Parsing
+treats persisted, remote, and callable input as untrusted. Metrics are not
+accepted from a submitter: both mobile and backend reconstruct the catalog
+world, run the same fixed-step simulation to success, and derive thread,
+stitches, time, and patch state. Daily comparison ignores campaign thimbles and
+orders thread, stitches, then time ascending.
+
+`useGameStore` carries an explicit campaign-or-Daily session. Both sessions
+reuse level input/render/runtime, but successful resolution branches before
+persistence. Campaign calls `recordRun`; Daily calls the lazily hydrated Daily
+store and never mutates campaign progress. Results hides thimbles/Next Level for
+Daily, and Daily replay playback remains presentation-only.
+
+`LocalDailyChallengeService` is authoritative for device availability. It
+persists a generated non-secret guest label, one best per challenge, attempt
+counts, and only the best pending upload. Writes fail soft in process. Firebase
+mode decorates that service: local submission completes first, then the adapter
+lazily initializes the public Firebase client and Anonymous Auth. No Firebase
+operation participates in `App.tsx` hydration or Quilt Map navigation.
+
+Firestore stores public challenge descriptors and one run at
+`daily_challenges/{challengeId}/runs/{uid}`. Security rules permit bounded
+reads, safe owner profile edits, and no direct challenge/run writes. The
+authenticated `submitDailyRun` callable bounds the JSON, reconstructs the
+canonical challenge, validates/re-simulates the compact replay, and uses an
+Admin SDK transaction to retain the incumbent on tied/worse submissions. Admin
+credentials exist only in the function runtime. The dedicated project is not
+yet created/deployed; [`FIREBASE_DAILY_SCRAP.md`](FIREBASE_DAILY_SCRAP.md)
+records that activation boundary.
+
 ## Full Atelier service and offline boundary
 
 `EntitlementService` is the platform-neutral purchase contract. The stable
@@ -332,11 +393,19 @@ reduction but cannot override the OS.
 
 ## Remaining service boundaries
 
-InsForge remains outside the campaign dependency graph:
+Firebase remains outside the campaign dependency graph:
 
-- no remote level, run, leaderboard, or guest-identity call
-- no Daily Scrap generation or remote best result
-- no account or network requirement for the campaign
+- no Firebase initialization, Auth, Firestore, function, or leaderboard call at
+  app/campaign startup
+- no Firebase dependency for deterministic Daily generation or local bests
+- no account or network requirement for campaign play
+
+The repository contains the Firebase boundary but not a linked/deployed
+Pullthread project. Anonymous Auth, billing, a monitored private-beta deploy,
+native App Check plus callable enforcement, two-user shared standings, and
+offline pending-sync evidence remain external gates. Date, per-guest frequency,
+and function-instance caps reduce preview risk but do not authorize a public
+unenforced callable.
 
 RevenueCat production configuration and real store transactions also remain
 external acceptance gates. The implemented abstraction, mock, UI, persistence,

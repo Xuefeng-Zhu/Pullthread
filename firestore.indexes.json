@@ -1,0 +1,27 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "runs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "metrics.threadUsed",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "metrics.stitchesUsed",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "metrics.completionMs",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

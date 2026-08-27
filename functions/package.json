@@ -1,0 +1,29 @@
+{
+  "name": "pullthread-functions",
+  "version": "1.0.0",
+  "private": true,
+  "main": "lib/index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "build": "npm run typecheck && esbuild src/index.ts --bundle --packages=external --platform=node --target=node22 --format=cjs --sourcemap --outfile=lib/index.js",
+    "build:test": "esbuild test/*.unit.ts --bundle --packages=external --platform=node --target=node22 --format=cjs --sourcemap --outdir=lib-test",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "npm run build:test && node --test --test-concurrency=1 lib-test/domain.unit.js",
+    "test:emulator": "npm run build:test && firebase --config ../firebase.json --project pullthread-rules-test emulators:exec --only firestore \"node --test --test-concurrency=1 lib-test/firestoreRules.unit.js lib-test/persistence.unit.js\"",
+    "test": "npm run typecheck && npm run test:unit && npm run test:emulator"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.3.0",
+    "firebase-functions": "^7.3.2"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
+    "@types/node": "^22.20.1",
+    "esbuild": "^0.28.2",
+    "firebase": "^12.18.0",
+    "firebase-tools": "^15.15.0",
+    "typescript": "^7.0.2"
+  }
+}

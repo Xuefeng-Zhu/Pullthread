@@ -1,0 +1,6 @@
+lib/
+lib-test/
+node_modules/
+firebase-debug.log*
+firestore-debug.log*
+*.tsbuildinfo

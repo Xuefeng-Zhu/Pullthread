@@ -3,15 +3,15 @@
 ## Goal
 
 Extend the proven portrait physics-puzzle slice into a complete offline-first
-campaign with a natural one-time unlock: three quilt sections, 15 validated
-levels, sequential progression, durable per-level progress, two stitch types,
-three fabric properties, deterministic hazards/collectibles, scoring, replay,
-and a fail-soft Full Atelier entitlement for Levels 7–15.
+campaign with a natural one-time unlock and an optional daily mode: three quilt
+sections, 15 validated levels, sequential progression, durable per-level
+progress, deterministic replay, a fail-soft Full Atelier entitlement, and a
+local-first Daily Scrap leaderboard that never becomes a campaign dependency.
 
-Milestone 4 wraps the working campaign with RevenueCat without making a
-purchase, account, credential, or network prerequisite for Levels 1–6.
-InsForge, Daily Scrap, remote leaderboards, production store configuration, and
-final content remain later work or external acceptance gates.
+Milestone 5 adds deterministic Daily Scrap locally and a Firebase
+Anonymous-Auth/Firestore adapter with server-verified replay submission. A
+dedicated Firebase project, cloud deployment, production store configuration,
+and final device evidence remain external acceptance gates.
 
 ## Milestone 1 plan
 
@@ -129,6 +129,39 @@ final content remain later work or external acceptance gates.
    lint/typecheck/test/Doctor/export, then perform real iOS and Android store
    acceptance passes when dashboard products and platform keys are available.
 
+## Milestone 5 plan
+
+1. Define an append-only, effective-dated Daily Scrap template pool containing
+   only the six free handcrafted levels. Derive the global UTC date, FNV-1a
+   seed, template, challenge identity, and level version deterministically.
+2. Wrap the existing compact level replay in a Daily envelope and derive every
+   rank metric through fixed-step re-simulation. Rank by thread, stitches, then
+   completion time; exact ties retain the incumbent.
+3. Implement `DailyChallengeService` locally first with fail-soft AsyncStorage,
+   unlimited attempts, one personal best per challenge, and a pending-best
+   upload queue. Load it only after Daily Scrap opens.
+4. Add a prominent Quilt Map entry, Daily hub, truthful local/offline/remote
+   states, personal best, shared leaderboard, replay route, Try Again flow, and
+   accessibility/reduced-motion behavior.
+5. Add an explicit Daily gameplay session to the reusable level shell. A Daily
+   success must submit to the Daily store without recording campaign progress,
+   changing entitlement state, unlocking levels, or exposing a Next Level path.
+6. Use Firebase Anonymous Auth for invisible guest identity. Keep Firebase SDK
+   initialization lazy and expose only public web-app configuration to the app.
+7. Deny direct run/challenge writes with Firestore rules. Submit through an
+   authenticated callable function that bounds input, validates the canonical
+   challenge/replay, re-runs the simulation, derives metrics server-side, and
+   atomically retains one best per user. Bound accepted dates, per-guest call
+   frequency, and function scaling; require native App Check enforcement before
+   public activation.
+8. Cover deterministic dates, replay drift, local persistence/idempotency,
+   campaign isolation, Daily UI states, reduced-motion replay, server
+   validation, Firestore rules, and concurrent best selection.
+9. Repeat app lint/typecheck/Jest/Doctor/export and function build/emulator
+   tests. Keep project creation, deployment, two-user proof, and physical
+   offline/reconnect evidence as explicit gates rather than claiming them from
+   local emulators.
+
 ## Architecture
 
 ```text
@@ -137,12 +170,15 @@ src/
   app/navigation/RootNavigator.tsx
   screens/
     QuiltMapScreen/
+    DailyScrapScreen/
+    DailyReplayScreen/
     SpikeLevelScreen/
     ResultsScreen/
     PaywallScreen/
     SettingsScreen/
   game/
     core/           # pure geometry, height field, physics, simulation, types
+    daily/          # UTC pool, challenge/replay contract, best comparator
     input/          # normalized stitch gesture
     levels/         # catalog, pure access policy, and runtime loaders
     rendering/      # Skia-only drawing components
@@ -152,11 +188,13 @@ src/
     feedback/       # haptic/audio interface and Expo implementation
   services/
     entitlements/   # mock/RevenueCat implementations behind one contract
+    dailyChallenges/# local-first service plus lazy Firebase decorator
   store/            # active run plus separately persisted preferences,
-                    # campaign progress, and verified entitlement cache
+                    # campaign/Daily progress, and verified entitlement cache
   components/       # reachable controls and outcome UI
   theme/            # textile design tokens
 tests/
+functions/          # Firebase callable plus rules/transaction emulator tests
 ```
 
 Rendering never owns gameplay rules. Undo and Reset rebuild deformation from
@@ -302,6 +340,28 @@ outstanding.
       verified offline cold-launch evidence.
 - [ ] Android Play test purchase, cancellation, restore, and offline evidence.
 
+### Milestone 5
+
+- [x] Deterministic UTC seed and append-only six-template free-level pool.
+- [x] Versioned Daily replay envelope with server/client metric derivation.
+- [x] Local-first `DailyChallengeService`, unlimited attempts, persisted best,
+      pending upload, malformed-record isolation, and fail-soft storage.
+- [x] Quilt Map entry, Daily hub, truthful service states, leaderboard, compact
+      replay, personal best, and unlimited Try Again flow.
+- [x] Dedicated Daily game session and Results behavior proven not to mutate
+      campaign progress or entitlement access.
+- [x] Lazy Firebase Anonymous Auth/Firestore adapter with no privileged mobile
+      credential and no app-start dependency.
+- [x] Replay-validating callable function, transactional best selection,
+      bounded leaderboard index, and deny-by-default Firestore rules.
+- [x] App Jest coverage plus function domain, transaction, and Firestore rules
+      emulator coverage.
+- [ ] Dedicated Firebase project, Anonymous Auth, Firestore, billing, project
+      alias, and tightly monitored private-beta rules/index/function deployment.
+- [ ] Two-user remote leaderboard, forged-score, offline pending-sync, native
+      App Check client attestation, callable enforcement, and physical-device
+      evidence before public Firebase activation.
+
 ## Completed work and tradeoffs
 
 - The campaign launches at the Quilt Map with no account, service credential,
@@ -310,6 +370,10 @@ outstanding.
   RevenueCat entitlement is cached independently of level progress; a purchase
   cannot fabricate predecessor completion and purchase failures cannot erase
   completed runs.
+- Daily Scrap similarly wraps the catalog without owning it. Its session reuses
+  fixed-step level simulation and replay, but completion writes only to the
+  lazily hydrated Daily store. Local save precedes Firebase, while a remote
+  outage never blocks the campaign or removes a device best.
 - `auto` mode selects RevenueCat only when the native platform key exists,
   falls back to a locked development mock when appropriate, and stays
   unavailable/locked in production when configuration is missing. Production
@@ -339,6 +403,10 @@ outstanding.
   force path proposes a breaking Expo 46 downgrade, so no incompatible fix was
   applied; this should be rechecked when Expo publishes an updated compatible
   chain.
+- `npm audit --omit=dev --prefix functions` reports seven moderate transitive
+  findings in the current Firebase Admin/Functions chain. The proposed change
+  is an incompatible downgrade, so the pinned working backend was retained and
+  the advisory set remains a dependency-upgrade gate rather than being hidden.
 - Milestone 3 stores per-level best runs locally. Scored achievements merge
   across successful attempts so an earned thread target or collectible patch
   is not lost when a different run supplies better comparison metrics.
@@ -415,12 +483,31 @@ outstanding.
 - Real RevenueCat iOS/Android store transactions and offline cold-launch proof —
   pending dashboard/store configuration and physical-device execution.
 
+## Milestone 5 verification snapshot — 2026-08-27
+
+- `npm run lint` — passed with no warnings.
+- `npm run typecheck` — passed.
+- `npm test` — 37 suites and 333 tests passed, including Daily domain,
+  persistence, campaign isolation, screen states, Results, and replay coverage.
+- `npm test --prefix functions` — 6 callable-domain tests, 3 Firestore rules
+  tests, and 3 best-transaction emulator tests passed.
+- `npx expo-doctor@latest` — 21 of 21 checks passed.
+- `npm run export` — web, Android, and iOS bundles exported successfully with
+  the lazy Firebase client in the dependency graph.
+- Maestro YAML parse — all four installed-app flows are valid YAML, including
+  the new local/offline Daily route smoke.
+- Exported web diagnostic at 390 x 844 — Quilt Map → Daily Scrap → First Pull
+  Sampler → Daily gameplay rendered with truthful local-board copy, reachable
+  controls, and zero warning/error console entries.
+- Firebase project/deploy and two-user remote/offline proof — pending because no
+  dedicated Pullthread project existed and unrelated projects were not reused.
+
 ## Next milestone
 
-Rebuild the native client and record the real RevenueCat sandbox/device matrix
-without conflating it with the already-green automated and mock-flow coverage.
-The remaining detailed sections in
-[`CAMPAIGN_SMOKE_TEST.md`](CAMPAIGN_SMOKE_TEST.md) and
-[`PHYSICAL_DEVICE_TEST.md`](PHYSICAL_DEVICE_TEST.md) also remain open. Once the
-campaign and transaction gates are recorded, Milestone 5 can add the local
-Daily Scrap model and InsForge adapter without becoming a campaign dependency.
+Create a dedicated Pullthread Firebase project, enable Anonymous Auth and
+Firestore, deploy the reviewed rules/index/function set, and record the
+two-user plus offline/reconnect matrix in
+[`FIREBASE_DAILY_SCRAP.md`](FIREBASE_DAILY_SCRAP.md). Keep that evidence
+separate from the still-open RevenueCat sandbox/device matrix and the physical
+campaign sections in [`CAMPAIGN_SMOKE_TEST.md`](CAMPAIGN_SMOKE_TEST.md) and
+[`PHYSICAL_DEVICE_TEST.md`](PHYSICAL_DEVICE_TEST.md).

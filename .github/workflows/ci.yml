@@ -44,3 +44,31 @@ jobs:
 
       - name: Export native bundles
         run: npm run export
+
+  firebase-backend:
+    name: Firebase function and Firestore rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Set up Java for the Firestore emulator
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install locked function dependencies
+        run: npm ci --prefix functions
+
+      - name: Test callable validation, transactions, and security rules
+        run: npm test --prefix functions

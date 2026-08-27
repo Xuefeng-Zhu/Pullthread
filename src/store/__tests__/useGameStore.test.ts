@@ -3,8 +3,11 @@ import { beforeEach, describe, expect, test } from '@jest/globals';
 import type { Stitch } from '../../game/core/types';
 import { createStitch } from '../../game/input/stitchGesture';
 import { CAMPAIGN_LEVELS } from '../../game/levels/campaignLevels';
+import { getDailyChallengeForDate } from '../../game/daily';
 import { createLevelReplay, simulateLevelReplay } from '../../game/replay';
 import { useCampaignProgressStore } from '../useCampaignProgressStore';
+import { resetDailyChallengeStoreForTests, useDailyChallengeStore } from '../useDailyChallengeStore';
+import { LocalDailyChallengeService } from '../../services/dailyChallenges';
 import {
   resetGameStoreForTests,
   selectThreadUsed,
@@ -226,5 +229,56 @@ describe('game planning store', () => {
       thimbles: 3,
       metrics: { collectedPatch: true },
     });
+  });
+
+  test('records a Daily Scrap best without mutating campaign progress', async () => {
+    const challenge = getDailyChallengeForDate('2026-08-27');
+    const level = CAMPAIGN_LEVELS.find(
+      (candidate) => candidate.id === challenge.levelId,
+    );
+    if (!level) throw new Error('Expected the Daily Scrap template level.');
+    const storage = {
+      values: new Map<string, string>(),
+      async getItem(key: string) {
+        return this.values.get(key) ?? null;
+      },
+      async setItem(key: string, value: string) {
+        this.values.set(key, value);
+      },
+    };
+    resetDailyChallengeStoreForTests(
+      new LocalDailyChallengeService(
+        storage,
+        () => new Date('2026-08-27T12:00:00.000Z'),
+      ),
+    );
+    await useDailyChallengeStore.getState().loadToday();
+    const campaignBefore = useCampaignProgressStore.getState().progressByLevel;
+
+    useGameStore.getState().startLevel(level.id, { kind: 'daily', challenge });
+    for (const stitch of level.referenceSolution) {
+      expect(
+        useGameStore.getState().commitStitch(stitch, {
+          maxStitches: level.maxStitches,
+          threadBudget: level.threadBudget,
+        }),
+      ).toBe(true);
+    }
+    const outcome = simulateLevelReplay(
+      createLevelReplay(level, level.referenceSolution),
+    ).outcome;
+    if (outcome.status !== 'success') throw new Error('Expected a successful pull.');
+    useGameStore.getState().release();
+    useGameStore.getState().resolve(outcome);
+
+    expect(useGameStore.getState().completedRun).toMatchObject({
+      session: { kind: 'daily', challenge: { id: challenge.id } },
+      isNewBest: true,
+    });
+    expect(useCampaignProgressStore.getState().progressByLevel).toBe(campaignBefore);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(useDailyChallengeStore.getState().personalBest).toEqual(
+      expect.objectContaining({ challengeId: challenge.id }),
+    );
   });
 });

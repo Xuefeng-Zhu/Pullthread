@@ -19,6 +19,7 @@ import {
   getNextCampaignLevel,
 } from '../../game/levels/levelLoader';
 import { useCampaignProgressStore } from '../../store/useCampaignProgressStore';
+import { useDailyChallengeStore } from '../../store/useDailyChallengeStore';
 import {
   selectHasFullGame,
   useEntitlementStore,
@@ -73,6 +74,10 @@ function StatTile({
 
 export function ResultsScreen({ navigation }: ResultsScreenProps) {
   const completedRun = useGameStore((state) => state.completedRun);
+  const isDaily = completedRun?.session?.kind === 'daily';
+  const dailySubmitStatus = useDailyChallengeStore((state) => state.submitStatus);
+  const dailyStatusMessage = useDailyChallengeStore((state) => state.statusMessage);
+  const dailyErrorMessage = useDailyChallengeStore((state) => state.errorMessage);
   const activeLevelId = useGameStore((state) => state.activeLevelId);
   const startLevel = useGameStore((state) => state.startLevel);
   const resetSession = useGameStore((state) => state.resetSession);
@@ -123,6 +128,16 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
 
   const handleTryAgain = useCallback(() => {
     const levelId = completedRun?.levelId ?? activeLevelId;
+    if (completedRun?.session?.kind === 'daily') {
+      const challenge = completedRun.session.challenge;
+      startLevel(levelId, completedRun.session);
+      navigation.popTo('SpikeLevel', {
+        levelId,
+        mode: 'daily',
+        challengeId: challenge.id,
+      });
+      return;
+    }
     const access = getCampaignLevelAccess(
       levelId,
       progressByLevel,
@@ -141,7 +156,7 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
     navigation.popTo('SpikeLevel', { levelId });
   }, [
     activeLevelId,
-    completedRun?.levelId,
+    completedRun,
     hasFullGame,
     navigation,
     progressByLevel,
@@ -151,8 +166,8 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
 
   const handleMap = useCallback(() => {
     resetSession();
-    navigation.popTo('QuiltMap');
-  }, [navigation, resetSession]);
+    navigation.popTo(isDaily ? 'DailyScrap' : 'QuiltMap');
+  }, [isDaily, navigation, resetSession]);
 
   const handleNextLevel = useCallback(() => {
     if (!completedRun) return;
@@ -247,7 +262,7 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
     0,
   );
   const level = getCampaignLevel(completedRun.levelId);
-  const nextLevel = getNextCampaignLevel(level.id);
+  const nextLevel = isDaily ? null : getNextCampaignLevel(level.id);
   const availableThimbles = level.collectible ? 3 : 2;
   const timeSeconds = `${(completedRun.outcome.completionMs / 1000).toFixed(1)}s`;
   return (
@@ -268,12 +283,18 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
         >
           <Ionicons name="flower-outline" size={22} color="#a93238" />
           <Text accessibilityRole="header" style={styles.title}>
-            Perfect pull!
+            {isDaily ? 'Scrap complete!' : 'Perfect pull!'}
           </Text>
           <Ionicons name="flower-outline" size={22} color="#a93238" />
         </View>
         <Text style={styles.subtitle}>
-          {level.name} is sewn into the quilt.
+          {isDaily
+            ? dailySubmitStatus === 'error'
+              ? 'The pull finished, but its result could not be saved.'
+              : dailySubmitStatus === 'volatile'
+                ? 'The pull finished, but it is kept only for this session.'
+                : `${completedRun.session?.kind === 'daily' ? completedRun.session.challenge.title : level.name} is recorded for today.`
+            : `${level.name} is sewn into the quilt.`}
         </Text>
 
         <ReplayStage
@@ -305,7 +326,7 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
           />
         </View>
 
-        <View style={styles.rewardRow}>
+        {!isDaily ? <View style={styles.rewardRow}>
           <View
             testID="results-thimbles"
             accessibilityLabel={`${completedRun.scoredRun.thimbles} of ${availableThimbles} thimbles earned`}
@@ -334,7 +355,35 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
               </Text>
             </View>
           ) : null}
-        </View>
+        </View> : null}
+
+        {isDaily ? (
+          <View
+            testID="daily-run-submit-status"
+            accessibilityLiveRegion="polite"
+            style={styles.dailyStatus}
+          >
+            <Ionicons
+              name={
+                dailySubmitStatus === 'saving'
+                  ? 'cloud-upload-outline'
+                  : dailySubmitStatus === 'error' ||
+                      dailySubmitStatus === 'volatile'
+                    ? 'alert-circle-outline'
+                    : 'checkmark-circle-outline'
+              }
+              size={18}
+              color="#4F3B24"
+            />
+            <Text style={styles.dailyStatusText}>
+              {dailySubmitStatus === 'saving'
+                ? 'Saving on this device…'
+                : dailySubmitStatus === 'error'
+                  ? dailyErrorMessage ?? 'This pull could not be saved.'
+                  : dailyStatusMessage}
+            </Text>
+          </View>
+        ) : null}
 
         <View
           style={[
@@ -391,7 +440,7 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
           <Pressable
             testID="results-map-button"
             accessibilityRole="button"
-            accessibilityLabel="Return to quilt map"
+            accessibilityLabel={isDaily ? 'Return to Daily Scrap' : 'Return to quilt map'}
             accessibilityState={{ disabled: replayControlsLocked }}
             disabled={replayControlsLocked}
             onPress={handleMap}
@@ -401,7 +450,11 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
               pressed && !replayControlsLocked && styles.secondaryPressed,
             ]}
           >
-            <Ionicons name="map" size={27} color="#173746" />
+            <Ionicons
+              name={isDaily ? 'calendar' : 'map'}
+              size={27}
+              color="#173746"
+            />
           </Pressable>
           <Pressable
             testID="try-again-button"
@@ -544,6 +597,25 @@ const styles = StyleSheet.create({
     fontFamily: 'NunitoSans_800ExtraBold',
     fontSize: 11,
     letterSpacing: 0.6,
+  },
+  dailyStatus: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 2,
+    borderColor: '#B49369',
+    backgroundColor: '#F2E2C5',
+  },
+  dailyStatusText: {
+    flex: 1,
+    color: '#4F3B24',
+    fontFamily: 'NunitoSans_700Bold',
+    fontSize: 12,
+    lineHeight: 17,
   },
   primaryButton: {
     minHeight: touchTargets.primary,
