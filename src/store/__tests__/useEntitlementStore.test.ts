@@ -242,8 +242,8 @@ describe('entitlement store', () => {
     });
     expect(restoreCalls).toBe(0);
 
-    // The latest listener snapshot wins even when ownership changed away and
-    // back to the operation's starting value before the SDK result arrives.
+    // The completed result comes from the purchase response's CustomerInfo and
+    // therefore supersedes callbacks that arrived while it was pending.
     listenerRef.current?.(false);
     resolvePurchase({ status: 'purchased' });
     await expect(
@@ -254,10 +254,13 @@ describe('entitlement store', () => {
       { status: 'purchased' },
     ]);
     expect(useEntitlementStore.getState()).toMatchObject({
-      hasFullGame: false,
-      cachedHasFullGame: false,
+      hasFullGame: true,
+      cachedHasFullGame: true,
       status: 'ready',
-      notice: null,
+      notice: {
+        kind: 'success',
+        message: 'Full Atelier is unlocked on this device.',
+      },
     });
 
     const laterPurchase = useEntitlementStore.getState().purchaseFullGame();
@@ -326,16 +329,21 @@ describe('entitlement store', () => {
       notice: null,
     });
 
-    // The later restore snapshot must not overwrite the newer listener update.
+    // The completed restore result is derived from its returned CustomerInfo,
+    // so it reconciles access after callbacks emitted while it was pending.
     resolveRestore({ status: 'not-found' });
     await expect(Promise.all([firstRestore, secondRestore])).resolves.toEqual([
       { status: 'not-found' },
       { status: 'not-found' },
     ]);
     expect(useEntitlementStore.getState()).toMatchObject({
-      hasFullGame: true,
+      hasFullGame: false,
+      cachedHasFullGame: false,
       status: 'ready',
-      notice: null,
+      notice: {
+        kind: 'neutral',
+        message: 'No Full Atelier purchase was found for this store account.',
+      },
     });
 
     await expect(

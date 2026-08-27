@@ -424,8 +424,6 @@ export const useEntitlementStore = create<EntitlementStore>()(
           }
 
           set({ status: 'purchasing', notice: null });
-          const operationRevision = entitlementRevision;
-          const operationStartAccess = useEntitlementStore.getState().hasFullGame;
           let result: PurchaseResult;
           try {
             result = await service.purchaseFullGame();
@@ -433,17 +431,6 @@ export const useEntitlementStore = create<EntitlementStore>()(
             result = unavailableResult(PURCHASE_ERROR_MESSAGE);
           }
           if (!isActiveService(service, serviceGeneration)) return result;
-          const expectedAccess = result.status === 'purchased' ? true : null;
-          const currentAccess = useEntitlementStore.getState().hasFullGame;
-          if (
-            entitlementRevision !== operationRevision &&
-            (expectedAccess === null
-              ? currentAccess !== operationStartAccess
-              : currentAccess !== expectedAccess)
-          ) {
-            set({ status: 'ready', notice: null });
-            return result;
-          }
 
           switch (result.status) {
             case 'purchased':
@@ -549,8 +536,6 @@ export const useEntitlementStore = create<EntitlementStore>()(
           }
 
           set({ status: 'restoring', notice: null });
-          const operationRevision = entitlementRevision;
-          const operationStartAccess = useEntitlementStore.getState().hasFullGame;
           let result: RestoreResult;
           try {
             result = await service.restorePurchases();
@@ -558,22 +543,6 @@ export const useEntitlementStore = create<EntitlementStore>()(
             result = { status: 'error', message: RESTORE_ERROR_MESSAGE };
           }
           if (!isActiveService(service, serviceGeneration)) return result;
-          const expectedAccess =
-            result.status === 'restored'
-              ? true
-                : result.status === 'not-found'
-                ? false
-                : null;
-          const currentAccess = useEntitlementStore.getState().hasFullGame;
-          if (
-            entitlementRevision !== operationRevision &&
-            (expectedAccess === null
-              ? currentAccess !== operationStartAccess
-              : currentAccess !== expectedAccess)
-          ) {
-            set({ status: 'ready', notice: null });
-            return result;
-          }
 
           switch (result.status) {
             case 'restored':
