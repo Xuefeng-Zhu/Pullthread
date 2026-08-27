@@ -402,6 +402,37 @@ describe('DailyScrapScreen', () => {
     expect(view.getByTestId('daily-scrap-play-button')).toBeTruthy();
   });
 
+  test('keeps a local personal best separate when shared ranks are offline', async () => {
+    resetDailyChallengeStoreForTests(
+      dailyService({
+        kind: 'firebase',
+        status: 'offline',
+        getPersonalBest: jest.fn(async () => personalBest),
+        getLeaderboard: jest.fn(async () => []),
+      }),
+    );
+    const harness = screenHarness();
+    const view = await render(
+      <DailyScrapScreen
+        navigation={harness.navigation}
+        route={harness.route}
+      />,
+    );
+
+    await view.findByTestId('daily-personal-best-replay-button');
+
+    expect(view.getByTestId('daily-scrap-status').props.children).toBe(
+      'Shared board unavailable. Today’s challenge still works offline.',
+    );
+    expect(view.getByTestId('daily-leaderboard-empty').props.children).toBe(
+      'Shared ranks are unavailable while offline.',
+    );
+    expect(
+      view.queryByTestId(`daily-leaderboard-entry-${personalBest.clientRunId}`),
+    ).toBeNull();
+    expect(view.getByTestId('daily-scrap-play-button')).toBeTruthy();
+  });
+
   test('reloads the canonical challenge whenever the screen regains focus', async () => {
     const getTodayChallenge = jest.fn(async () => challenge);
     resetDailyChallengeStoreForTests(

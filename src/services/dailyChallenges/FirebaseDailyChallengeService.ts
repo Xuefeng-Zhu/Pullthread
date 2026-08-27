@@ -324,9 +324,15 @@ function defaultDailyDelay(milliseconds: number): Promise<void> {
 /** Local-first Firebase decorator. Every successful run is saved locally first. */
 export class FirebaseDailyChallengeService implements DailyChallengeService {
   readonly kind = 'firebase' as const;
-  private connectionStatus: DailyServiceStatus = 'remote';
+  private leaderboardStatus: DailyServiceStatus = 'remote';
   private pendingFlush: Promise<PendingFlushOutcome> | null = null;
   private lastSuccessfulUploadAt: number | null = null;
+  private leaderboardStatusGeneration = 0;
+  private readonly leaderboardGeneration = new Map<string, number>();
+  private readonly leaderboardCache = new Map<
+    string,
+    DailyLeaderboardEntry[]
+  >();
 
   constructor(
     private readonly local = new LocalDailyChallengeService(),
@@ -337,7 +343,7 @@ export class FirebaseDailyChallengeService implements DailyChallengeService {
   ) {}
 
   get status(): DailyServiceStatus {
-    return this.connectionStatus;
+    return this.leaderboardStatus;
   }
 
   async getTodayChallenge(): Promise<DailyChallenge> {
@@ -361,10 +367,9 @@ export class FirebaseDailyChallengeService implements DailyChallengeService {
   ): Promise<void> {
     try {
       await this.remote.checkChallenge(localChallenge);
-      this.connectionStatus = 'remote';
       void this.flushPendingRuns();
     } catch {
-      this.connectionStatus = 'offline';
+      // The foreground leaderboard request owns visible board provenance.
     }
   }
 
@@ -395,7 +400,6 @@ export class FirebaseDailyChallengeService implements DailyChallengeService {
       } else {
         await this.remote.ensureGuest();
       }
-      this.connectionStatus = 'remote';
       const personalBest = remoteSubmission
         ? selectDailyBest(
             localResult.personalBest,
@@ -437,7 +441,6 @@ export class FirebaseDailyChallengeService implements DailyChallengeService {
             : 'Shared best is up to date, but device storage is unavailable.',
       });
     } catch {
-      this.connectionStatus = 'offline';
       if (!localResult.accepted) {
         return Object.freeze({
           ...localResult,
@@ -473,17 +476,27 @@ export class FirebaseDailyChallengeService implements DailyChallengeService {
 
   async getLeaderboard(challengeId: string): Promise<DailyLeaderboardEntry[]> {
     const challenge = getTodayDailyChallenge(this.clock);
-    if (challengeId !== challenge.id) return this.local.getLeaderboard(challengeId);
+    if (challengeId !== challenge.id) {
+      return this.leaderboardCache.get(challengeId) ?? [];
+    }
+    const statusGeneration = ++this.leaderboardStatusGeneration;
+    const generation = (this.leaderboardGeneration.get(challengeId) ?? 0) + 1;
+    this.leaderboardGeneration.set(challengeId, generation);
     try {
       const pendingFlush = await this.flushPendingRuns();
       const entries = await this.remote.getLeaderboard(challenge);
-      this.connectionStatus = pendingFlush.synced ? 'remote' : 'offline';
-      return entries.length > 0
-        ? entries
-        : this.local.getLeaderboard(challengeId);
+      if (this.leaderboardGeneration.get(challengeId) === generation) {
+        this.leaderboardCache.set(challengeId, entries);
+      }
+      if (this.leaderboardStatusGeneration === statusGeneration) {
+        this.leaderboardStatus = pendingFlush.synced ? 'remote' : 'offline';
+      }
+      return entries;
     } catch {
-      this.connectionStatus = 'offline';
-      return this.local.getLeaderboard(challengeId);
+      if (this.leaderboardStatusGeneration === statusGeneration) {
+        this.leaderboardStatus = 'offline';
+      }
+      return this.leaderboardCache.get(challengeId) ?? [];
     }
   }
 
@@ -576,10 +589,8 @@ export class FirebaseDailyChallengeService implements DailyChallengeService {
           Object.freeze({ ...remoteSubmission, localPersisted }),
         );
       }
-      this.connectionStatus = 'remote';
       return Object.freeze({ synced: true, submissions, expiredRunIds });
     } catch {
-      this.connectionStatus = 'offline';
       return Object.freeze({ synced: false, submissions, expiredRunIds });
     }
   }

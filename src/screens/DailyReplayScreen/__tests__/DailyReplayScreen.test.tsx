@@ -1,8 +1,15 @@
-import { fireEvent, render } from '@testing-library/react-native';
-import { beforeEach, describe, expect, jest, test } from '@jest/globals';
+import { act, fireEvent, render } from '@testing-library/react-native';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  jest,
+  test,
+} from '@jest/globals';
 import type { ComponentProps } from 'react';
 import MockReact from 'react';
-import { View as MockView } from 'react-native';
+import { AccessibilityInfo, View as MockView } from 'react-native';
 
 import {
   createDailyRun,
@@ -63,6 +70,7 @@ function screenHarness(entryId = entry.id) {
 
 describe('DailyReplayScreen', () => {
   beforeEach(() => {
+    jest.restoreAllMocks();
     jest.clearAllMocks();
     usePreferencesStore.setState({ ...defaultPreferences });
     useDailyChallengeStore.setState({
@@ -70,6 +78,10 @@ describe('DailyReplayScreen', () => {
       leaderboard: [entry],
       personalBest: null,
     });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   test('opens a leaderboard replay already complete when motion is reduced', async () => {
@@ -89,6 +101,58 @@ describe('DailyReplayScreen', () => {
 
     await fireEvent.press(view.getByTestId('daily-replay-back-button'));
     expect(harness.goBack).toHaveBeenCalledTimes(1);
+  });
+
+  test('finishes an active replay when the OS reduced-motion query resolves', async () => {
+    jest.useFakeTimers();
+    let resolveReducedMotion!: (enabled: boolean) => void;
+    let emitReducedMotion!: (enabled: boolean) => void;
+    jest
+      .spyOn(AccessibilityInfo, 'isReduceMotionEnabled')
+      .mockImplementationOnce(
+        () =>
+          new Promise<boolean>((resolve) => {
+            resolveReducedMotion = resolve;
+          }),
+      );
+    jest
+      .spyOn(AccessibilityInfo, 'addEventListener')
+      .mockImplementation(((eventName, handler) => {
+        if (eventName === 'reduceMotionChanged') {
+          emitReducedMotion = handler as (enabled: boolean) => void;
+        }
+        return { remove: jest.fn() } as unknown as ReturnType<
+          typeof AccessibilityInfo.addEventListener
+        >;
+      }) as typeof AccessibilityInfo.addEventListener);
+    const harness = screenHarness();
+    const view = await render(
+      <DailyReplayScreen
+        navigation={harness.navigation}
+        route={harness.route}
+      />,
+    );
+
+    expect(
+      view.getByTestId('mock-daily-replay-stage').props.accessibilityLabel,
+    ).toBe('running:playing');
+
+    await act(async () => {
+      resolveReducedMotion(true);
+    });
+
+    expect(
+      view.getByTestId('mock-daily-replay-stage').props.accessibilityLabel,
+    ).toBe('succeeded:complete');
+
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+    });
+
+    await act(() => emitReducedMotion(false));
+    expect(
+      view.getByTestId('mock-daily-replay-stage').props.accessibilityLabel,
+    ).toBe('succeeded:complete');
   });
 
   test('fails safely when a replay entry is no longer available', async () => {

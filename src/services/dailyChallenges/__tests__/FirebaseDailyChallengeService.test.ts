@@ -236,12 +236,14 @@ describe('FirebaseDailyChallengeService local-first boundary', () => {
 
     remote.submitRun.mockResolvedValueOnce(remoteSubmission(run));
     remote.getLeaderboard.mockResolvedValueOnce([]);
-    await expect(service.getLeaderboard(run.challengeId)).resolves.toEqual([
-      expect.objectContaining({ id: run.clientRunId, isCurrentPlayer: true }),
-    ]);
+    await expect(service.getLeaderboard(run.challengeId)).resolves.toEqual([]);
     expect(remote.submitRun).toHaveBeenCalledTimes(2);
     expect(service.status).toBe('remote');
     await expect(local.getPendingRuns()).resolves.toEqual([]);
+    remote.getPersonalBest.mockResolvedValueOnce(null);
+    await expect(service.getPersonalBest(run.challengeId)).resolves.toMatchObject(
+      { clientRunId: run.clientRunId },
+    );
   });
 
   test('uploads an earlier pending best instead of a later tied attempt', async () => {
@@ -342,6 +344,186 @@ describe('FirebaseDailyChallengeService local-first boundary', () => {
     await expect(service.getPersonalBest(run.challengeId)).resolves.toMatchObject(
       { clientRunId: run.clientRunId },
     );
+
+    remote.getLeaderboard.mockRejectedValueOnce(new Error('offline'));
+    await expect(service.getLeaderboard(run.challengeId)).resolves.toEqual(
+      remoteBoard,
+    );
+    expect(service.status).toBe('offline');
+
+    remote.getLeaderboard.mockResolvedValueOnce([]);
+    await expect(service.getLeaderboard(run.challengeId)).resolves.toEqual([]);
+    remote.getLeaderboard.mockRejectedValueOnce(new Error('offline again'));
+    await expect(service.getLeaderboard(run.challengeId)).resolves.toEqual([]);
+  });
+
+  test('does not invent a shared rank for an offline local personal best', async () => {
+    const remote = new FakeRemote();
+    const local = new LocalDailyChallengeService(new MemoryStorage());
+    const service = new FirebaseDailyChallengeService(
+      local,
+      () => new Date('2026-08-27T12:00:00.000Z'),
+      remote,
+    );
+    const run = referenceRun('firebase-offline-personal-best-0001');
+    await local.submitRun(run);
+    await local.markRunSynced(run);
+    remote.getLeaderboard.mockRejectedValueOnce(new Error('offline'));
+    remote.getPersonalBest.mockRejectedValueOnce(new Error('offline'));
+
+    await expect(service.getLeaderboard(run.challengeId)).resolves.toEqual([]);
+    await expect(service.getPersonalBest(run.challengeId)).resolves.toMatchObject(
+      { clientRunId: run.clientRunId },
+    );
+    expect(service.status).toBe('offline');
+  });
+
+  test('keeps a failed board offline when a background challenge check later succeeds', async () => {
+    const remote = new FakeRemote();
+    const local = new LocalDailyChallengeService(new MemoryStorage());
+    let finishChallengeCheck!: () => void;
+    const challengeCheckGate = new Promise<void>((resolve) => {
+      finishChallengeCheck = resolve;
+    });
+    let signalChallengeCheckFinished!: () => void;
+    const challengeCheckFinished = new Promise<void>((resolve) => {
+      signalChallengeCheckFinished = resolve;
+    });
+    remote.checkChallenge.mockImplementationOnce(async () => {
+      await challengeCheckGate;
+      signalChallengeCheckFinished();
+    });
+    remote.getLeaderboard.mockRejectedValueOnce(new Error('offline'));
+    const service = new FirebaseDailyChallengeService(
+      local,
+      () => new Date('2026-08-27T12:00:00.000Z'),
+      remote,
+    );
+    const challenge = await service.getTodayChallenge();
+
+    await expect(service.getLeaderboard(challenge.id)).resolves.toEqual([]);
+    expect(service.status).toBe('offline');
+
+    finishChallengeCheck();
+    await challengeCheckFinished;
+    await Promise.resolve();
+    expect(service.status).toBe('offline');
+  });
+
+  test('does not let an older refresh overwrite the newer cached board', async () => {
+    const remote = new FakeRemote();
+    const local = new LocalDailyChallengeService(new MemoryStorage());
+    const run = referenceRun('firebase-board-generation-0001');
+    const olderBoard = [
+      {
+        id: 'older-remote-entry',
+        rank: 2,
+        displayName: 'Older snapshot',
+        metrics: run.metrics,
+        replay: run.replay,
+        isCurrentPlayer: false,
+      },
+    ];
+    const newerBoard = [
+      {
+        id: 'newer-remote-entry',
+        rank: 1,
+        displayName: 'Newer snapshot',
+        metrics: run.metrics,
+        replay: run.replay,
+        isCurrentPlayer: false,
+      },
+    ];
+    let signalOlderRequestStarted!: () => void;
+    const olderRequestStarted = new Promise<void>((resolve) => {
+      signalOlderRequestStarted = resolve;
+    });
+    let finishOlderRequest!: () => void;
+    const olderRequest = new Promise<typeof olderBoard>((resolve) => {
+      finishOlderRequest = () => resolve(olderBoard);
+    });
+    remote.getLeaderboard
+      .mockImplementationOnce(() => {
+        signalOlderRequestStarted();
+        return olderRequest;
+      })
+      .mockResolvedValueOnce(newerBoard)
+      .mockRejectedValueOnce(new Error('offline'));
+    const service = new FirebaseDailyChallengeService(
+      local,
+      () => new Date('2026-08-27T12:00:00.000Z'),
+      remote,
+    );
+
+    const staleRefresh = service.getLeaderboard(run.challengeId);
+    await olderRequestStarted;
+    await expect(service.getLeaderboard(run.challengeId)).resolves.toEqual(
+      newerBoard,
+    );
+    finishOlderRequest();
+    await expect(staleRefresh).resolves.toEqual(olderBoard);
+
+    await expect(service.getLeaderboard(run.challengeId)).resolves.toEqual(
+      newerBoard,
+    );
+    expect(service.status).toBe('offline');
+  });
+
+  test('does not let a prior-day success overwrite the current board status', async () => {
+    const remote = new FakeRemote();
+    const local = new LocalDailyChallengeService(new MemoryStorage());
+    const priorRun = referenceRun('firebase-prior-day-board-0001');
+    const currentRun = referenceRunForDate(
+      '2026-08-28',
+      'firebase-current-day-board-0001',
+      '2026-08-28T12:00:00.000Z',
+    );
+    const priorBoard = [
+      {
+        id: 'prior-day-entry',
+        rank: 1,
+        displayName: 'Prior day',
+        metrics: priorRun.metrics,
+        replay: priorRun.replay,
+        isCurrentPlayer: false,
+      },
+    ];
+    let signalPriorRequestStarted!: () => void;
+    const priorRequestStarted = new Promise<void>((resolve) => {
+      signalPriorRequestStarted = resolve;
+    });
+    let finishPriorRequest!: () => void;
+    const priorRequest = new Promise<typeof priorBoard>((resolve) => {
+      finishPriorRequest = () => resolve(priorBoard);
+    });
+    remote.getLeaderboard
+      .mockImplementationOnce(() => {
+        signalPriorRequestStarted();
+        return priorRequest;
+      })
+      .mockRejectedValueOnce(new Error('current board offline'));
+    let now = new Date('2026-08-27T23:59:59.999Z');
+    const service = new FirebaseDailyChallengeService(
+      local,
+      () => now,
+      remote,
+    );
+
+    const priorRefresh = service.getLeaderboard(priorRun.challengeId);
+    await priorRequestStarted;
+    now = new Date('2026-08-28T00:00:00.000Z');
+    await expect(service.getLeaderboard(currentRun.challengeId)).resolves.toEqual(
+      [],
+    );
+    expect(service.status).toBe('offline');
+
+    finishPriorRequest();
+    await expect(priorRefresh).resolves.toEqual(priorBoard);
+    expect(service.status).toBe('offline');
+    await expect(service.getLeaderboard(priorRun.challengeId)).resolves.toEqual(
+      priorBoard,
+    );
+    expect(service.status).toBe('offline');
   });
 
   test('uses and caches the authoritative best after local storage resets', async () => {

@@ -176,7 +176,9 @@ export const useDailyChallengeStore = create<DailyChallengeStore>((set, get) => 
         statusMessage: localOnly
           ? 'LOCAL BOARD — Remote leaderboard is not configured.'
           : offline
-            ? 'Showing saved standings. Today’s challenge still works offline.'
+            ? leaderboard.length > 0
+              ? 'Showing saved standings. Today’s challenge still works offline.'
+              : 'Shared board unavailable. Today’s challenge still works offline.'
             : 'Shared standings are up to date.',
       }));
     } catch {

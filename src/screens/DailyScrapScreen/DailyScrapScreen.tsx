@@ -282,7 +282,9 @@ export function DailyScrapScreen({ navigation }: DailyScrapScreenProps) {
             </Text>
             {leaderboard.length === 0 && boardStatus !== 'loading' ? (
               <Text testID="daily-leaderboard-empty" style={styles.bodyCopy}>
-                No finished pulls yet. Yours can be first.
+                {boardStatus === 'offline'
+                  ? 'Shared ranks are unavailable while offline.'
+                  : 'No finished pulls yet. Yours can be first.'}
               </Text>
             ) : null}
             {leaderboard.map((entry) => (

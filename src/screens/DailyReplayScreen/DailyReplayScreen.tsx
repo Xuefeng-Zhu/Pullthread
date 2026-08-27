@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -38,6 +38,21 @@ export function DailyReplayScreen({ navigation, route }: DailyReplayScreenProps)
   const [status, setStatus] = useState<ReplayStatus>(
     reducedMotion ? 'complete' : 'playing',
   );
+  const reducedMotionCompletion = reducedMotion && status === 'playing';
+  const visiblePhase = reducedMotionCompletion ? 'succeeded' : phase;
+  const visibleStatus = reducedMotionCompletion ? 'complete' : status;
+
+  useEffect(() => {
+    if (!reducedMotionCompletion) return;
+
+    const settleTimer = setTimeout(() => {
+      setPhase('succeeded');
+      setStatus('complete');
+    }, 0);
+
+    return () => clearTimeout(settleTimer);
+  }, [reducedMotionCompletion]);
+
   const handleOutcome = useCallback((outcome: SimulationOutcome) => {
     setPhase(outcome.status === 'success' ? 'succeeded' : 'failed');
     setStatus('complete');
@@ -72,8 +87,8 @@ export function DailyReplayScreen({ navigation, route }: DailyReplayScreenProps)
           <ReplayStage
             replay={replay.levelReplay}
             highContrast={highContrast}
-            phase={phase}
-            status={status}
+            phase={visiblePhase}
+            status={visibleStatus}
             onOutcome={handleOutcome}
           />
         ) : (
