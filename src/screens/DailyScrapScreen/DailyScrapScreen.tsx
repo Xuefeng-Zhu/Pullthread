@@ -173,6 +173,20 @@ export function DailyScrapScreen({ navigation }: DailyScrapScreenProps) {
           </View>
         ) : null}
 
+        {loadStatus === 'update-required' ? (
+          <View
+            testID="daily-scrap-update-required"
+            accessibilityRole="alert"
+            style={styles.card}
+          >
+            <Text style={styles.cardTitle}>New scraps are ready</Text>
+            <Text style={styles.bodyCopy}>{errorMessage}</Text>
+            <Text style={styles.bodyCopy}>
+              Your saved campaign progress stays on this device.
+            </Text>
+          </View>
+        ) : null}
+
         {visibleChallenge ? (
           <View testID="daily-challenge-card" style={styles.challengeCard}>
             <Text style={styles.eyebrow}>{visibleChallenge.challengeDate} UTC</Text>

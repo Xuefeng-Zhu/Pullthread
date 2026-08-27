@@ -248,12 +248,15 @@ gameplay invariant rather than a cosmetic map state.
 
 ## Daily Scrap boundary
 
-Daily Scrap derives `YYYY-MM-DD` from UTC and selects the latest append-only
-template pool whose `effectiveFrom` covers that day. FNV-1a hashes the pool
-version and date into an unsigned seed; the seed indexes an explicit list of
-the six free catalog templates. The challenge identity includes date, pool,
-template, template version, and level version so content changes cannot silently
-reuse a prior identity.
+Daily Scrap derives `YYYY-MM-DD` from UTC and selects the append-only template
+pool whose finite `effectiveFrom` through `effectiveThrough` range covers that
+day. Ranges are contiguous and immutable. The next pool must ship in both app
+and Functions before its future activation date; a build beyond its last known
+range fails closed with an update-required state instead of extending a
+superseded pool offline. FNV-1a hashes the pool version and date into an unsigned
+seed; the seed indexes an explicit list of the six free catalog templates. The
+challenge identity includes date, pool, template, template version, and level
+version so content changes cannot silently reuse a prior identity.
 
 `DailyReplayV1` wraps `LevelReplayV1` with challenge id/date and seed. Parsing
 treats persisted, remote, and callable input as untrusted. Metrics are not
@@ -281,6 +284,9 @@ reads, safe owner profile edits, and no direct challenge/run writes. The
 authenticated `submitDailyRun` callable bounds the JSON, reconstructs the
 canonical challenge, validates/re-simulates the compact replay, and uses an
 Admin SDK transaction to retain the incumbent on tied/worse submissions. Admin
+SDK writes add `recordedAt`, which is the trusted fourth ordering key for the
+bounded top-50 query; client `createdAt` never controls the cutoff. Exact
+committed retries return the incumbent without another guard write. Admin
 credentials exist only in the function runtime. The dedicated project is not
 yet created/deployed; [`FIREBASE_DAILY_SCRAP.md`](FIREBASE_DAILY_SCRAP.md)
 records that activation boundary.

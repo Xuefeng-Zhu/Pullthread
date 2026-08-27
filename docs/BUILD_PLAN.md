@@ -131,9 +131,11 @@ and final device evidence remain external acceptance gates.
 
 ## Milestone 5 plan
 
-1. Define an append-only, effective-dated Daily Scrap template pool containing
-   only the six free handcrafted levels. Derive the global UTC date, FNV-1a
-   seed, template, challenge identity, and level version deterministically.
+1. Define an append-only, finite effective-date Daily Scrap template pool
+   containing only the six free handcrafted levels. Require contiguous ranges
+   and fail closed when a build reaches its last shipped date. Derive the global
+   UTC date, FNV-1a seed, template, challenge identity, and level version
+   deterministically.
 2. Wrap the existing compact level replay in a Daily envelope and derive every
    rank metric through fixed-step re-simulation. Rank by thread, stitches, then
    completion time; exact ties retain the incumbent.
@@ -342,7 +344,8 @@ outstanding.
 
 ### Milestone 5
 
-- [x] Deterministic UTC seed and append-only six-template free-level pool.
+- [x] Deterministic UTC seed and finite, append-only six-template free-level
+      pool with an explicit update-required compatibility boundary.
 - [x] Versioned Daily replay envelope with server/client metric derivation.
 - [x] Local-first `DailyChallengeService`, unlimited attempts, persisted best,
       pending upload, malformed-record isolation, and fail-soft storage.
@@ -487,10 +490,10 @@ outstanding.
 
 - `npm run lint` — passed with no warnings.
 - `npm run typecheck` — passed.
-- `npm test` — 37 suites and 352 tests passed, including Daily domain,
+- `npm test` — 37 suites and 357 tests passed, including Daily domain,
   persistence, campaign isolation, screen states, Results, and replay coverage.
-- `npm test --prefix functions` — 6 callable-domain tests, 3 Firestore rules
-  tests, and 3 best-transaction emulator tests passed.
+- `npm test --prefix functions` — 7 callable-domain tests, 5 Firestore
+  rules/index tests, and 7 best-transaction emulator tests passed.
 - `npx expo-doctor@latest` — 21 of 21 checks passed.
 - `npm run export` — web, Android, and iOS bundles exported successfully with
   the lazy Firebase client in the dependency graph.

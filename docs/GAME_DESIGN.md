@@ -153,9 +153,11 @@ new access; a previously RevenueCat-verified offline cache remains available.
 
 Daily Scrap is an optional secondary mode reached deliberately from the Quilt
 Map. One global UTC date produces one immutable challenge identity and selects
-one handcrafted template from the effective, append-only free-level pool. A new
-scrap begins at 00:00 UTC. Attempts are unlimited and local play never requires
-an account, purchase, service configuration, or network.
+one handcrafted template from the effective, append-only free-level pool. Pool
+ranges are finite and contiguous so an older build asks for an update instead
+of generating a superseded challenge after its last shipped date. A new scrap
+begins at 00:00 UTC. Attempts are unlimited and local play never requires an
+account, purchase, service configuration, or network.
 
 The Daily ranking contract is deliberately different from campaign thimbles:
 

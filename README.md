@@ -223,6 +223,12 @@ with lower thread first, then fewer stitches, then lower deterministic
 completion time. Watching a compact stitch replay never records campaign
 progress.
 
+Every shipped template pool has a finite inclusive date range. Pool v1 covers
+2026-01-01 through 2027-12-31; the app and callable must ship the next contiguous
+pool before that boundary. An older build fails closed with an update-required
+message after its final known date instead of silently generating a challenge
+that the backend no longer recognizes.
+
 Local mode is the default and requires no service configuration:
 
 ```text
@@ -232,7 +238,9 @@ EXPO_PUBLIC_DAILY_SERVICE=local
 Firebase mode preserves that local save, then lazily signs the player in with
 Firebase Anonymous Auth and syncs a verified best to Firestore. The callable
 function ignores client score claims, re-runs the canonical replay, derives the
-metric tuple, and updates one best document per user in a transaction. Direct
+metric tuple, and updates one best document per user in a transaction. Exact
+committed retries are idempotent, and leaderboard cutoff ties use the
+server-authored recording time rather than a client timestamp. Direct
 client writes to challenge and run documents are denied by Firestore rules.
 The backend also accepts only today or yesterday, rate-limits each guest, and
 caps function scaling. Those controls do not replace App Check: public Firebase

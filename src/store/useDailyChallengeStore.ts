@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import {
   createDailyClientRunId,
   createDailyRun,
+  DailyCatalogUpdateRequiredError,
   selectDailyBest,
   type DailyChallenge,
   type DailyLeaderboardEntry,
@@ -15,7 +16,12 @@ import {
   type DailySubmissionResult,
 } from '../services/dailyChallenges';
 
-export type DailyLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
+export type DailyLoadStatus =
+  | 'idle'
+  | 'loading'
+  | 'ready'
+  | 'error'
+  | 'update-required';
 export type DailyBoardStatus = 'idle' | 'loading' | 'local' | 'ready' | 'offline';
 export type DailySubmitStatus =
   | 'idle'
@@ -115,19 +121,22 @@ export const useDailyChallengeStore = create<DailyChallengeStore>((set, get) => 
             : 'Loading shared standings…',
       }));
       await get().refreshLeaderboard();
-    } catch {
+    } catch (error) {
       if (request !== loadRequest) return;
       leaderboardRequest += 1;
       submissionRequest += 1;
+      const updateRequired = error instanceof DailyCatalogUpdateRequiredError;
       set({
         challenge: null,
-        loadStatus: 'error',
+        loadStatus: updateRequired ? 'update-required' : 'error',
         boardStatus: 'idle',
         submitStatus: 'idle',
         leaderboard: [],
         personalBest: null,
         latestSubmission: null,
-        errorMessage: 'Today’s scrap could not be prepared. Try again.',
+        errorMessage: updateRequired
+          ? 'Update Pullthread to load today’s Daily Scrap.'
+          : 'Today’s scrap could not be prepared. Try again.',
       });
     }
   },

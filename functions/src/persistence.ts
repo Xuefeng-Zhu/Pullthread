@@ -74,6 +74,14 @@ function assertCanonicalStoredChallenge(
   }
 }
 
+function dailyRunsEqual(left: DailyRun, right: DailyRun): boolean {
+  return (
+    left.clientRunId === right.clientRunId &&
+    left.createdAt === right.createdAt &&
+    dailyReplaysEqual(left, right)
+  );
+}
+
 /**
  * Stores exactly one best run for a Firebase Auth user and challenge. The
  * transaction keeps the incumbent on ties, so concurrent and idempotent
@@ -109,9 +117,66 @@ export async function persistBestDailyRun(
     const incumbentSnapshot = await transaction.get(runRef);
     const submissionGuardSnapshot = await transaction.get(submissionGuardRef);
 
+    if (challengeSnapshot.exists) {
+      assertCanonicalStoredChallenge(challengeSnapshot.data(), challenge);
+    }
+
+    const incumbent = incumbentSnapshot.exists
+      ? parseDailyRun(incumbentSnapshot.data())
+      : null;
+
+    let lastAcceptedRun: DailyRun | null = null;
+    try {
+      const storedLastRun = submissionGuardSnapshot.get('lastRun');
+      if (storedLastRun !== undefined) {
+        lastAcceptedRun = parseDailyRun(storedLastRun);
+      }
+    } catch {
+      // A legacy or malformed private guard must never become authority. It
+      // simply loses the retry exemption and follows the normal throttle path.
+    }
+    const lastResultIsNewBest = submissionGuardSnapshot.get(
+      'lastResultIsNewBest',
+    );
+    if (
+      lastAcceptedRun?.clientRunId === candidate.clientRunId &&
+      !dailyRunsEqual(lastAcceptedRun, candidate)
+    ) {
+      throw new ClientRunIdConflictError();
+    }
+    if (
+      incumbent &&
+      typeof lastResultIsNewBest === 'boolean' &&
+      lastAcceptedRun &&
+      dailyRunsEqual(lastAcceptedRun, candidate) &&
+      (!lastResultIsNewBest ||
+        incumbent.clientRunId === candidate.clientRunId)
+    ) {
+      // Reproduce the committed callable result without another write. This
+      // covers new-best, tied, and worse attempts whose response was lost.
+      return Object.freeze({
+        isNewBest: lastResultIsNewBest,
+        personalBest: incumbent,
+      });
+    }
+
+    if (incumbent?.clientRunId === candidate.clientRunId) {
+      if (!dailyRunsEqual(incumbent, candidate)) {
+        throw new ClientRunIdConflictError();
+      }
+
+      // Backward compatibility for a best written before guards retained the
+      // request fingerprint. It is still safe to exempt because the public run
+      // document belongs to this authenticated uid and matches exactly.
+      return Object.freeze({ isNewBest: false, personalBest: incumbent });
+    }
+
     const lastSubmissionAt = submissionGuardSnapshot.get('lastSubmissionAt');
     if (lastSubmissionAt instanceof Timestamp) {
-      const elapsedMs = serverNow.getTime() - lastSubmissionAt.toMillis();
+      const elapsedMs = Math.max(
+        0,
+        serverNow.getTime() - lastSubmissionAt.toMillis(),
+      );
       if (elapsedMs < DAILY_SUBMISSION_MIN_INTERVAL_MS) {
         const retryAfterSeconds = Math.max(
           1,
@@ -123,21 +188,7 @@ export async function persistBestDailyRun(
       }
     }
 
-    if (challengeSnapshot.exists) {
-      assertCanonicalStoredChallenge(challengeSnapshot.data(), challenge);
-    }
-
     const displayName = publicDisplayName(profileSnapshot.data(), uid);
-    const incumbent = incumbentSnapshot.exists
-      ? parseDailyRun(incumbentSnapshot.data())
-      : null;
-
-    if (
-      incumbent?.clientRunId === candidate.clientRunId &&
-      !dailyReplaysEqual(incumbent, candidate)
-    ) {
-      throw new ClientRunIdConflictError();
-    }
 
     const personalBest = selectTrustedDailyBest(candidate, incumbent);
     const isNewBest =
@@ -146,6 +197,8 @@ export async function persistBestDailyRun(
 
     transaction.set(submissionGuardRef, {
       lastSubmissionAt: Timestamp.fromDate(serverNow),
+      lastRun: candidate,
+      lastResultIsNewBest: isNewBest,
       updatedAt: now,
     });
 

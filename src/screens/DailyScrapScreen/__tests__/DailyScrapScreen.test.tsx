@@ -17,6 +17,7 @@ import type { ComponentProps } from 'react';
 
 import {
   createDailyRun,
+  DailyCatalogUpdateRequiredError,
   getDailyChallengeForDate,
   type DailyLeaderboardEntry,
   type DailyRun,
@@ -283,6 +284,32 @@ describe('DailyScrapScreen', () => {
     await fireEvent.press(view.getByTestId('daily-scrap-retry-button'));
     await waitFor(() => expect(view.getByText(challenge.title)).toBeTruthy());
     expect(getTodayChallenge).toHaveBeenCalledTimes(2);
+  });
+
+  test('requires an app update without offering an invalid retry or play action', async () => {
+    resetDailyChallengeStoreForTests(
+      dailyService({
+        getTodayChallenge: jest.fn(async () => {
+          throw new DailyCatalogUpdateRequiredError('2028-01-01');
+        }),
+      }),
+    );
+    const harness = screenHarness();
+    const view = await render(
+      <DailyScrapScreen
+        navigation={harness.navigation}
+        route={harness.route}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(view.getByTestId('daily-scrap-update-required')).toBeTruthy();
+    });
+    expect(
+      view.getByText('Update Pullthread to load today’s Daily Scrap.'),
+    ).toBeTruthy();
+    expect(view.queryByTestId('daily-scrap-play-button')).toBeNull();
+    expect(view.queryByTestId('daily-scrap-retry-button')).toBeNull();
   });
 
   test('announces challenge loading as busy', async () => {

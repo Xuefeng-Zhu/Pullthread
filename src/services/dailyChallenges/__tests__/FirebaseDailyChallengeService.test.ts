@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 import {
   createDailyRun,
   DAILY_SUBMISSION_MIN_INTERVAL_MS,
+  DailyCatalogUpdateRequiredError,
   getDailyChallengeForDate,
 } from '../../../game/daily';
 import { getCampaignLevel } from '../../../game/levels/levelLoader';
@@ -173,6 +174,42 @@ describe('FirebaseDailyChallengeService local-first boundary', () => {
       challengeDate: '2026-08-27',
       templateId: 'first-pull-sampler',
     });
+  });
+
+  test('flushes the final supported day when today requires an update', async () => {
+    const remote = new FakeRemote();
+    const local = new LocalDailyChallengeService(new MemoryStorage());
+    const finalSupportedRun = referenceRunForDate(
+      '2027-12-31',
+      'firebase-final-supported-run-0001',
+      '2027-12-31T12:00:00.000Z',
+    );
+    await local.submitRun(finalSupportedRun);
+    let signalUploadStarted!: () => void;
+    const uploadStarted = new Promise<void>((resolve) => {
+      signalUploadStarted = resolve;
+    });
+    remote.submitRun.mockImplementationOnce(async (run) => {
+      signalUploadStarted();
+      return remoteSubmission(run);
+    });
+    const service = new FirebaseDailyChallengeService(
+      local,
+      () => new Date('2028-01-01T00:01:00.000Z'),
+      remote,
+    );
+
+    await expect(service.getTodayChallenge()).rejects.toBeInstanceOf(
+      DailyCatalogUpdateRequiredError,
+    );
+    await uploadStarted;
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      if ((await local.getPendingRuns()).length === 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(remote.submitRun).toHaveBeenCalledWith(finalSupportedRun);
+    await expect(local.getPendingRuns()).resolves.toEqual([]);
   });
 
   test('saves locally on upload failure and flushes the pending best later', async () => {

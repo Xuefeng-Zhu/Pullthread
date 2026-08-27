@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 import {
   createDailyRun,
+  DailyCatalogUpdateRequiredError,
   getDailyChallengeForDate,
   type DailyChallenge,
   type DailyLeaderboardEntry,
@@ -258,6 +259,44 @@ describe('useDailyChallengeStore request coordination', () => {
         isNewBest: false,
         personalBest: { clientRunId: firstDay.run.clientRunId },
       },
+    });
+  });
+
+  test('fails closed and clears day-scoped state when the catalog needs an update', async () => {
+    let todayRequests = 0;
+    const service = serviceWith({
+      getTodayChallenge: jest.fn(async () => {
+        todayRequests += 1;
+        if (todayRequests === 1) return firstDay.challenge;
+        throw new DailyCatalogUpdateRequiredError('2028-01-01');
+      }),
+      getLeaderboard: jest.fn(async () => [firstDay.entry]),
+      getPersonalBest: jest.fn(async () => firstDay.run),
+      submitRun: jest.fn(async (run: DailyRun) => ({
+        accepted: true,
+        isNewBest: true,
+        personalBest: run,
+        syncStatus: 'local' as const,
+        message: 'Saved on this device.',
+      })),
+    });
+    resetDailyChallengeStoreForTests(service);
+    await useDailyChallengeStore.getState().loadToday();
+    await useDailyChallengeStore
+      .getState()
+      .submitCompletedReplay(firstDay.challenge, firstDay.replay);
+
+    await useDailyChallengeStore.getState().loadToday();
+
+    expect(useDailyChallengeStore.getState()).toMatchObject({
+      challenge: null,
+      loadStatus: 'update-required',
+      boardStatus: 'idle',
+      submitStatus: 'idle',
+      leaderboard: [],
+      personalBest: null,
+      latestSubmission: null,
+      errorMessage: 'Update Pullthread to load today’s Daily Scrap.',
     });
   });
 });

@@ -36,11 +36,25 @@ EXPO_PUBLIC_DAILY_SERVICE=local
   clients.
 - A Firestore transaction stores one best document per challenge/user, ordered
   by thread used, stitches used, then simulated completion time. Ties and worse
-  attempts retain the incumbent.
+  attempts retain the incumbent. The top-50 cutoff uses server-authored
+  `recordedAt`; client `createdAt` is retained only as run metadata. An exact
+  retry of a committed run is returned idempotently without extending the
+  per-user throttle.
 - The app writes the local best before attempting Firebase. Failed uploads stay
   pending and retry after a later Daily Scrap connection. Once a pending run is
   older than the server's one-day grace window, the client prunes it and keeps
   flushing newer days instead of retrying a permanent rejection forever.
+
+## Pool compatibility release rule
+
+Each Daily Scrap pool has an immutable, finite `effectiveFrom` through
+`effectiveThrough` UTC range. Pool v1 ends on 2027-12-31. Before that date, ship
+the app and Functions from the same revision with a contiguous v2 range starting
+2028-01-01, and deploy the new `recordedAt` composite index before releasing the
+client. Never activate a new pool inside an older pool's advertised range and
+never edit a historical range. A build past its last shipped range shows an
+update-required state and does not create or submit a superseded challenge,
+including while offline.
 
 ## Create and link a dedicated project
 

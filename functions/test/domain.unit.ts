@@ -4,6 +4,8 @@ import { describe, test } from 'node:test';
 import {
   createDailyReplay,
   createDailyRun,
+  DAILY_POOL_EFFECTIVE_THROUGH,
+  DailyCatalogUpdateRequiredError,
   getDailyChallengeForDate,
 } from '../../src/game/daily';
 import { getCampaignLevel } from '../../src/game/levels/levelLoader';
@@ -72,6 +74,32 @@ describe('Daily Scrap callable validation', () => {
     assert.throws(
       () => validateDailyRunSubmission(older, serverNow),
       /limited to today and yesterday/,
+    );
+  });
+
+  test('shares the finite shipped-pool horizon with the app', () => {
+    const terminal = referenceRun(
+      DAILY_POOL_EFFECTIVE_THROUGH,
+      'daily-run-terminal-pool-0001',
+    );
+    assert.equal(
+      validateDailyRunSubmission(
+        terminal,
+        new Date(`${DAILY_POOL_EFFECTIVE_THROUGH}T20:00:00.000Z`),
+      ).challenge.poolVersion,
+      1,
+    );
+    assert.equal(
+      validateDailyRunSubmission(
+        terminal,
+        new Date('2028-01-01T00:01:00.000Z'),
+      ).run.clientRunId,
+      terminal.clientRunId,
+    );
+
+    assert.throws(
+      () => referenceRun('2028-01-01', 'daily-run-unsupported-pool-0001'),
+      DailyCatalogUpdateRequiredError,
     );
   });
 

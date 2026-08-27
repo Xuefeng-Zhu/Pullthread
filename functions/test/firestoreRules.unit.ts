@@ -16,6 +16,7 @@ import {
   getDoc,
   getDocs,
   limit,
+  orderBy,
   query,
   serverTimestamp,
   setDoc,
@@ -74,6 +75,7 @@ async function seedPublicDocuments(): Promise<void> {
           userId: OWNER_ID,
           displayName: 'Quilter 1234',
           createdAt: '2026-08-27T12:00:00.000Z',
+          recordedAt: new Date('2026-08-27T12:00:00.000Z'),
           metrics: {
             threadUsed: 42,
             stitchesUsed: 1,
@@ -159,6 +161,74 @@ describe('Pullthread Firestore rules', () => {
     );
     await assertFails(
       getDoc(doc(database, 'daily_submission_guards', OWNER_ID)),
+    );
+  });
+
+  test('uses the trusted recorded timestamp for a tied leaderboard cutoff', async () => {
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const database = context.firestore();
+      const runs = collection(
+        database,
+        'daily_challenges',
+        CHALLENGE_ID,
+        'runs',
+      );
+      const metrics = {
+        threadUsed: 42,
+        stitchesUsed: 1,
+        completionMs: 1500,
+      };
+      await Promise.all([
+        setDoc(doc(runs, 'client-backdated'), {
+          userId: 'client-backdated',
+          createdAt: '1970-01-01T00:00:00.000Z',
+          recordedAt: new Date('2026-08-27T12:01:00.000Z'),
+          metrics,
+        }),
+        setDoc(doc(runs, 'server-first'), {
+          userId: 'server-first',
+          createdAt: '2026-08-27T12:00:00.000Z',
+          recordedAt: new Date('2026-08-27T12:00:00.000Z'),
+          metrics,
+        }),
+      ]);
+    });
+    const database = environment.unauthenticatedContext().firestore();
+    const result = await assertSucceeds(
+      getDocs(
+        query(
+          collection(
+            database,
+            'daily_challenges',
+            CHALLENGE_ID,
+            'runs',
+          ),
+          orderBy('metrics.threadUsed', 'asc'),
+          orderBy('metrics.stitchesUsed', 'asc'),
+          orderBy('metrics.completionMs', 'asc'),
+          orderBy('recordedAt', 'asc'),
+          limit(1),
+        ),
+      ),
+    );
+
+    assert.equal(result.docs[0]?.id, 'server-first');
+  });
+
+  test('declares the trusted leaderboard composite index', () => {
+    const indexConfig = JSON.parse(
+      readFileSync(resolve(__dirname, '../../firestore.indexes.json'), 'utf8'),
+    ) as {
+      indexes: Array<{ fields: Array<{ fieldPath: string }> }>;
+    };
+    assert.deepEqual(
+      indexConfig.indexes[0]?.fields.map((field) => field.fieldPath),
+      [
+        'metrics.threadUsed',
+        'metrics.stitchesUsed',
+        'metrics.completionMs',
+        'recordedAt',
+      ],
     );
   });
 

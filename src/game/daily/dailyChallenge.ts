@@ -10,7 +10,17 @@ import {
 export const DAILY_CHALLENGE_SCHEMA_VERSION = 1 as const;
 export const DAILY_REPLAY_SCHEMA_VERSION = 1 as const;
 export const DAILY_POOL_EFFECTIVE_FROM = '2026-01-01';
+export const DAILY_POOL_EFFECTIVE_THROUGH = '2027-12-31';
 export const DAILY_SUBMISSION_MIN_INTERVAL_MS = 5_000;
+
+export class DailyCatalogUpdateRequiredError extends RangeError {
+  constructor(challengeDate: string) {
+    super(
+      `This Pullthread build does not include a Daily Scrap pool for ${challengeDate}.`,
+    );
+    this.name = 'DailyCatalogUpdateRequiredError';
+  }
+}
 
 export interface DailyChallengeTemplate {
   readonly id: string;
@@ -117,6 +127,8 @@ const DAILY_CHALLENGE_TEMPLATES_V1: readonly DailyChallengeTemplate[] =
 export interface DailyChallengePool {
   readonly version: number;
   readonly effectiveFrom: string;
+  /** Inclusive UTC date. A later pool must start on the following day. */
+  readonly effectiveThrough: string;
   readonly templates: readonly DailyChallengeTemplate[];
 }
 
@@ -129,6 +141,7 @@ export const DAILY_CHALLENGE_POOLS: readonly DailyChallengePool[] =
     Object.freeze({
       version: 1,
       effectiveFrom: DAILY_POOL_EFFECTIVE_FROM,
+      effectiveThrough: DAILY_POOL_EFFECTIVE_THROUGH,
       templates: DAILY_CHALLENGE_TEMPLATES_V1,
     }),
   ]);
@@ -143,6 +156,62 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function canonicalUtcDate(value: unknown, label: string): string {
+  if (typeof value !== 'string' || !DATE_PATTERN.test(value)) {
+    throw new TypeError(`${label} must use UTC YYYY-MM-DD format.`);
+  }
+
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw new RangeError(`${label} must be a real UTC calendar date.`);
+  }
+  return value;
+}
+
+function followingUtcDate(value: string): string {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+export function assertDailyChallengePoolRegistry(
+  pools: readonly DailyChallengePool[],
+): void {
+  if (pools.length === 0) {
+    throw new RangeError('Daily Scrap requires at least one template pool.');
+  }
+
+  let previous: DailyChallengePool | null = null;
+  for (const [index, pool] of pools.entries()) {
+    if (pool.version !== index + 1) {
+      throw new RangeError('Daily Scrap pool versions must be contiguous.');
+    }
+    const effectiveFrom = canonicalUtcDate(
+      pool.effectiveFrom,
+      'Daily Scrap pool effectiveFrom',
+    );
+    const effectiveThrough = canonicalUtcDate(
+      pool.effectiveThrough,
+      'Daily Scrap pool effectiveThrough',
+    );
+    if (effectiveThrough < effectiveFrom) {
+      throw new RangeError('Daily Scrap pool date ranges must not be empty.');
+    }
+    if (pool.templates.length === 0) {
+      throw new RangeError('Daily Scrap pools must include at least one template.');
+    }
+    if (
+      previous &&
+      effectiveFrom !== followingUtcDate(previous.effectiveThrough)
+    ) {
+      throw new RangeError('Daily Scrap pool date ranges must be contiguous.');
+    }
+    previous = pool;
+  }
+}
+
+assertDailyChallengePoolRegistry(DAILY_CHALLENGE_POOLS);
+
 function assertSafeUnsignedInteger(value: unknown, label: string): asserts value is number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
     throw new RangeError(`${label} must be a non-negative safe integer.`);
@@ -150,19 +219,12 @@ function assertSafeUnsignedInteger(value: unknown, label: string): asserts value
 }
 
 export function parseChallengeDate(value: unknown): string {
-  if (typeof value !== 'string' || !DATE_PATTERN.test(value)) {
-    throw new TypeError('Daily challenge date must use UTC YYYY-MM-DD format.');
-  }
-
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
-    throw new RangeError('Daily challenge date must be a real UTC calendar date.');
-  }
-  if (value < DAILY_POOL_EFFECTIVE_FROM) {
+  const normalized = canonicalUtcDate(value, 'Daily challenge date');
+  if (normalized < DAILY_POOL_EFFECTIVE_FROM) {
     throw new RangeError('Daily challenge date predates the supported template pool.');
   }
 
-  return value;
+  return normalized;
 }
 
 export function utcChallengeDate(date: Date): string {
@@ -191,8 +253,12 @@ export function getDailyChallengePool(challengeDate: string): DailyChallengePool
   const normalizedDate = parseChallengeDate(challengeDate);
   const pool = [...DAILY_CHALLENGE_POOLS]
     .reverse()
-    .find((candidate) => candidate.effectiveFrom <= normalizedDate);
-  if (!pool) throw new RangeError('No Daily Scrap template pool covers this date.');
+    .find(
+      (candidate) =>
+        candidate.effectiveFrom <= normalizedDate &&
+        normalizedDate <= candidate.effectiveThrough,
+    );
+  if (!pool) throw new DailyCatalogUpdateRequiredError(normalizedDate);
   return pool;
 }
 

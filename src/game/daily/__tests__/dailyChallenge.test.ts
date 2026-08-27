@@ -5,6 +5,9 @@ import { getCampaignLevel } from '../../levels/levelLoader';
 import { createLevelReplay, simulateLevelReplay } from '../../replay';
 import {
   DAILY_CHALLENGE_TEMPLATES,
+  DAILY_POOL_EFFECTIVE_THROUGH,
+  DailyCatalogUpdateRequiredError,
+  assertDailyChallengePoolRegistry,
   compareDailyMetrics,
   createDailyReplay,
   createDailyRun,
@@ -12,6 +15,7 @@ import {
   getDailyChallengeForDate,
   parseDailyChallenge,
   parseDailyReplay,
+  type DailyChallengePool,
   utcChallengeDate,
 } from '../dailyChallenge';
 
@@ -63,6 +67,50 @@ describe('Daily Scrap deterministic domain', () => {
           .status,
       ).toBe('success');
     }
+  });
+
+  test('fails closed when this build reaches the end of its shipped pool', () => {
+    expect(getDailyChallengeForDate(DAILY_POOL_EFFECTIVE_THROUGH)).toMatchObject({
+      challengeDate: DAILY_POOL_EFFECTIVE_THROUGH,
+      poolVersion: 1,
+    });
+    const nextDate = new Date(`${DAILY_POOL_EFFECTIVE_THROUGH}T00:00:00.000Z`);
+    nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+
+    expect(() =>
+      getDailyChallengeForDate(nextDate.toISOString().slice(0, 10)),
+    ).toThrow(DailyCatalogUpdateRequiredError);
+  });
+
+  test('requires finite, contiguous, append-only pool ranges', () => {
+    const first: DailyChallengePool = {
+      version: 1,
+      effectiveFrom: '2026-01-01',
+      effectiveThrough: '2026-12-31',
+      templates: DAILY_CHALLENGE_TEMPLATES,
+    };
+    const second: DailyChallengePool = {
+      ...first,
+      version: 2,
+      effectiveFrom: '2027-01-01',
+      effectiveThrough: '2027-12-31',
+    };
+
+    expect(() => assertDailyChallengePoolRegistry([first, second])).not.toThrow();
+    expect(() =>
+      assertDailyChallengePoolRegistry([first, { ...second, version: 3 }]),
+    ).toThrow(/versions must be contiguous/);
+    expect(() =>
+      assertDailyChallengePoolRegistry([
+        first,
+        { ...second, effectiveFrom: '2027-01-02' },
+      ]),
+    ).toThrow(/date ranges must be contiguous/);
+    expect(() =>
+      assertDailyChallengePoolRegistry([
+        { ...first, effectiveThrough: '2025-12-31' },
+      ]),
+    ).toThrow(/must not be empty/);
   });
 
   test('rejects remote descriptors and replay envelopes that drift from the day', () => {

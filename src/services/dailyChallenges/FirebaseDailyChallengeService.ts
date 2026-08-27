@@ -4,6 +4,7 @@ import { Platform } from 'react-native';
 import {
   compareDailyMetrics,
   DAILY_SUBMISSION_MIN_INTERVAL_MS,
+  DailyCatalogUpdateRequiredError,
   getTodayDailyChallenge,
   parseDailyChallenge,
   parseDailyReplay,
@@ -272,7 +273,7 @@ class SdkFirebaseDailyRemoteGateway implements FirebaseDailyRemoteGateway {
         orderBy('metrics.threadUsed', 'asc'),
         orderBy('metrics.stitchesUsed', 'asc'),
         orderBy('metrics.completionMs', 'asc'),
-        orderBy('createdAt', 'asc'),
+        orderBy('recordedAt', 'asc'),
         limit(50),
       ),
     );
@@ -340,7 +341,17 @@ export class FirebaseDailyChallengeService implements DailyChallengeService {
   }
 
   async getTodayChallenge(): Promise<DailyChallenge> {
-    const localChallenge = getTodayDailyChallenge(this.clock);
+    let localChallenge: DailyChallenge;
+    try {
+      localChallenge = getTodayDailyChallenge(this.clock);
+    } catch (error) {
+      if (error instanceof DailyCatalogUpdateRequiredError) {
+        // The final supported day can still be inside the callable's one-day
+        // grace window. Drain it even though this build cannot open today's UI.
+        void this.flushPendingRuns();
+      }
+      throw error;
+    }
     void this.checkRemoteChallenge(localChallenge);
     return localChallenge;
   }
