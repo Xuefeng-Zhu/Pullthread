@@ -142,15 +142,53 @@ function unavailableResult(
   return { status: 'error', message };
 }
 
+type CommerceOperation =
+  | Readonly<{
+      kind: 'purchase';
+      token: symbol;
+      promise: Promise<PurchaseResult>;
+    }>
+  | Readonly<{
+      kind: 'restore';
+      token: symbol;
+      promise: Promise<RestoreResult>;
+    }>;
+
+const STORE_OPERATION_BUSY_MESSAGE =
+  'Another Full Atelier store operation is already in progress.';
+const PURCHASE_ERROR_MESSAGE =
+  'Full Atelier could not be purchased. Please try again.';
+const RESTORE_ERROR_MESSAGE =
+  'Full Atelier purchases could not be restored. Please try again.';
+
 let activeService: EntitlementService | null = null;
 let defaultService: EntitlementService | null = null;
 let serviceUnsubscribe: (() => void) | null = null;
 let initializationPromise: Promise<void> | null = null;
 let hydrationPromise: Promise<void> | null = null;
+let commerceOperation: CommerceOperation | null = null;
+let refreshPromise: Promise<void> | null = null;
+let activeServiceGeneration = 0;
+let entitlementRevision = 0;
 
 function runtimeService(): EntitlementService {
   if (!defaultService) defaultService = createEntitlementService();
   return defaultService;
+}
+
+function isActiveService(
+  service: EntitlementService,
+  generation: number,
+): boolean {
+  return activeService === service && activeServiceGeneration === generation;
+}
+
+function isTransientStatus(status: EntitlementStatus): boolean {
+  return (
+    status === 'refreshing' ||
+    status === 'purchasing' ||
+    status === 'restoring'
+  );
 }
 
 function commitVerifiedEntitlement(
@@ -179,12 +217,19 @@ function commitVerifiedEntitlement(
   });
 }
 
-async function refreshOffer(service: EntitlementService): Promise<void> {
+async function refreshOffer(
+  service: EntitlementService,
+  generation: number,
+): Promise<void> {
   try {
     const offer = await service.getFullGameOffer();
-    if (activeService === service) useEntitlementStore.setState({ offer });
+    if (isActiveService(service, generation)) {
+      useEntitlementStore.setState({ offer });
+    }
   } catch {
-    if (activeService === service) useEntitlementStore.setState({ offer: null });
+    if (isActiveService(service, generation)) {
+      useEntitlementStore.setState({ offer: null });
+    }
   }
 }
 
@@ -203,9 +248,25 @@ export async function initializeEntitlements(
     if (status !== 'idle' && !needsFullRetry) return;
   }
 
-  serviceUnsubscribe?.();
+  const replacingService = activeService !== null && activeService !== service;
+  if (replacingService) {
+    // An operation belongs to the service generation that started it. Its
+    // eventual completion is ignored by generation checks and must not block
+    // commerce or refreshes on the replacement service.
+    commerceOperation = null;
+    refreshPromise = null;
+  }
+
+  const previousUnsubscribe = serviceUnsubscribe;
   serviceUnsubscribe = null;
   activeService = service;
+  const serviceGeneration = ++activeServiceGeneration;
+  try {
+    previousUnsubscribe?.();
+  } catch {
+    // A native listener cleanup failure must not strand service replacement.
+    // The old callback is also fenced by service identity and generation.
+  }
   useEntitlementStore.setState({
     serviceKind: service.kind,
     status: 'refreshing',
@@ -237,21 +298,40 @@ export async function initializeEntitlements(
 
     try {
       await service.initialize();
-      if (activeService !== service) return;
+      if (!isActiveService(service, serviceGeneration)) return;
+      const verificationRevision = entitlementRevision;
       serviceUnsubscribe = service.subscribe((hasFullGame) => {
-        if (activeService === service) {
+        if (isActiveService(service, serviceGeneration)) {
+          const previous = useEntitlementStore.getState();
           commitVerifiedEntitlement(service, hasFullGame);
+          const accepted = useEntitlementStore.getState();
+          const accessChanged = previous.hasFullGame !== accepted.hasFullGame;
+          // Every accepted callback is a newer authoritative snapshot, even
+          // when it repeats the current boolean value.
+          entitlementRevision += 1;
+
+          // A listener is authoritative for access, but it must not make a
+          // still-running purchase/restore/refresh appear finished. Stable
+          // stale success/error UI is normalized immediately.
+          if (
+            !isTransientStatus(previous.status) &&
+            (accessChanged || previous.status === 'error')
+          ) {
+            useEntitlementStore.setState({ status: 'ready', notice: null });
+          }
         }
       });
       const hasFullGame = await service.hasFullGame();
-      if (activeService !== service) return;
-      commitVerifiedEntitlement(service, hasFullGame);
-      await refreshOffer(service);
-      if (activeService === service) {
+      if (!isActiveService(service, serviceGeneration)) return;
+      if (entitlementRevision === verificationRevision) {
+        commitVerifiedEntitlement(service, hasFullGame);
+      }
+      await refreshOffer(service, serviceGeneration);
+      if (isActiveService(service, serviceGeneration)) {
         useEntitlementStore.setState({ status: 'ready', notice: null });
       }
     } catch {
-      if (activeService === service) {
+      if (isActiveService(service, serviceGeneration)) {
         useEntitlementStore.setState({
           status: 'error',
           notice: {
@@ -295,120 +375,295 @@ export const useEntitlementStore = create<EntitlementStore>()(
       notice: null,
       debugOverride: null,
 
-      purchaseFullGame: async () => {
-        const service = await ensureService();
-        if (!service) {
-          return unavailableResult(ENTITLEMENT_REFRESH_ERROR_MESSAGE);
+      purchaseFullGame: () => {
+        if (commerceOperation?.kind === 'purchase') {
+          return commerceOperation.promise;
         }
-        if (service.kind === 'unavailable') {
-          const result = unavailableResult(
-            'Full Atelier purchases are unavailable in this build.',
+        if (commerceOperation) {
+          return Promise.resolve(
+            unavailableResult(STORE_OPERATION_BUSY_MESSAGE),
           );
-          set({ status: 'error', notice: { kind: 'error', message: result.message } });
-          return result;
         }
 
-        set({ status: 'purchasing', notice: null });
-        const result = await service.purchaseFullGame();
-        switch (result.status) {
-          case 'purchased':
-            commitVerifiedEntitlement(service, true);
-            set({
-              status: 'ready',
-              notice: {
-                kind: 'success',
-                message: 'Full Atelier is unlocked on this device.',
-              },
-            });
-            break;
-          case 'cancelled':
-            set({
-              status: 'ready',
-              notice: {
-                kind: 'neutral',
-                message: 'Purchase cancelled. Nothing was charged.',
-              },
-            });
-            break;
-          case 'error':
-            set({
-              status: 'error',
-              notice: { kind: 'error', message: result.message },
-            });
-            break;
-        }
-        return result;
+        const operationToken = Symbol('purchase');
+        const purchase = (async (): Promise<PurchaseResult> => {
+          // Yield once so the operation record below is installed before any
+          // token check, while still claiming the action synchronously for the
+          // caller and any rapid follow-up tap.
+          await Promise.resolve();
+          const pendingRefresh = refreshPromise;
+          if (pendingRefresh) await pendingRefresh;
+          if (
+            commerceOperation?.kind !== 'purchase' ||
+            commerceOperation.token !== operationToken
+          ) {
+            return unavailableResult(STORE_OPERATION_BUSY_MESSAGE);
+          }
+          const service = await ensureService();
+          if (!service) {
+            return unavailableResult(ENTITLEMENT_REFRESH_ERROR_MESSAGE);
+          }
+          if (
+            commerceOperation?.kind !== 'purchase' ||
+            commerceOperation.token !== operationToken
+          ) {
+            return unavailableResult(STORE_OPERATION_BUSY_MESSAGE);
+          }
+          const serviceGeneration = activeServiceGeneration;
+          if (service.kind === 'unavailable') {
+            const result = unavailableResult(
+              'Full Atelier purchases are unavailable in this build.',
+            );
+            if (isActiveService(service, serviceGeneration)) {
+              set({
+                status: 'error',
+                notice: { kind: 'error', message: result.message },
+              });
+            }
+            return result;
+          }
+
+          set({ status: 'purchasing', notice: null });
+          const operationRevision = entitlementRevision;
+          const operationStartAccess = useEntitlementStore.getState().hasFullGame;
+          let result: PurchaseResult;
+          try {
+            result = await service.purchaseFullGame();
+          } catch {
+            result = unavailableResult(PURCHASE_ERROR_MESSAGE);
+          }
+          if (!isActiveService(service, serviceGeneration)) return result;
+          const expectedAccess = result.status === 'purchased' ? true : null;
+          const currentAccess = useEntitlementStore.getState().hasFullGame;
+          if (
+            entitlementRevision !== operationRevision &&
+            (expectedAccess === null
+              ? currentAccess !== operationStartAccess
+              : currentAccess !== expectedAccess)
+          ) {
+            set({ status: 'ready', notice: null });
+            return result;
+          }
+
+          switch (result.status) {
+            case 'purchased':
+              commitVerifiedEntitlement(service, true);
+              set({
+                status: 'ready',
+                notice: {
+                  kind: 'success',
+                  message: 'Full Atelier is unlocked on this device.',
+                },
+              });
+              break;
+            case 'cancelled':
+              set({
+                status: 'ready',
+                notice: {
+                  kind: 'neutral',
+                  message: 'Purchase cancelled. Nothing was charged.',
+                },
+              });
+              break;
+            case 'error':
+              set({
+                status: 'error',
+                notice: { kind: 'error', message: result.message },
+              });
+              break;
+          }
+          return result;
+        });
+
+        const pendingPurchase = purchase().finally(() => {
+          if (
+            commerceOperation?.kind === 'purchase' &&
+            commerceOperation.promise === pendingPurchase
+          ) {
+            commerceOperation = null;
+          }
+        });
+
+        commerceOperation = {
+          kind: 'purchase',
+          token: operationToken,
+          promise: pendingPurchase,
+        };
+        return pendingPurchase;
       },
 
-      restorePurchases: async () => {
-        const service = await ensureService();
-        if (!service) {
-          return {
-            status: 'error',
-            message: ENTITLEMENT_REFRESH_ERROR_MESSAGE,
-          };
+      restorePurchases: () => {
+        if (commerceOperation?.kind === 'restore') {
+          return commerceOperation.promise;
         }
-        if (service.kind === 'unavailable') {
-          const result: RestoreResult = {
+        if (commerceOperation) {
+          return Promise.resolve({
             status: 'error',
-            message: 'Restore purchases is unavailable in this build.',
-          };
-          set({ status: 'error', notice: { kind: 'error', message: result.message } });
-          return result;
-        }
-
-        set({ status: 'restoring', notice: null });
-        const result = await service.restorePurchases();
-        switch (result.status) {
-          case 'restored':
-            commitVerifiedEntitlement(service, true);
-            set({
-              status: 'ready',
-              notice: {
-                kind: 'success',
-                message: 'Full Atelier purchase restored.',
-              },
-            });
-            break;
-          case 'not-found':
-            commitVerifiedEntitlement(service, false);
-            set({
-              status: 'ready',
-              notice: {
-                kind: 'neutral',
-                message: 'No Full Atelier purchase was found for this store account.',
-              },
-            });
-            break;
-          case 'error':
-            set({
-              status: 'error',
-              notice: { kind: 'error', message: result.message },
-            });
-            break;
-        }
-        return result;
-      },
-
-      refreshEntitlement: async () => {
-        const service = await ensureService();
-        if (!service || service.kind === 'unavailable') return;
-
-        set({ status: 'refreshing', notice: null });
-        try {
-          const hasFullGame = await service.hasFullGame();
-          commitVerifiedEntitlement(service, hasFullGame);
-          await refreshOffer(service);
-          set({ status: 'ready' });
-        } catch {
-          set({
-            status: 'error',
-            notice: {
-              kind: 'error',
-              message: ENTITLEMENT_REFRESH_ERROR_MESSAGE,
-            },
+            message: STORE_OPERATION_BUSY_MESSAGE,
           });
         }
+
+        const operationToken = Symbol('restore');
+        const restore = (async (): Promise<RestoreResult> => {
+          await Promise.resolve();
+          const pendingRefresh = refreshPromise;
+          if (pendingRefresh) await pendingRefresh;
+          if (
+            commerceOperation?.kind !== 'restore' ||
+            commerceOperation.token !== operationToken
+          ) {
+            return {
+              status: 'error',
+              message: STORE_OPERATION_BUSY_MESSAGE,
+            };
+          }
+          const service = await ensureService();
+          if (!service) {
+            return {
+              status: 'error',
+              message: ENTITLEMENT_REFRESH_ERROR_MESSAGE,
+            };
+          }
+          if (
+            commerceOperation?.kind !== 'restore' ||
+            commerceOperation.token !== operationToken
+          ) {
+            return {
+              status: 'error',
+              message: STORE_OPERATION_BUSY_MESSAGE,
+            };
+          }
+          const serviceGeneration = activeServiceGeneration;
+          if (service.kind === 'unavailable') {
+            const result: RestoreResult = {
+              status: 'error',
+              message: 'Restore purchases is unavailable in this build.',
+            };
+            if (isActiveService(service, serviceGeneration)) {
+              set({
+                status: 'error',
+                notice: { kind: 'error', message: result.message },
+              });
+            }
+            return result;
+          }
+
+          set({ status: 'restoring', notice: null });
+          const operationRevision = entitlementRevision;
+          const operationStartAccess = useEntitlementStore.getState().hasFullGame;
+          let result: RestoreResult;
+          try {
+            result = await service.restorePurchases();
+          } catch {
+            result = { status: 'error', message: RESTORE_ERROR_MESSAGE };
+          }
+          if (!isActiveService(service, serviceGeneration)) return result;
+          const expectedAccess =
+            result.status === 'restored'
+              ? true
+                : result.status === 'not-found'
+                ? false
+                : null;
+          const currentAccess = useEntitlementStore.getState().hasFullGame;
+          if (
+            entitlementRevision !== operationRevision &&
+            (expectedAccess === null
+              ? currentAccess !== operationStartAccess
+              : currentAccess !== expectedAccess)
+          ) {
+            set({ status: 'ready', notice: null });
+            return result;
+          }
+
+          switch (result.status) {
+            case 'restored':
+              commitVerifiedEntitlement(service, true);
+              set({
+                status: 'ready',
+                notice: {
+                  kind: 'success',
+                  message: 'Full Atelier purchase restored.',
+                },
+              });
+              break;
+            case 'not-found':
+              commitVerifiedEntitlement(service, false);
+              set({
+                status: 'ready',
+                notice: {
+                  kind: 'neutral',
+                  message:
+                    'No Full Atelier purchase was found for this store account.',
+                },
+              });
+              break;
+            case 'error':
+              set({
+                status: 'error',
+                notice: { kind: 'error', message: result.message },
+              });
+              break;
+          }
+          return result;
+        });
+
+        const pendingRestore = restore().finally(() => {
+          if (
+            commerceOperation?.kind === 'restore' &&
+            commerceOperation.promise === pendingRestore
+          ) {
+            commerceOperation = null;
+          }
+        });
+
+        commerceOperation = {
+          kind: 'restore',
+          token: operationToken,
+          promise: pendingRestore,
+        };
+        return pendingRestore;
+      },
+
+      refreshEntitlement: () => {
+        if (refreshPromise) return refreshPromise;
+        if (commerceOperation) return Promise.resolve();
+
+        const refresh = async (): Promise<void> => {
+          const service = await ensureService();
+          if (!service || service.kind === 'unavailable') return;
+          const serviceGeneration = activeServiceGeneration;
+          if (!isActiveService(service, serviceGeneration)) return;
+          const verificationRevision = entitlementRevision;
+
+          set({ status: 'refreshing', notice: null });
+          try {
+            const hasFullGame = await service.hasFullGame();
+            if (!isActiveService(service, serviceGeneration)) return;
+            if (entitlementRevision === verificationRevision) {
+              commitVerifiedEntitlement(service, hasFullGame);
+            }
+            await refreshOffer(service, serviceGeneration);
+            if (isActiveService(service, serviceGeneration)) {
+              set({ status: 'ready' });
+            }
+          } catch {
+            if (isActiveService(service, serviceGeneration)) {
+              set({
+                status: 'error',
+                notice: {
+                  kind: 'error',
+                  message: ENTITLEMENT_REFRESH_ERROR_MESSAGE,
+                },
+              });
+            }
+          }
+        };
+
+        const pendingRefresh = refresh().finally(() => {
+          if (refreshPromise === pendingRefresh) refreshPromise = null;
+        });
+        refreshPromise = pendingRefresh;
+        return pendingRefresh;
       },
 
       setDebugEntitlement: (hasFullGame) => {
@@ -471,12 +726,20 @@ export function hydrateEntitlements(): Promise<void> {
 
 /** Test-only reset for the module-owned service, listener, and durable cache. */
 export async function resetEntitlementStoreForTests(): Promise<void> {
-  serviceUnsubscribe?.();
+  try {
+    serviceUnsubscribe?.();
+  } catch {
+    // Match production replacement semantics for a faulty native cleanup.
+  }
   serviceUnsubscribe = null;
   activeService = null;
   defaultService = null;
   initializationPromise = null;
   hydrationPromise = null;
+  commerceOperation = null;
+  refreshPromise = null;
+  activeServiceGeneration += 1;
+  entitlementRevision += 1;
   // Tests may replace action functions with spies through setState. Restore the
   // complete initial state so later tests exercise the real store actions.
   useEntitlementStore.setState(useEntitlementStore.getInitialState(), true);

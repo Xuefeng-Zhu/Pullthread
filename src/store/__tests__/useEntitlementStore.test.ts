@@ -7,7 +7,11 @@ import {
   test,
 } from '@jest/globals';
 
-import type { EntitlementService } from '../../services/entitlements/EntitlementService';
+import type {
+  EntitlementService,
+  PurchaseResult,
+  RestoreResult,
+} from '../../services/entitlements/EntitlementService';
 import { MockEntitlementService } from '../../services/entitlements/MockEntitlementService';
 import {
   ENTITLEMENT_STORAGE_KEY,
@@ -173,6 +177,451 @@ describe('entitlement store', () => {
     );
   });
 
+  test('shares one in-flight purchase across rapid calls', async () => {
+    let purchaseCalls = 0;
+    let restoreCalls = 0;
+    let resolvePurchase!: (result: PurchaseResult) => void;
+    let markPurchaseStarted!: () => void;
+    const purchaseStarted = new Promise<void>((resolve) => {
+      markPurchaseStarted = resolve;
+    });
+    const purchaseResult = new Promise<PurchaseResult>((resolve) => {
+      resolvePurchase = resolve;
+    });
+    const listenerRef: {
+      current: ((hasFullGame: boolean) => void) | null;
+    } = { current: null };
+    const service: EntitlementService = {
+      kind: 'revenuecat',
+      initialize: async () => undefined,
+      hasFullGame: async () => false,
+      getFullGameOffer: async () => null,
+      purchaseFullGame: () => {
+        purchaseCalls += 1;
+        markPurchaseStarted();
+        return purchaseResult;
+      },
+      restorePurchases: async () => {
+        restoreCalls += 1;
+        return { status: 'not-found' };
+      },
+      subscribe: (listener) => {
+        listenerRef.current = listener;
+        return () => {
+          listenerRef.current = null;
+        };
+      },
+    };
+
+    await initializeEntitlements(service);
+
+    const firstPurchase = useEntitlementStore.getState().purchaseFullGame();
+    const secondPurchase = useEntitlementStore.getState().purchaseFullGame();
+
+    expect(secondPurchase).toBe(firstPurchase);
+    await purchaseStarted;
+    expect(purchaseCalls).toBe(1);
+    expect(useEntitlementStore.getState().status).toBe('purchasing');
+
+    listenerRef.current?.(true);
+    expect(useEntitlementStore.getState()).toMatchObject({
+      hasFullGame: true,
+      cachedHasFullGame: true,
+      status: 'purchasing',
+      notice: null,
+    });
+
+    const thirdPurchase = useEntitlementStore.getState().purchaseFullGame();
+    expect(thirdPurchase).toBe(firstPurchase);
+    expect(purchaseCalls).toBe(1);
+    await expect(
+      useEntitlementStore.getState().restorePurchases(),
+    ).resolves.toEqual({
+      status: 'error',
+      message: 'Another Full Atelier store operation is already in progress.',
+    });
+    expect(restoreCalls).toBe(0);
+
+    // The latest listener snapshot wins even when ownership changed away and
+    // back to the operation's starting value before the SDK result arrives.
+    listenerRef.current?.(false);
+    resolvePurchase({ status: 'purchased' });
+    await expect(
+      Promise.all([firstPurchase, secondPurchase, thirdPurchase]),
+    ).resolves.toEqual([
+      { status: 'purchased' },
+      { status: 'purchased' },
+      { status: 'purchased' },
+    ]);
+    expect(useEntitlementStore.getState()).toMatchObject({
+      hasFullGame: false,
+      cachedHasFullGame: false,
+      status: 'ready',
+      notice: null,
+    });
+
+    const laterPurchase = useEntitlementStore.getState().purchaseFullGame();
+    expect(laterPurchase).not.toBe(firstPurchase);
+    await expect(laterPurchase).resolves.toEqual({ status: 'purchased' });
+    expect(purchaseCalls).toBe(2);
+  });
+
+  test('coalesces restores and prevents a purchase from overlapping them', async () => {
+    let restoreCalls = 0;
+    let purchaseCalls = 0;
+    let resolveRestore!: (result: RestoreResult) => void;
+    let markRestoreStarted!: () => void;
+    const restoreStarted = new Promise<void>((resolve) => {
+      markRestoreStarted = resolve;
+    });
+    const restoreResult = new Promise<RestoreResult>((resolve) => {
+      resolveRestore = resolve;
+    });
+    const listenerRef: {
+      current: ((hasFullGame: boolean) => void) | null;
+    } = { current: null };
+    const service: EntitlementService = {
+      kind: 'revenuecat',
+      initialize: async () => undefined,
+      hasFullGame: async () => false,
+      getFullGameOffer: async () => null,
+      purchaseFullGame: async () => {
+        purchaseCalls += 1;
+        return { status: 'purchased' };
+      },
+      restorePurchases: () => {
+        restoreCalls += 1;
+        markRestoreStarted();
+        return restoreResult;
+      },
+      subscribe: (listener) => {
+        listenerRef.current = listener;
+        return () => {
+          listenerRef.current = null;
+        };
+      },
+    };
+
+    await initializeEntitlements(service);
+
+    const firstRestore = useEntitlementStore.getState().restorePurchases();
+    const secondRestore = useEntitlementStore.getState().restorePurchases();
+    expect(secondRestore).toBe(firstRestore);
+    await restoreStarted;
+    expect(restoreCalls).toBe(1);
+
+    await expect(
+      useEntitlementStore.getState().purchaseFullGame(),
+    ).resolves.toEqual({
+      status: 'error',
+      message: 'Another Full Atelier store operation is already in progress.',
+    });
+    expect(purchaseCalls).toBe(0);
+    expect(useEntitlementStore.getState().status).toBe('restoring');
+
+    listenerRef.current?.(true);
+    expect(useEntitlementStore.getState()).toMatchObject({
+      hasFullGame: true,
+      status: 'restoring',
+      notice: null,
+    });
+
+    // The later restore snapshot must not overwrite the newer listener update.
+    resolveRestore({ status: 'not-found' });
+    await expect(Promise.all([firstRestore, secondRestore])).resolves.toEqual([
+      { status: 'not-found' },
+      { status: 'not-found' },
+    ]);
+    expect(useEntitlementStore.getState()).toMatchObject({
+      hasFullGame: true,
+      status: 'ready',
+      notice: null,
+    });
+
+    await expect(
+      useEntitlementStore.getState().purchaseFullGame(),
+    ).resolves.toEqual({ status: 'purchased' });
+    expect(purchaseCalls).toBe(1);
+  });
+
+  test('ignores a late purchase result from a superseded service', async () => {
+    let resolvePurchase!: (result: PurchaseResult) => void;
+    let markPurchaseStarted!: () => void;
+    const purchaseStarted = new Promise<void>((resolve) => {
+      markPurchaseStarted = resolve;
+    });
+    const purchaseResult = new Promise<PurchaseResult>((resolve) => {
+      resolvePurchase = resolve;
+    });
+    const firstService: EntitlementService = {
+      kind: 'revenuecat',
+      initialize: async () => undefined,
+      hasFullGame: async () => false,
+      getFullGameOffer: async () => null,
+      purchaseFullGame: () => {
+        markPurchaseStarted();
+        return purchaseResult;
+      },
+      restorePurchases: async () => ({ status: 'not-found' }),
+      subscribe: () => () => undefined,
+    };
+    const secondService: EntitlementService = {
+      ...firstService,
+      purchaseFullGame: async () => ({ status: 'purchased' }),
+    };
+
+    await initializeEntitlements(firstService);
+    const pendingPurchase = useEntitlementStore
+      .getState()
+      .purchaseFullGame();
+    await purchaseStarted;
+    await initializeEntitlements(secondService);
+
+    resolvePurchase({ status: 'purchased' });
+    await expect(pendingPurchase).resolves.toEqual({ status: 'purchased' });
+
+    expect(useEntitlementStore.getState()).toMatchObject({
+      hasFullGame: false,
+      cachedHasFullGame: false,
+      cacheSource: 'revenuecat',
+      serviceKind: 'revenuecat',
+      status: 'ready',
+      notice: null,
+    });
+  });
+
+  test('lets replacement commerce proceed when prior cleanup and purchase are stuck', async () => {
+    let resolveFirstPurchase!: (result: PurchaseResult) => void;
+    let markFirstPurchaseStarted!: () => void;
+    const firstPurchaseStarted = new Promise<void>((resolve) => {
+      markFirstPurchaseStarted = resolve;
+    });
+    const firstPurchaseResult = new Promise<PurchaseResult>((resolve) => {
+      resolveFirstPurchase = resolve;
+    });
+    const firstService: EntitlementService = {
+      kind: 'revenuecat',
+      initialize: async () => undefined,
+      hasFullGame: async () => false,
+      getFullGameOffer: async () => null,
+      purchaseFullGame: () => {
+        markFirstPurchaseStarted();
+        return firstPurchaseResult;
+      },
+      restorePurchases: async () => ({ status: 'not-found' }),
+      subscribe: () => () => {
+        throw new Error('Native listener cleanup failed');
+      },
+    };
+    let replacementPurchaseCalls = 0;
+    const replacementService: EntitlementService = {
+      ...firstService,
+      purchaseFullGame: async () => {
+        replacementPurchaseCalls += 1;
+        return { status: 'purchased' };
+      },
+      subscribe: () => () => undefined,
+    };
+
+    await initializeEntitlements(firstService);
+    const oldPurchase = useEntitlementStore.getState().purchaseFullGame();
+    await firstPurchaseStarted;
+
+    await expect(
+      initializeEntitlements(replacementService),
+    ).resolves.toBeUndefined();
+    await expect(
+      useEntitlementStore.getState().purchaseFullGame(),
+    ).resolves.toEqual({ status: 'purchased' });
+    expect(replacementPurchaseCalls).toBe(1);
+
+    resolveFirstPurchase({ status: 'cancelled' });
+    await expect(oldPurchase).resolves.toEqual({ status: 'cancelled' });
+    expect(useEntitlementStore.getState()).toMatchObject({
+      hasFullGame: true,
+      cachedHasFullGame: true,
+      status: 'ready',
+      notice: {
+        kind: 'success',
+        message: 'Full Atelier is unlocked on this device.',
+      },
+    });
+  });
+
+  test('fences a reentrant old listener during throwing native cleanup', async () => {
+    let firstListener: ((hasFullGame: boolean) => void) | null = null;
+    const firstService: EntitlementService = {
+      kind: 'revenuecat',
+      initialize: async () => undefined,
+      hasFullGame: async () => false,
+      getFullGameOffer: async () => null,
+      purchaseFullGame: async () => ({ status: 'purchased' }),
+      restorePurchases: async () => ({ status: 'not-found' }),
+      subscribe: (listener) => {
+        firstListener = listener;
+        return () => {
+          firstListener?.(true);
+          throw new Error('Native listener cleanup failed');
+        };
+      },
+    };
+    let finishReplacement!: () => void;
+    const replacementInitialization = new Promise<void>((resolve) => {
+      finishReplacement = resolve;
+    });
+    const replacementService: EntitlementService = {
+      ...firstService,
+      initialize: () => replacementInitialization,
+      subscribe: () => () => undefined,
+    };
+
+    await initializeEntitlements(firstService);
+    const pendingReplacement = initializeEntitlements(replacementService);
+
+    expect(useEntitlementStore.getState()).toMatchObject({
+      hasFullGame: false,
+      cachedHasFullGame: false,
+      status: 'refreshing',
+      serviceKind: 'revenuecat',
+    });
+
+    finishReplacement();
+    await pendingReplacement;
+    expect(useEntitlementStore.getState()).toMatchObject({
+      hasFullGame: false,
+      cachedHasFullGame: false,
+      status: 'ready',
+    });
+  });
+
+  test('does not migrate commerce waiting on refresh to a replacement service', async () => {
+    let entitlementChecks = 0;
+    let markRefreshStarted!: () => void;
+    let resolveRefresh!: (hasFullGame: boolean) => void;
+    const refreshStarted = new Promise<void>((resolve) => {
+      markRefreshStarted = resolve;
+    });
+    const refreshResult = new Promise<boolean>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    const firstService: EntitlementService = {
+      kind: 'revenuecat',
+      initialize: async () => undefined,
+      hasFullGame: () => {
+        entitlementChecks += 1;
+        if (entitlementChecks === 1) return Promise.resolve(false);
+        markRefreshStarted();
+        return refreshResult;
+      },
+      getFullGameOffer: async () => null,
+      purchaseFullGame: async () => ({ status: 'purchased' }),
+      restorePurchases: async () => ({ status: 'not-found' }),
+      subscribe: () => () => undefined,
+    };
+    let replacementPurchaseCalls = 0;
+    const replacementService: EntitlementService = {
+      ...firstService,
+      hasFullGame: async () => false,
+      purchaseFullGame: async () => {
+        replacementPurchaseCalls += 1;
+        return { status: 'purchased' };
+      },
+    };
+
+    await initializeEntitlements(firstService);
+    const oldRefresh = useEntitlementStore.getState().refreshEntitlement();
+    await refreshStarted;
+    const oldPurchase = useEntitlementStore.getState().purchaseFullGame();
+
+    await initializeEntitlements(replacementService);
+    await expect(
+      useEntitlementStore.getState().purchaseFullGame(),
+    ).resolves.toEqual({ status: 'purchased' });
+
+    resolveRefresh(false);
+    await oldRefresh;
+    await expect(oldPurchase).resolves.toEqual({
+      status: 'error',
+      message: 'Another Full Atelier store operation is already in progress.',
+    });
+    expect(replacementPurchaseCalls).toBe(1);
+    expect(useEntitlementStore.getState()).toMatchObject({
+      hasFullGame: true,
+      status: 'ready',
+      notice: {
+        kind: 'success',
+        message: 'Full Atelier is unlocked on this device.',
+      },
+    });
+  });
+
+  test('coalesces refreshes and orders commerce after a newer listener snapshot', async () => {
+    let entitlementChecks = 0;
+    let purchaseCalls = 0;
+    let resolveRefresh!: (hasFullGame: boolean) => void;
+    let markRefreshStarted!: () => void;
+    const refreshStarted = new Promise<void>((resolve) => {
+      markRefreshStarted = resolve;
+    });
+    const refreshResult = new Promise<boolean>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    const listenerRef: {
+      current: ((hasFullGame: boolean) => void) | null;
+    } = { current: null };
+    const service: EntitlementService = {
+      kind: 'revenuecat',
+      initialize: async () => undefined,
+      hasFullGame: () => {
+        entitlementChecks += 1;
+        if (entitlementChecks === 1) return Promise.resolve(false);
+        markRefreshStarted();
+        return refreshResult;
+      },
+      getFullGameOffer: async () => null,
+      purchaseFullGame: async () => {
+        purchaseCalls += 1;
+        return { status: 'purchased' };
+      },
+      restorePurchases: async () => ({ status: 'not-found' }),
+      subscribe: (listener) => {
+        listenerRef.current = listener;
+        return () => {
+          listenerRef.current = null;
+        };
+      },
+    };
+
+    await initializeEntitlements(service);
+    const firstRefresh = useEntitlementStore.getState().refreshEntitlement();
+    const secondRefresh = useEntitlementStore.getState().refreshEntitlement();
+    expect(secondRefresh).toBe(firstRefresh);
+    await refreshStarted;
+
+    const purchase = useEntitlementStore.getState().purchaseFullGame();
+    expect(purchaseCalls).toBe(0);
+    expect(useEntitlementStore.getState().status).toBe('refreshing');
+
+    // Even the same boolean is a newer authoritative snapshot than the
+    // outstanding query, so its stale `true` result must not be committed.
+    listenerRef.current?.(false);
+    resolveRefresh(true);
+    await Promise.all([firstRefresh, secondRefresh]);
+    await expect(purchase).resolves.toEqual({ status: 'purchased' });
+
+    expect(entitlementChecks).toBe(2);
+    expect(purchaseCalls).toBe(1);
+    expect(useEntitlementStore.getState()).toMatchObject({
+      hasFullGame: true,
+      cachedHasFullGame: true,
+      status: 'ready',
+      notice: {
+        kind: 'success',
+        message: 'Full Atelier is unlocked on this device.',
+      },
+    });
+  });
+
   test('treats a cancelled mock purchase as neutral and keeps access locked', async () => {
     await initializeEntitlements(
       new MockEntitlementService({ purchaseOutcome: 'cancel' }),
@@ -189,6 +638,55 @@ describe('entitlement store', () => {
         kind: 'neutral',
         message: 'Purchase cancelled. Nothing was charged.',
       },
+    });
+  });
+
+  test('keeps commerce feedback after a same-value listener snapshot', async () => {
+    let listenerRef: ((hasFullGame: boolean) => void) | null = null;
+    const service: EntitlementService = {
+      kind: 'revenuecat',
+      initialize: async () => undefined,
+      hasFullGame: async () => false,
+      getFullGameOffer: async () => null,
+      purchaseFullGame: async () => {
+        listenerRef?.(false);
+        return { status: 'cancelled' };
+      },
+      restorePurchases: async () => {
+        listenerRef?.(false);
+        return { status: 'error', message: 'Restore stayed offline.' };
+      },
+      subscribe: (listener) => {
+        listenerRef = listener;
+        return () => {
+          listenerRef = null;
+        };
+      },
+    };
+
+    await initializeEntitlements(service);
+    await expect(
+      useEntitlementStore.getState().purchaseFullGame(),
+    ).resolves.toEqual({ status: 'cancelled' });
+    expect(useEntitlementStore.getState()).toMatchObject({
+      hasFullGame: false,
+      status: 'ready',
+      notice: {
+        kind: 'neutral',
+        message: 'Purchase cancelled. Nothing was charged.',
+      },
+    });
+
+    await expect(
+      useEntitlementStore.getState().restorePurchases(),
+    ).resolves.toEqual({
+      status: 'error',
+      message: 'Restore stayed offline.',
+    });
+    expect(useEntitlementStore.getState()).toMatchObject({
+      hasFullGame: false,
+      status: 'error',
+      notice: { kind: 'error', message: 'Restore stayed offline.' },
     });
   });
 
@@ -291,6 +789,57 @@ describe('entitlement store', () => {
       hasFullGame: true,
       cachedHasFullGame: true,
       cacheSource: 'mock',
+    });
+  });
+
+  test('normalizes stale success and error UI when the listener changes access', async () => {
+    const listenerRef: {
+      current: ((hasFullGame: boolean) => void) | null;
+    } = { current: null };
+    const service: EntitlementService = {
+      kind: 'revenuecat',
+      initialize: async () => undefined,
+      hasFullGame: async () => false,
+      getFullGameOffer: async () => null,
+      purchaseFullGame: async () => ({ status: 'purchased' }),
+      restorePurchases: async () => ({ status: 'not-found' }),
+      subscribe: (listener) => {
+        listenerRef.current = listener;
+        return () => {
+          listenerRef.current = null;
+        };
+      },
+    };
+
+    await initializeEntitlements(service);
+
+    useEntitlementStore.setState({
+      hasFullGame: true,
+      cachedHasFullGame: true,
+      status: 'ready',
+      notice: {
+        kind: 'success',
+        message: 'Full Atelier purchase restored.',
+      },
+    });
+    listenerRef.current?.(false);
+    expect(useEntitlementStore.getState()).toMatchObject({
+      hasFullGame: false,
+      cachedHasFullGame: false,
+      status: 'ready',
+      notice: null,
+    });
+
+    useEntitlementStore.setState({
+      status: 'error',
+      notice: { kind: 'error', message: 'Store temporarily unavailable.' },
+    });
+    listenerRef.current?.(true);
+    expect(useEntitlementStore.getState()).toMatchObject({
+      hasFullGame: true,
+      cachedHasFullGame: true,
+      status: 'ready',
+      notice: null,
     });
   });
 
