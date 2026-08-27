@@ -2,14 +2,16 @@
 
 ## Goal
 
-Extend the proven portrait physics-puzzle slice into a complete local campaign:
-three quilt sections, 15 validated levels, sequential unlocking, durable
-per-level progress, two stitch types, three fabric properties, deterministic
-hazards/collectibles, scoring, best-result comparison, and replay.
+Extend the proven portrait physics-puzzle slice into a complete offline-first
+campaign with a natural one-time unlock: three quilt sections, 15 validated
+levels, sequential progression, durable per-level progress, two stitch types,
+three fabric properties, deterministic hazards/collectibles, scoring, replay,
+and a fail-soft Full Atelier entitlement for Levels 7–15.
 
-Milestone 3 remains offline-first and service-independent. RevenueCat,
-entitlement gates, InsForge, Daily Scrap, remote leaderboards, and production
-content remain later work.
+Milestone 4 wraps the working campaign with RevenueCat without making a
+purchase, account, credential, or network prerequisite for Levels 1–6.
+InsForge, Daily Scrap, remote leaderboards, production store configuration, and
+final content remain later work or external acceptance gates.
 
 ## Milestone 1 plan
 
@@ -95,6 +97,38 @@ content remain later work.
    then complete the physical campaign checklist on the installed iOS
    development client.
 
+## Milestone 4 plan
+
+1. Define a platform-neutral entitlement service with stable
+   `full_atelier` entitlement and `pullthread_full_game` product identifiers.
+   Provide RevenueCat, deterministic mock, and unavailable locked
+   implementations without committing environment values.
+2. Persist the last verified entitlement through a versioned, sanitized,
+   fail-soft AsyncStorage store. Hydrate it before navigation, then initialize
+   or refresh RevenueCat asynchronously so network work never blocks launch.
+3. Derive campaign access in pure TypeScript: Levels 1–6 remain free, Levels
+   7–15 require Full Atelier, completed premium replays remain gated, and
+   purchase never bypasses predecessor progression.
+4. Apply the same access rule to Quilt Map nodes, Results `Next Level`, and
+   direct gameplay routes. Keep sequence locks disabled while premium locks
+   remain pressable and explain the one-time unlock.
+5. Add a custom Full Atelier paywall with nine-level/mechanic benefits,
+   localized offer price, explicit one-time/no-subscription language, purchase,
+   restore, cancellation, failure, and already-unlocked states. Never show it
+   automatically at launch.
+6. Add Restore Purchases to Settings and a development-only, non-persisted
+   entitlement lock/unlock override. Missing production configuration must not
+   grant new access; development may fall back to the mock.
+7. Cover service behavior, persistence/migration, offline refresh failure,
+   access rules, map/results/direct-route guards, paywall states, and Settings
+   restore with Jest and React Native Testing Library.
+8. Add a separate Maestro development-mock flow. Keep its evidence explicitly
+   separate from real StoreKit/Play Billing, receipt validation, sandbox
+   cancellation, fresh-install restore, and offline physical-device proof.
+9. Rebuild the native development client for `react-native-purchases`, repeat
+   lint/typecheck/test/Doctor/export, then perform real iOS and Android store
+   acceptance passes when dashboard products and platform keys are available.
+
 ## Architecture
 
 ```text
@@ -105,18 +139,21 @@ src/
     QuiltMapScreen/
     SpikeLevelScreen/
     ResultsScreen/
+    PaywallScreen/
     SettingsScreen/
   game/
     core/           # pure geometry, height field, physics, simulation, types
     input/          # normalized stitch gesture
-    levels/         # validated quilt/level catalog and runtime loaders
+    levels/         # catalog, pure access policy, and runtime loaders
     rendering/      # Skia-only drawing components
     runtime/        # fixed-step session and animation loop
     replay/         # campaign replay plus Level 1 compatibility wrapper
     tutorial/       # pure guided-flow reducer and accepted copy
     feedback/       # haptic/audio interface and Expo implementation
-  store/            # active run plus separately persisted preferences and
-                    # versioned per-level campaign progress
+  services/
+    entitlements/   # mock/RevenueCat implementations behind one contract
+  store/            # active run plus separately persisted preferences,
+                    # campaign progress, and verified entitlement cache
   components/       # reachable controls and outcome UI
   theme/            # textile design tokens
 tests/
@@ -162,6 +199,17 @@ Reference: `docs/design/pullthread-gameplay-concept.png`
   Level 2, and that state plus the best scored run survives a cold relaunch.
 - Results and the Quilt Map expose earned thimbles and patch state without
   relying on color alone.
+- Levels 1–6 never require Full Atelier; Levels 7–15 do, including replay of a
+  previously completed premium level.
+- Premium locks open Paywall, while entitlement without predecessor progress
+  remains sequence-locked. Results and direct routes cannot bypass either rule.
+- Purchase cancellation, unavailable offers, initialization failure, and
+  restore errors preserve prior access and never erase campaign progress.
+- A previously verified RevenueCat entitlement remains usable from local cache
+  while offline; network refresh never blocks the free campaign.
+- Development mock proof is reported separately from a real store transaction.
+  Real completion requires a rebuilt native client plus physical purchase,
+  cancellation, restore, and offline cold-launch evidence.
 
 ## Environment tradeoff
 
@@ -232,10 +280,41 @@ outstanding.
 - [ ] Manual physical-device campaign checklist, campaign recording,
       performance notes, and native Maestro evidence.
 
+### Milestone 4
+
+- [x] Platform-neutral entitlement contract with RevenueCat, development mock,
+      and unavailable locked implementations.
+- [x] Versioned, fail-soft cached entitlement hydration and asynchronous SDK
+      refresh that does not block the campaign.
+- [x] Pure premium/progression access rules for the first six free levels and
+      nine Full Atelier levels.
+- [x] Quilt Map, Results, and direct-route access guards with distinct Atelier
+      and sequence lock behavior.
+- [x] Custom one-time Full Atelier paywall with purchase, cancellation/error,
+      restore, localized-offer, and unlocked states.
+- [x] Settings restore action and development-only lock/unlock/auto controls.
+- [x] Focused service, store, access, screen, paywall, and restore tests.
+- [x] Separate Maestro development-mock paywall/restore flow authored.
+- [x] Integrated final lint, typecheck, Jest, Expo Doctor, and all-platform
+      export snapshot on the completed Milestone 4 change set.
+- [ ] Rebuilt physical-device client containing `react-native-purchases`.
+- [ ] Real iOS sandbox purchase, cancellation, fresh-install restore, and
+      verified offline cold-launch evidence.
+- [ ] Android Play test purchase, cancellation, restore, and offline evidence.
+
 ## Completed work and tradeoffs
 
 - The campaign launches at the Quilt Map with no account, service credential,
-  purchase, or network-backed gameplay dependency.
+  purchase, or network-backed gameplay dependency for the free campaign.
+- Full Atelier wraps, rather than owns, campaign progression. The last verified
+  RevenueCat entitlement is cached independently of level progress; a purchase
+  cannot fabricate predecessor completion and purchase failures cannot erase
+  completed runs.
+- `auto` mode selects RevenueCat only when the native platform key exists,
+  falls back to a locked development mock when appropriate, and stays
+  unavailable/locked in production when configuration is missing. Production
+  builds also reject explicit `mock` mode, so it cannot become transaction
+  evidence or a release unlock.
 - Rendering uses the documented procedural fallback: woven Skia paths,
   displaced height-field guides, contour/shadow cues, and the same surface data
   sampled by physics. A dynamically textured vertex mesh remains deferred so
@@ -256,16 +335,20 @@ outstanding.
 - `npm audit --omit=dev` currently reports 14 transitive findings (10 moderate,
   4 high) in the Expo
   57 build chain (`metro`/`image-size` and `xcode`/`uuid`). A non-mutating
-  `npm audit fix --dry-run --omit=dev` leaves the same findings, while the force
-  path proposes a breaking Expo 46 downgrade, so no incompatible fix was applied;
-  this should be rechecked when Expo publishes an updated compatible chain.
+  `npm audit fix --dry-run` proposes no compatible lockfile change, while the
+  force path proposes a breaking Expo 46 downgrade, so no incompatible fix was
+  applied; this should be rechecked when Expo publishes an updated compatible
+  chain.
 - Milestone 3 stores per-level best runs locally. Scored achievements merge
   across successful attempts so an earned thread target or collectible patch
   is not lost when a different run supplies better comparison metrics.
-- AsyncStorage and the SDK 57 patch updates are native dependency changes. The
-  recorded Milestone 3 Release build includes those updates; rebuild the client
-  again whenever native dependencies change before relying on later phone
-  evidence.
+- AsyncStorage and SDK patch changes are native dependency changes. The recorded
+  Milestone 3 Release build contains its then-current dependency set, but it
+  predates the latest Milestone 4 patch alignment; rebuild before relying on
+  later phone evidence.
+- `react-native-purchases` is another native dependency change. The recorded
+  Milestone 3 binary predates it and cannot prove Milestone 4 RevenueCat
+  behavior even when it loads the latest JavaScript from Metro.
 
 ## Verification snapshot — 2026-08-18
 
@@ -314,12 +397,30 @@ outstanding.
   limited owner-reported manual smoke passed; detailed checklist, recording,
   performance/lifecycle observations, and native Maestro remain pending.
 
+## Milestone 4 verification snapshot — 2026-08-26
+
+- `npm ci` — clean lockfile install and Skia web setup passed.
+- `npm run lint` — passed with no warnings.
+- `npm run typecheck` — passed.
+- `npm test` — 31 suites and 296 tests passed.
+- `npx expo-doctor@latest` — 21 of 21 checks passed after aligning the current
+  Expo SDK 57 patch matrix.
+- `npm run export` — web, Android, and iOS bundles exported successfully with
+  `react-native-purchases` in the dependency graph.
+- Maestro YAML parse — all three installed-app flows are valid YAML, including
+  the new development-mock Full Atelier flow.
+- `.maestro/full-atelier-mock.yaml` on an installed target — pending because the
+  Maestro CLI and a rebuilt Milestone 4 native client are not available in this
+  verification pass.
+- Real RevenueCat iOS/Android store transactions and offline cold-launch proof —
+  pending dashboard/store configuration and physical-device execution.
+
 ## Next milestone
 
-Complete the remaining detailed sections in
-[`CAMPAIGN_SMOKE_TEST.md`](CAMPAIGN_SMOKE_TEST.md) plus the extended checks in
-[`PHYSICAL_DEVICE_TEST.md`](PHYSICAL_DEVICE_TEST.md). Tune
-campaign gestures, map usability, feedback timing, replay pacing, and frame
-pacing only from recorded evidence. After Milestone 3 is device-validated,
-Milestone 4 can add RevenueCat entitlement/restore behavior and later service
-work without weakening the offline campaign.
+Rebuild the native client and record the real RevenueCat sandbox/device matrix
+without conflating it with the already-green automated and mock-flow coverage.
+The remaining detailed sections in
+[`CAMPAIGN_SMOKE_TEST.md`](CAMPAIGN_SMOKE_TEST.md) and
+[`PHYSICAL_DEVICE_TEST.md`](PHYSICAL_DEVICE_TEST.md) also remain open. Once the
+campaign and transaction gates are recorded, Milestone 5 can add the local
+Daily Scrap model and InsForge adapter without becoming a campaign dependency.

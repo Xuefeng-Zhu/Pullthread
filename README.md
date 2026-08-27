@@ -7,12 +7,12 @@ Native. The player draws pinch and pocket stitches across a quilt, the stitches
 deform a shared height field, and a button-shaped traveler rolls over that
 changed surface toward an embroidered goal.
 
-The repository now contains the Milestone 3 local campaign: a three-quilt map,
-15 authored levels, sequential unlocking, durable per-level progress, pinch and
-pocket stitches, felt/silk/elastic regions, holes, thorns, bumpers, collectible
-patches, deterministic thimble scoring, best-run comparisons, and
-campaign-aware replay. RevenueCat, InsForge, Daily Scrap, and production
-content remain intentionally deferred.
+The repository now contains the Milestone 4 campaign and monetization slice: a
+three-quilt map, 15 authored levels, sequential unlocking, durable per-level
+progress, deterministic gameplay/replay, a one-time Full Atelier entitlement,
+RevenueCat and development-mock implementations, a custom paywall, restore
+purchases, offline entitlement caching, and premium access guards. InsForge,
+Daily Scrap, production store configuration, and final content remain deferred.
 
 > **Physical-device gate: limited Milestone 3 iOS smoke passed; full checklist
 > pending.** A locally signed Release build with an embedded Hermes bundle for
@@ -22,6 +22,12 @@ content remain intentionally deferred.
 > campaign, touch, haptic/audio, lifecycle, performance, repetition, recording,
 > and native Maestro checks remain open.
 
+> **Milestone 4 transaction gate: implementation complete; real store proof
+> pending.** Automated and development-mock coverage does not prove an Apple or
+> Google transaction. A new native build, configured RevenueCat project, store
+> sandbox product, purchase/cancellation pass, restore pass, and verified
+> offline cold launch are still required on physical hardware.
+
 ## Technology
 
 - Expo SDK 57, React Native 0.86, and React 19.2
@@ -30,7 +36,9 @@ content remain intentionally deferred.
 - React Native Reanimated and Gesture Handler for tactile interaction
 - Zustand for coarse gameplay state
 - AsyncStorage for versioned preferences, tutorial completion, and campaign
-  progress
+  progress plus the last verified Full Atelier entitlement
+- RevenueCat `react-native-purchases` behind a platform-neutral entitlement
+  service, with a credential-free development mock
 - Expo Audio and Expo Haptics behind a feedback abstraction
 - Jest and React Native Testing Library
 - Maestro for the installed-app smoke flow
@@ -48,8 +56,9 @@ development and CI environment more narrowly to **Node 24.x** through
   Xcode, and either a simulator or a trusted phone with Developer Mode enabled
 - Optional for the smoke flow: the [Maestro CLI](https://docs.maestro.dev/)
 
-No RevenueCat or InsForge credentials are needed for the local Milestone 3
-campaign.
+No RevenueCat or InsForge credentials are needed to play Levels 1–6 or use the
+development mock. Real Full Atelier transactions require platform-specific
+RevenueCat public SDK keys and matching App Store / Play products.
 
 ## Install
 
@@ -113,8 +122,85 @@ Rebuild the native development client after changing native dependencies,
 native configuration, or the Expo SDK. The campaign implementation itself is
 JavaScript/TypeScript, but this integrated change set also aligns Expo,
 Expo Asset, Expo Dev Client, and Metro Runtime to the SDK 57 patch matrix.
-The recorded 2026-08-26 Release build includes that alignment. Rebuild before
-relying on later device evidence whenever native dependencies change.
+The recorded 2026-08-26 Milestone 3 Release build predates this Milestone 4
+dependency set. Rebuild before relying on later device evidence.
+
+Milestone 4 adds the native `react-native-purchases` SDK. An older Pullthread
+binary cannot exercise RevenueCat even if Metro serves the new JavaScript.
+Re-run `npx expo run:ios --device` or `npx expo run:android --device` after
+installing this change before testing a real native purchase flow. Use that
+same rebuilt client when recording the mock flow as device evidence.
+
+## RevenueCat and Full Atelier
+
+The first six levels are free. Levels 7–15 require the one-time Full Atelier
+entitlement **and** their normal predecessor completion; buying Full Atelier
+does not skip campaign progression. A premium node opens the paywall instead of
+starting gameplay. Results and direct level routes apply the same access rule,
+so the map is not the only guard. The paywall is never shown at launch.
+
+Pullthread uses these stable RevenueCat identifiers:
+
+```text
+entitlement: full_atelier
+product:     pullthread_full_game
+```
+
+Copy the environment template for local work:
+
+```sh
+cp .env.example .env
+```
+
+The supported variables are:
+
+| Variable | Meaning |
+| --- | --- |
+| `EXPO_PUBLIC_ENTITLEMENT_MODE` | `auto`, `mock`, or `revenuecat` |
+| `EXPO_PUBLIC_REVENUECAT_IOS_API_KEY` | Apple-platform public SDK key |
+| `EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY` | Google-platform public SDK key |
+
+Mode selection is deliberately fail-safe:
+
+- `auto` uses RevenueCat when the selected native platform has a key. In a
+  development build with no key it uses the locked-by-default mock. In a
+  production build with no key, purchases remain unavailable and a fresh
+  install stays locked; previously RevenueCat-verified offline access remains.
+  The development mock never replaces or downgrades that stronger cache record.
+- `mock` provides a deterministic local offer, purchase, restore-not-found,
+  and development lock/unlock controls without contacting a store. Production
+  builds ignore this mode and cannot grant new access.
+- `revenuecat` requires the current platform key. A missing key does not unlock
+  content; the app uses its unavailable, locked state.
+- Web uses the unavailable state unless mock mode is selected. This project
+  does not configure RevenueCat Web Billing.
+
+Do not commit real key values. RevenueCat platform SDK keys are public client
+configuration rather than secret backend API keys, but this repository keeps
+all environment-specific values outside source control. Never place a
+RevenueCat secret API key in an `EXPO_PUBLIC_*` variable.
+
+For a real store pass:
+
+1. Create the `pullthread_full_game` non-consumable in App Store Connect and
+   Google Play Console as applicable.
+2. Mark the Android product non-consumable in RevenueCat, then attach the
+   product to the `full_atelier` entitlement and current offering. Pullthread
+   rejects subscriptions and ambiguous offering metadata. The installed native
+   bridge labels Google Play one-time products `NON_SUBSCRIPTION` + `CONSUMABLE`;
+   RevenueCat's dashboard non-consumable setting controls repeat purchase and
+   restore behavior on Android. Apple consumables remain rejected.
+3. Put only the matching platform public SDK key in the local `.env` or build
+   environment and use `EXPO_PUBLIC_ENTITLEMENT_MODE=revenuecat`.
+4. Rebuild the native app, sign in with a sandbox/test store account, and test
+   purchase, cancellation, and explicit restore on the physical device.
+
+At launch, Pullthread hydrates a versioned local entitlement cache before
+rendering navigation, then refreshes RevenueCat asynchronously. A refresh
+failure never blocks the offline campaign and does not erase previously
+verified access. Purchase and restore still require the platform store and may
+fail offline; the paywall reports that failure without changing campaign
+progress. Offer details are not treated as durable entitlement proof.
 
 ### Simulator, emulator, and web diagnostics
 
@@ -178,6 +264,14 @@ The flows expect an installed app with identifier
 - `results-map-button`
 - `try-again-button`
 - `settings-screen`
+- `settings-entitlement-status`
+- `settings-restore-button`
+- `level-state-attic-07-pocket-catch`
+- `paywall-screen`
+- `paywall-status`
+- `paywall-purchase-button`
+- `paywall-restore-button`
+- `paywall-close-button`
 - `undo-button`
 - `reset-button`
 
@@ -186,6 +280,7 @@ Start Metro if the installed development build needs it, then run:
 ```sh
 maestro test .maestro/spike-smoke.yaml
 maestro test .maestro/failure-retry.yaml
+maestro test .maestro/full-atelier-mock.yaml
 ```
 
 The main flow launches cleanly on the Quilt Map, enters Level 1, starts its pull
@@ -198,6 +293,15 @@ Undo, and Reset. Maestro proves the control path on the selected installed
 target; it does not judge tactile quality or prove physics determinism by
 itself.
 
+`full-atelier-mock.yaml` separately checks the deterministic development mock:
+the development tool completes the free path, Level 7 opens the Full Atelier
+paywall, restore-not-found is handled, mock purchase makes the reached level
+current/playable, and the mock cache survives a cold relaunch. Separate access
+tests prove that entitlement alone cannot bypass sequence. This flow does
+**not** prove StoreKit, Google Play Billing, RevenueCat receipt validation, a
+real localized offer, or a real restore. Record those as separate
+physical-device transaction evidence.
+
 ## Architecture and proof standard
 
 The campaign keeps geometry, deformation, physics, level validation, replay
@@ -209,20 +313,22 @@ fixed-step loop, campaign catalog, persistence, and replay boundaries. Level
 authors should also read [`docs/LEVEL_FORMAT.md`](docs/LEVEL_FORMAT.md).
 
 The implementation plan and current tradeoffs live in
-[`docs/BUILD_PLAN.md`](docs/BUILD_PLAN.md). The limited physical campaign pass
-and remaining checklist are recorded in
+[`docs/BUILD_PLAN.md`](docs/BUILD_PLAN.md), and the campaign access and
+monetization rules live in [`docs/GAME_DESIGN.md`](docs/GAME_DESIGN.md). The
+limited physical campaign pass and remaining checklist are recorded in
 [`docs/CAMPAIGN_SMOKE_TEST.md`](docs/CAMPAIGN_SMOKE_TEST.md).
 
-## Explicitly deferred
+## Remaining work and explicit boundaries
 
-The following are not part of the local Milestone 3 campaign and should not be
+The following remain outside the implemented local campaign and should not be
 inferred from it:
 
-- RevenueCat purchases, restore purchases, and entitlement caching
 - InsForge, Daily Scrap, guest identity, and leaderboards
-- Premium level gates and remote/cloud save synchronization
+- Remote/cloud save synchronization
 - Remote content delivery, daily challenge content, and social systems
 - Production audio, final art, store builds, and release signing
+- RevenueCat dashboard/store product configuration and real iOS/Android
+  sandbox purchase, cancellation, restore, and offline-device evidence
 - A completed Milestone 3 physical-device checklist, recording, performance
   capture, or native Maestro report
 
@@ -238,3 +344,7 @@ complete the campaign checklist before calling Milestone 3 device-complete.
 - [Using a development build](https://docs.expo.dev/develop/development-builds/use-development-builds/)
 - [Expo CLI native run and export commands](https://docs.expo.dev/more/expo-cli/)
 - [Maestro command reference](https://docs.maestro.dev/api-reference/commands)
+- [RevenueCat with Expo](https://www.revenuecat.com/docs/getting-started/installation/expo)
+- [RevenueCat Google Play product setup](https://www.revenuecat.com/docs/getting-started/entitlements/android-products)
+- [RevenueCat CustomerInfo and entitlement status](https://www.revenuecat.com/docs/customers/customer-info)
+- [RevenueCat purchase restore guidance](https://www.revenuecat.com/docs/getting-started/restoring-purchases)

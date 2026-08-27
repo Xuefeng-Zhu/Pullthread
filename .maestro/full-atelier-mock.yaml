@@ -1,0 +1,160 @@
+appId: com.xuefengzhu.pullthread
+name: Pullthread Full Atelier development-mock paywall and restore flow
+tags:
+  - smoke
+  - milestone-4
+  - mock-purchase
+---
+# This flow requires a development build using the mock entitlement service
+# (`EXPO_PUBLIC_ENTITLEMENT_MODE=mock`, or development `auto` mode without a
+# platform key). It proves only Pullthread UI, routing, persistence, and access
+# state. It does not prove StoreKit, Play Billing, a RevenueCat receipt,
+# localized production products, or a real restore transaction.
+- launchApp:
+    clearState: true
+
+- assertVisible:
+    id: "quilt-map-screen"
+# Seed only campaign progression through the development-only Settings tool;
+# entitlement remains locked until the paywall purchase below.
+- tapOn:
+    id: "quilt-map-settings-button"
+- scrollUntilVisible:
+    element:
+      id: "debug-complete-free-campaign"
+    direction: DOWN
+    timeout: 10000
+- tapOn:
+    id: "debug-complete-free-campaign"
+- scrollUntilVisible:
+    element:
+      id: "settings-done-button"
+    direction: DOWN
+    timeout: 10000
+- tapOn:
+    id: "settings-done-button"
+- assertVisible:
+    id: "quilt-map-screen"
+- scrollUntilVisible:
+    element:
+      id: "level-state-attic-07-pocket-catch"
+    direction: DOWN
+    timeout: 10000
+- assertVisible:
+    id: "level-state-attic-07-pocket-catch"
+    text: "ATELIER LOCKED"
+- tapOn:
+    id: "level-node-attic-07-pocket-catch"
+
+- assertVisible:
+    id: "paywall-screen"
+- assertVisible: "ONE-TIME UNLOCK · NO SUBSCRIPTION"
+- scrollUntilVisible:
+    element:
+      id: "paywall-purchase-button"
+    direction: DOWN
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      id: "paywall-purchase-button"
+      text: ".*Mock purchase.*"
+    timeout: 10000
+
+# The default development mock has no store history. This exercises the
+# explicit restore-not-found state before the deterministic mock purchase.
+- scrollUntilVisible:
+    element:
+      id: "paywall-restore-button"
+    direction: DOWN
+    timeout: 10000
+- tapOn:
+    id: "paywall-restore-button"
+- extendedWaitUntil:
+    visible:
+      id: "paywall-status"
+      text: ".*No Full Atelier purchase was found.*"
+    timeout: 10000
+
+- scrollUntilVisible:
+    element:
+      id: "paywall-purchase-button"
+    direction: UP
+    timeout: 10000
+- tapOn:
+    id: "paywall-purchase-button"
+- extendedWaitUntil:
+    visible:
+      id: "paywall-status"
+      text: ".*Full Atelier is unlocked.*"
+    timeout: 10000
+- assertVisible:
+    id: "paywall-purchase-button"
+    text: "FULL ATELIER UNLOCKED"
+- scrollUntilVisible:
+    element:
+      id: "paywall-close-button"
+    direction: UP
+    timeout: 10000
+- tapOn:
+    id: "paywall-close-button"
+
+- assertVisible:
+    id: "quilt-map-screen"
+- scrollUntilVisible:
+    element:
+      id: "level-state-attic-07-pocket-catch"
+    direction: DOWN
+    timeout: 10000
+# The free-path seed establishes predecessor progress, so purchase must make
+# the reached premium boundary playable.
+- assertVisible:
+    id: "level-state-attic-07-pocket-catch"
+    text: "CURRENT"
+- tapOn:
+    id: "level-node-attic-07-pocket-catch"
+- assertVisible:
+    id: "spike-level-screen"
+- tapOn:
+    id: "game-map-button"
+- assertVisible:
+    id: "quilt-map-screen"
+- scrollUntilVisible:
+    element:
+      id: "quilt-map-settings-button"
+    direction: UP
+    timeout: 10000
+- tapOn:
+    id: "quilt-map-settings-button"
+- assertVisible:
+    id: "settings-screen"
+- scrollUntilVisible:
+    element:
+      id: "settings-entitlement-status"
+      text: "FULL ATELIER OWNED — LEVELS 7–15 INCLUDED"
+    direction: DOWN
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      id: "settings-done-button"
+    direction: DOWN
+    timeout: 10000
+- tapOn:
+    id: "settings-done-button"
+
+# Relaunch without clearing app state. This proves the development mock cache
+# path only; repeat offline with a RevenueCat-verified real purchase before
+# claiming physical transaction/offline acceptance.
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "quilt-map-screen"
+    timeout: 20000
+- tapOn:
+    id: "quilt-map-settings-button"
+- scrollUntilVisible:
+    element:
+      id: "settings-entitlement-status"
+      text: "FULL ATELIER OWNED — LEVELS 7–15 INCLUDED"
+    direction: DOWN
+    timeout: 10000

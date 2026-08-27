@@ -40,6 +40,7 @@ import {
   SPIKE_LEVEL,
   TUTORIAL_GUIDED_PINCH_STITCH,
 } from '../../game/levels/spikeLevel';
+import { getCampaignLevelAccess } from '../../game/levels/campaignAccess';
 import {
   createLevelWorld,
   getCampaignLevel,
@@ -53,6 +54,11 @@ import {
   createTutorialFlowState,
   tutorialFlowReducer,
 } from '../../game/tutorial/tutorialFlow';
+import { useCampaignProgressStore } from '../../store/useCampaignProgressStore';
+import {
+  selectHasFullGame,
+  useEntitlementStore,
+} from '../../store/useEntitlementStore';
 import {
   selectThreadUsed,
   useGameStore,
@@ -114,6 +120,14 @@ export function SpikeLevelScreen({
   const level = useMemo(
     () => getCampaignLevel(screenRoute.params.levelId),
     [screenRoute.params.levelId],
+  );
+  const progressByLevel = useCampaignProgressStore(
+    (state) => state.progressByLevel,
+  );
+  const hasFullGame = useEntitlementStore(selectHasFullGame);
+  const levelAccess = useMemo(
+    () => getCampaignLevelAccess(level.id, progressByLevel, hasFullGame),
+    [hasFullGame, level.id, progressByLevel],
   );
   const viewport = useWindowDimensions();
   const compactViewport = viewport.width < 350 || viewport.height < 700;
@@ -190,8 +204,21 @@ export function SpikeLevelScreen({
   );
 
   useEffect(() => {
-    if (activeLevelId !== level.id) startLevel(level.id);
-  }, [activeLevelId, level.id, startLevel]);
+    if (levelAccess.openPaywall) {
+      navigation.replace('Paywall', { levelId: level.id });
+      return;
+    }
+
+    if (!levelAccess.canPlay) {
+      navigation.replace('QuiltMap');
+    }
+  }, [level.id, levelAccess.canPlay, levelAccess.openPaywall, navigation]);
+
+  useEffect(() => {
+    if (levelAccess.canPlay && activeLevelId !== level.id) {
+      startLevel(level.id);
+    }
+  }, [activeLevelId, level.id, levelAccess.canPlay, startLevel]);
 
   useEffect(() => {
     feedback.setPreferences({ hapticsEnabled, soundEnabled });
@@ -238,7 +265,9 @@ export function SpikeLevelScreen({
   );
   const session = useGameSession({
     level,
-    phase,
+    // A guarded deep link must not inherit and advance a different level's
+    // running session while navigation redirects it away.
+    phase: levelAccess.canPlay ? phase : 'planning',
     stitches,
     onOutcome: handleOutcome,
   });
@@ -494,6 +523,22 @@ export function SpikeLevelScreen({
     completedTutorialVersion < CURRENT_TUTORIAL_VERSION &&
     !tutorial.completed;
 
+  if (!levelAccess.canPlay) {
+    return (
+      <SafeAreaView
+        testID="level-access-guard"
+        style={styles.accessGuard}
+        edges={['top', 'bottom']}
+      >
+        <Text style={styles.accessGuardText}>
+          {levelAccess.openPaywall
+            ? 'Opening Full Atelier…'
+            : 'Returning to the quilt map…'}
+        </Text>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView
       testID="spike-level-screen"
@@ -717,6 +762,19 @@ export function SpikeLevelScreen({
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#162f3a' },
+  accessGuard: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#162f3a',
+    padding: spacing.lg,
+  },
+  accessGuardText: {
+    color: colors.textOnDark,
+    fontFamily: 'NunitoSans_700Bold',
+    fontSize: 16,
+    textAlign: 'center',
+  },
   screenHighContrast: { backgroundColor: '#071e27' },
   header: {
     minHeight: 56,

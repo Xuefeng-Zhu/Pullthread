@@ -15,9 +15,16 @@ import {
 } from '../../../game/levels/spikeLevel';
 import { CAMPAIGN_LEVELS } from '../../../game/levels/campaignLevels';
 import {
+  createLevelReplay,
   createSpikeReplay,
+  simulateLevelReplay,
   simulateSpikeReplay,
 } from '../../../game/replay';
+import {
+  type CampaignLevelProgress,
+  useCampaignProgressStore,
+} from '../../../store/useCampaignProgressStore';
+import { useEntitlementStore } from '../../../store/useEntitlementStore';
 import {
   resetGameStoreForTests,
   useGameStore,
@@ -92,7 +99,63 @@ function seedCompletedRun() {
       },
     },
   });
+  useCampaignProgressStore.setState({ progressByLevel: completedThrough(1) });
   return { replay, outcome };
+}
+
+function seedCompletedRunForLevel(levelIndex: number) {
+  const level = CAMPAIGN_LEVELS[levelIndex];
+  const replay = createLevelReplay(level, level.referenceSolution);
+  const outcome = simulateLevelReplay(replay).outcome;
+  if (outcome.status !== 'success') {
+    throw new Error(`${level.name}'s reference replay must succeed.`);
+  }
+  const threadUsed = replay.stitches.reduce(
+    (total, stitch) => total + stitch.threadCost,
+    0,
+  );
+  const metrics = {
+    threadUsed,
+    stitchesUsed: replay.stitches.length,
+    completionMs: outcome.completionMs,
+    collectedPatch: false,
+  } as const;
+
+  useGameStore.setState({
+    activeLevelId: level.id,
+    phase: 'succeeded',
+    stitches: [...level.referenceSolution],
+    outcome,
+    completedRun: {
+      levelId: level.id,
+      replay,
+      outcome,
+      isNewBest: true,
+      bestMetrics: metrics,
+      scoredRun: { thimbles: 2, metrics },
+    },
+  });
+}
+
+function completedThrough(levelCount: number) {
+  const progress: Record<string, CampaignLevelProgress> = {};
+
+  for (const level of CAMPAIGN_LEVELS.slice(0, levelCount)) {
+    progress[level.id] = {
+      completed: true,
+      bestRun: {
+        thimbles: 2,
+        metrics: {
+          threadUsed: level.targetThreadUsage,
+          stitchesUsed: level.referenceSolution.length,
+          completionMs: 1_000,
+          collectedPatch: false,
+        },
+      },
+    };
+  }
+
+  return progress;
 }
 
 function navigation() {
@@ -108,6 +171,8 @@ function navigation() {
 describe('ResultsScreen', () => {
   beforeEach(() => {
     resetGameStoreForTests();
+    useCampaignProgressStore.setState({ progressByLevel: {} });
+    useEntitlementStore.setState({ hasFullGame: false, debugOverride: null });
     usePreferencesStore.setState({ ...defaultPreferences });
     mockUseGameSession.mockClear();
   });
@@ -245,6 +310,23 @@ describe('ResultsScreen', () => {
     });
   });
 
+  test('preserves premium Results and opens Paywall when entitlement is lost', async () => {
+    seedCompletedRunForLevel(6);
+    useCampaignProgressStore.setState({ progressByLevel: completedThrough(7) });
+    const nav = navigation();
+    const view = await render(<ResultsScreen navigation={nav.value} />);
+
+    await fireEvent.press(view.getByTestId('try-again-button'));
+
+    expect(nav.navigate).toHaveBeenCalledWith('Paywall', {
+      levelId: CAMPAIGN_LEVELS[6].id,
+    });
+    expect(nav.popTo).not.toHaveBeenCalledWith('SpikeLevel', expect.anything());
+    expect(useGameStore.getState().completedRun?.levelId).toBe(
+      CAMPAIGN_LEVELS[6].id,
+    );
+  });
+
   test('continues to the next campaign level with a fresh session', async () => {
     seedCompletedRun();
     const nav = navigation();
@@ -260,6 +342,43 @@ describe('ResultsScreen', () => {
     });
     expect(nav.popTo).toHaveBeenCalledWith('SpikeLevel', {
       levelId: CAMPAIGN_LEVELS[1].id,
+    });
+  });
+
+  test('opens Full Atelier instead of starting Level 7 when access is locked', async () => {
+    seedCompletedRunForLevel(5);
+    useCampaignProgressStore.setState({ progressByLevel: completedThrough(6) });
+    const nav = navigation();
+    const view = await render(<ResultsScreen navigation={nav.value} />);
+
+    await fireEvent.press(view.getByTestId('next-level-button'));
+
+    expect(nav.navigate).toHaveBeenCalledWith('Paywall', {
+      levelId: CAMPAIGN_LEVELS[6].id,
+    });
+    expect(nav.popTo).not.toHaveBeenCalledWith('SpikeLevel', expect.anything());
+    expect(useGameStore.getState().completedRun?.levelId).toBe(
+      CAMPAIGN_LEVELS[5].id,
+    );
+  });
+
+  test('starts Level 7 after Full Atelier is unlocked and free levels are complete', async () => {
+    seedCompletedRunForLevel(5);
+    useCampaignProgressStore.setState({ progressByLevel: completedThrough(6) });
+    useEntitlementStore.setState({ hasFullGame: true });
+    const nav = navigation();
+    const view = await render(<ResultsScreen navigation={nav.value} />);
+
+    await fireEvent.press(view.getByTestId('next-level-button'));
+
+    expect(nav.navigate).not.toHaveBeenCalledWith('Paywall', expect.anything());
+    expect(nav.popTo).toHaveBeenCalledWith('SpikeLevel', {
+      levelId: CAMPAIGN_LEVELS[6].id,
+    });
+    expect(useGameStore.getState()).toMatchObject({
+      activeLevelId: CAMPAIGN_LEVELS[6].id,
+      phase: 'planning',
+      completedRun: null,
     });
   });
 

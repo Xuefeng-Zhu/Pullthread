@@ -24,6 +24,11 @@ import {
   useCampaignProgressStore,
 } from './src/store/useCampaignProgressStore';
 import {
+  hydrateEntitlements,
+  initializeEntitlements,
+  useEntitlementStore,
+} from './src/store/useEntitlementStore';
+import {
   hydratePreferences,
   usePreferencesStore,
 } from './src/store/usePreferencesStore';
@@ -40,7 +45,8 @@ export default function App() {
   });
   const [storedStateLoaded, setStoredStateLoaded] = useState(
     usePreferencesStore.persist.hasHydrated() &&
-      useCampaignProgressStore.persist.hasHydrated(),
+      useCampaignProgressStore.persist.hasHydrated() &&
+      useEntitlementStore.persist.hasHydrated(),
   );
   const reducedMotionEnabled = usePreferencesStore(
     (state) => state.reducedMotionEnabled,
@@ -49,11 +55,16 @@ export default function App() {
   useEffect(() => {
     let mounted = true;
 
-    void Promise.all([hydratePreferences(), hydrateCampaignProgress()])
-      .catch(() => undefined)
-      .finally(() => {
-        if (mounted) setStoredStateLoaded(true);
-      });
+    void Promise.allSettled([
+      hydratePreferences(),
+      hydrateCampaignProgress(),
+      hydrateEntitlements(),
+    ]).then(() => {
+      // RevenueCat may need the network. Its refresh starts only after the
+      // fail-soft cache is available and never blocks the offline campaign.
+      void initializeEntitlements().catch(() => undefined);
+      if (mounted) setStoredStateLoaded(true);
+    });
 
     return () => {
       mounted = false;

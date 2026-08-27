@@ -5,6 +5,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { RootStackParamList } from '../../app/navigation/RootNavigator';
 import {
+  getCampaignLevelAccess,
+  type CampaignLevelAccess,
+  type CampaignLevelAccessState,
+} from '../../game/levels/campaignAccess';
+import {
   CAMPAIGN_LEVELS,
   CAMPAIGN_QUILTS,
 } from '../../game/levels/campaignLevels';
@@ -16,6 +21,10 @@ import {
   useCampaignProgressStore,
   type CampaignLevelProgress,
 } from '../../store/useCampaignProgressStore';
+import {
+  selectHasFullGame,
+  useEntitlementStore,
+} from '../../store/useEntitlementStore';
 import { useGameStore } from '../../store/useGameStore';
 import {
   colors,
@@ -31,8 +40,6 @@ export interface QuiltMapScreenProps {
     'navigate'
   >;
 }
-
-type LevelNodeState = 'completed' | 'current' | 'locked';
 
 interface QuiltTone {
   readonly surface: string;
@@ -62,32 +69,30 @@ const QUILT_TONES: readonly QuiltTone[] = [
   },
 ] as const;
 
-function levelState(
-  index: number,
-  progressByLevel: Readonly<Record<string, CampaignLevelProgress>>,
-): LevelNodeState {
-  const level = CAMPAIGN_LEVELS[index];
-  if (progressByLevel[level.id]) return 'completed';
-  if (index === 0 || progressByLevel[CAMPAIGN_LEVELS[index - 1].id]) {
-    return 'current';
-  }
-  return 'locked';
+function isLocked(state: CampaignLevelAccessState): boolean {
+  return state === 'sequence-locked' || state === 'premium-locked';
+}
+
+function levelStateLabel(state: CampaignLevelAccessState): string {
+  if (state === 'premium-locked') return 'ATELIER LOCKED';
+  if (state === 'sequence-locked') return 'LOCKED';
+  return state.toUpperCase();
 }
 
 function patchLabel(
   level: LevelDefinition,
-  state: LevelNodeState,
+  state: CampaignLevelAccessState,
   progress?: CampaignLevelProgress,
 ): string | null {
   if (!level.collectible) return null;
   if (progress?.bestRun.metrics.collectedPatch) return 'PATCH FOUND';
-  if (state === 'locked') return 'PATCH LOCKED';
+  if (isLocked(state)) return 'PATCH LOCKED';
   return 'PATCH NOT FOUND';
 }
 
 function levelAccessibilityLabel(
   level: LevelDefinition,
-  state: LevelNodeState,
+  state: CampaignLevelAccessState,
   progress?: CampaignLevelProgress,
 ): string {
   const status =
@@ -97,7 +102,9 @@ function levelAccessibilityLabel(
         } thimbles`
       : state === 'current'
         ? 'current level'
-        : 'locked';
+        : state === 'premium-locked'
+          ? 'Full Atelier locked, opens the one-time unlock paywall'
+          : 'locked, complete the previous level to unlock';
   const patch = patchLabel(level, state, progress);
   return `Level ${level.order}, ${level.name}, ${status}${
     patch ? `, ${patch.toLowerCase()}` : ''
@@ -106,7 +113,7 @@ function levelAccessibilityLabel(
 
 interface LevelNodeProps {
   readonly level: LevelDefinition;
-  readonly state: LevelNodeState;
+  readonly access: CampaignLevelAccess;
   readonly progress?: CampaignLevelProgress;
   readonly tone: QuiltTone;
   readonly alignRight: boolean;
@@ -115,13 +122,15 @@ interface LevelNodeProps {
 
 function LevelNode({
   level,
-  state,
+  access,
   progress,
   tone,
   alignRight,
   onPress,
 }: LevelNodeProps) {
-  const locked = state === 'locked';
+  const { state } = access;
+  const locked = isLocked(state);
+  const disabled = !access.canPlay && !access.openPaywall;
   const thimbles = progress?.bestRun.thimbles ?? 0;
   const availableThimbles = level.collectible ? 3 : 2;
   const collectibleStatus = patchLabel(level, state, progress);
@@ -131,9 +140,15 @@ function LevelNode({
       testID={`level-node-${level.id}`}
       accessibilityRole="button"
       accessibilityLabel={levelAccessibilityLabel(level, state, progress)}
-      accessibilityHint={locked ? 'Complete the previous level to unlock.' : 'Opens this level.'}
-      accessibilityState={{ disabled: locked, selected: state === 'current' }}
-      disabled={locked}
+      accessibilityHint={
+        state === 'premium-locked'
+          ? 'Opens the Full Atelier one-time unlock.'
+          : state === 'sequence-locked'
+            ? 'Complete the previous level to unlock.'
+            : 'Opens this level.'
+      }
+      accessibilityState={{ disabled, selected: state === 'current' }}
+      disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
         styles.levelNode,
@@ -144,7 +159,8 @@ function LevelNode({
           { borderColor: tone.accent },
         ],
         locked && styles.levelNodeLocked,
-        pressed && !locked && styles.levelNodePressed,
+        state === 'premium-locked' && styles.levelNodePremiumLocked,
+        pressed && !disabled && styles.levelNodePressed,
       ]}
     >
       <View
@@ -170,9 +186,10 @@ function LevelNode({
             styles.levelState,
             state === 'current' && { color: tone.accent },
             locked && styles.levelStateLocked,
+            state === 'premium-locked' && styles.levelStatePremiumLocked,
           ]}
         >
-          {state.toUpperCase()}
+          {levelStateLabel(state)}
         </Text>
         {!locked ? (
           <Text style={styles.mechanic} maxFontSizeMultiplier={1.35}>
@@ -220,13 +237,18 @@ interface QuiltSectionProps {
   readonly quilt: QuiltDefinition;
   readonly quiltIndex: number;
   readonly progressByLevel: Readonly<Record<string, CampaignLevelProgress>>;
-  readonly onOpenLevel: (levelId: string) => void;
+  readonly hasFullGame: boolean;
+  readonly onOpenLevel: (
+    levelId: string,
+    access: CampaignLevelAccess,
+  ) => void;
 }
 
 function QuiltSection({
   quilt,
   quiltIndex,
   progressByLevel,
+  hasFullGame,
   onOpenLevel,
 }: QuiltSectionProps) {
   const tone = QUILT_TONES[quiltIndex % QUILT_TONES.length];
@@ -258,10 +280,11 @@ function QuiltSection({
 
       <View style={styles.levelPath}>
         {levels.map((level, sectionIndex) => {
-          const campaignIndex = CAMPAIGN_LEVELS.findIndex(
-            (candidate) => candidate.id === level.id,
+          const access = getCampaignLevelAccess(
+            level.id,
+            progressByLevel,
+            hasFullGame,
           );
-          const state = levelState(campaignIndex, progressByLevel);
           return (
             <View key={level.id}>
               {sectionIndex > 0 ? (
@@ -272,11 +295,11 @@ function QuiltSection({
               ) : null}
               <LevelNode
                 level={level}
-                state={state}
+                access={access}
                 progress={progressByLevel[level.id]}
                 tone={tone}
                 alignRight={sectionIndex % 2 === 1}
-                onPress={() => onOpenLevel(level.id)}
+                onPress={() => onOpenLevel(level.id, access)}
               />
             </View>
           );
@@ -288,6 +311,7 @@ function QuiltSection({
 
 export function QuiltMapScreen({ navigation }: QuiltMapScreenProps) {
   const startLevel = useGameStore((state) => state.startLevel);
+  const hasFullGame = useEntitlementStore(selectHasFullGame);
   const progressByLevel = useCampaignProgressStore(
     (state) => state.progressByLevel,
   );
@@ -376,7 +400,13 @@ export function QuiltMapScreen({ navigation }: QuiltMapScreenProps) {
             quilt={quilt}
             quiltIndex={index}
             progressByLevel={progressByLevel}
-            onOpenLevel={(levelId) => {
+            hasFullGame={hasFullGame}
+            onOpenLevel={(levelId, access) => {
+              if (access.openPaywall) {
+                navigation.navigate('Paywall', { levelId });
+                return;
+              }
+              if (!access.canPlay) return;
               startLevel(levelId);
               navigation.navigate('SpikeLevel', { levelId });
             }}
@@ -584,6 +614,10 @@ const styles = StyleSheet.create({
     opacity: 0.82,
     elevation: 0,
   },
+  levelNodePremiumLocked: {
+    borderColor: '#8B6828',
+    backgroundColor: '#E6D7BD',
+  },
   levelNodePressed: {
     backgroundColor: colors.surfacePressed,
   },
@@ -626,6 +660,9 @@ const styles = StyleSheet.create({
   },
   levelStateLocked: {
     color: '#5F5955',
+  },
+  levelStatePremiumLocked: {
+    color: '#72531D',
   },
   mechanic: {
     marginTop: spacing.xxs,
