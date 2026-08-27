@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useEffectiveReducedMotion } from '../../accessibility/useEffectiveReducedMotion';
 import type { RootStackParamList } from '../../app/navigation/RootNavigator';
 import type { SimulationOutcome, SimulationPhase } from '../../game/core/types';
+import { utcChallengeDate } from '../../game/daily';
 import { getCampaignLevelAccess } from '../../game/levels/campaignAccess';
 import {
   getCampaignLevel,
@@ -134,6 +135,11 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
     const levelId = completedRun?.levelId ?? activeLevelId;
     if (completedRun?.session?.kind === 'daily') {
       const challenge = completedRun.session.challenge;
+      if (challenge.challengeDate !== utcChallengeDate(new Date())) {
+        resetSession();
+        navigation.popTo('DailyScrap');
+        return;
+      }
       startLevel(levelId, completedRun.session);
       navigation.popTo('SpikeLevel', {
         levelId,

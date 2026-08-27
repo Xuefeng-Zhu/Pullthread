@@ -4,7 +4,14 @@ import {
   render,
   waitFor,
 } from '@testing-library/react-native';
-import { beforeEach, describe, expect, jest, test } from '@jest/globals';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  jest,
+  test,
+} from '@jest/globals';
 import MockReact from 'react';
 import { View as MockView } from 'react-native';
 
@@ -234,6 +241,10 @@ describe('ResultsScreen', () => {
     useEntitlementStore.setState({ hasFullGame: false, debugOverride: null });
     usePreferencesStore.setState({ ...defaultPreferences });
     mockUseGameSession.mockClear();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   test('shows exact result copy and metrics from the captured run', async () => {
@@ -581,6 +592,8 @@ describe('ResultsScreen', () => {
   });
 
   test('retries a Daily Scrap run in daily context without touching campaign progress', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-08-27T23:59:59.999Z'));
     const { challenge, level } = seedDailyCompletedRun();
     const nav = navigation();
     const view = await render(<ResultsScreen navigation={nav.value} />);
@@ -604,6 +617,28 @@ describe('ResultsScreen', () => {
     });
     expect(useCampaignProgressStore.getState().progressByLevel).toEqual({});
     expect(nav.navigate).not.toHaveBeenCalledWith('Paywall', expect.anything());
+  });
+
+  test('returns to Daily Scrap instead of replaying a run after its UTC day', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-08-28T00:00:00.000Z'));
+    seedDailyCompletedRun();
+    const nav = navigation();
+    const view = await render(<ResultsScreen navigation={nav.value} />);
+
+    await fireEvent.press(view.getByTestId('try-again-button'));
+
+    expect(nav.popTo).toHaveBeenCalledWith('DailyScrap');
+    expect(nav.popTo).not.toHaveBeenCalledWith(
+      'SpikeLevel',
+      expect.anything(),
+    );
+    expect(useGameStore.getState()).toMatchObject({
+      phase: 'planning',
+      stitches: [],
+      completedRun: null,
+    });
+    expect(useCampaignProgressStore.getState().progressByLevel).toEqual({});
   });
 
   test('offers a safe return when opened without a completed run', async () => {
