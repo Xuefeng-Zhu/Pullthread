@@ -149,9 +149,9 @@ const isOneTimeUnlockProduct = (
   // by the product's non-consumable setting in the RevenueCat dashboard.
   if (platform === 'android') return true;
 
-  // Apple exposes the real consumability distinction, so a consumable must not
-  // back Pullthread's permanent Full Atelier entitlement.
-  return productType === 'NON_CONSUMABLE' || productType === 'UNKNOWN';
+  // Apple exposes the real consumability distinction, so only an explicitly
+  // non-consumable product may back Pullthread's permanent entitlement.
+  return productType === 'NON_CONSUMABLE';
 };
 
 const errorMessage = (error: unknown, fallback: string): string => {

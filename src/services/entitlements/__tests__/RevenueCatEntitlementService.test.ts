@@ -186,6 +186,10 @@ describe('RevenueCatEntitlementService', () => {
       productType: 'CONSUMABLE' as const,
     },
     {
+      productCategory: 'NON_SUBSCRIPTION' as const,
+      productType: 'UNKNOWN' as const,
+    },
+    {
       productCategory: null,
       productType: 'CONSUMABLE' as const,
     },

@@ -262,6 +262,8 @@ Offline behavior is deliberately asymmetric:
 - A previously RevenueCat-verified Full Atelier entitlement is available from
   the sanitized local cache before SDK refresh finishes.
 - Refresh failure retains that known result and never blocks free gameplay.
+- Development mock state may change access for the current session, but it
+  never replaces a stronger RevenueCat-derived cache record.
 - A new purchase or restore still requires the platform store and RevenueCat
   transaction path; failure is shown without mutating campaign progress.
 - Offer copy and price are presentation data, not entitlement proof. If no

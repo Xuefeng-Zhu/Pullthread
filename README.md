@@ -166,6 +166,7 @@ Mode selection is deliberately fail-safe:
   development build with no key it uses the locked-by-default mock. In a
   production build with no key, purchases remain unavailable and a fresh
   install stays locked; previously RevenueCat-verified offline access remains.
+  The development mock never replaces or downgrades that stronger cache record.
 - `mock` provides a deterministic local offer, purchase, restore-not-found,
   and development lock/unlock controls without contacting a store. Production
   builds ignore this mode and cannot grant new access.

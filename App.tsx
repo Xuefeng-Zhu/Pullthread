@@ -55,18 +55,16 @@ export default function App() {
   useEffect(() => {
     let mounted = true;
 
-    void Promise.all([
+    void Promise.allSettled([
       hydratePreferences(),
       hydrateCampaignProgress(),
       hydrateEntitlements(),
-    ])
-      .catch(() => undefined)
-      .finally(() => {
-        // RevenueCat may need the network. Its refresh starts only after the
-        // fail-soft cache is available and never blocks the offline campaign.
-        void initializeEntitlements().catch(() => undefined);
-        if (mounted) setStoredStateLoaded(true);
-      });
+    ]).then(() => {
+      // RevenueCat may need the network. Its refresh starts only after the
+      // fail-soft cache is available and never blocks the offline campaign.
+      void initializeEntitlements().catch(() => undefined);
+      if (mounted) setStoredStateLoaded(true);
+    });
 
     return () => {
       mounted = false;

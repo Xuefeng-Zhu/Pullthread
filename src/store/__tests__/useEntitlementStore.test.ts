@@ -118,6 +118,40 @@ describe('entitlement store', () => {
     });
   });
 
+  test('does not let a locked development mock downgrade RevenueCat ownership', async () => {
+    await persistEntitlementCache(true, 'revenuecat');
+    await useEntitlementStore.persist.rehydrate();
+
+    await initializeEntitlements(new MockEntitlementService());
+
+    expect(useEntitlementStore.getState()).toMatchObject({
+      hasFullGame: true,
+      cachedHasFullGame: true,
+      cacheSource: 'revenuecat',
+      verifiedAt: 123,
+      serviceKind: 'mock',
+      status: 'ready',
+    });
+  });
+
+  test('keeps RevenueCat cache evidence while mock state changes for the session', async () => {
+    await persistEntitlementCache(false, 'revenuecat');
+    await useEntitlementStore.persist.rehydrate();
+    await initializeEntitlements(new MockEntitlementService());
+
+    const result = await useEntitlementStore.getState().purchaseFullGame();
+
+    expect(result).toEqual({ status: 'purchased' });
+    expect(useEntitlementStore.getState()).toMatchObject({
+      hasFullGame: true,
+      cachedHasFullGame: false,
+      cacheSource: 'revenuecat',
+      verifiedAt: 123,
+      serviceKind: 'mock',
+      status: 'ready',
+    });
+  });
+
   test('records a successful mock purchase and caches the unlock', async () => {
     await initializeEntitlements(new MockEntitlementService());
 

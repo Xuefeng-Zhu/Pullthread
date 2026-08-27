@@ -160,6 +160,17 @@ function commitVerifiedEntitlement(
   const cacheSource = cacheSourceFor(service);
   if (!cacheSource) return;
 
+  const current = useEntitlementStore.getState();
+  if (cacheSource === 'mock' && current.cacheSource === 'revenuecat') {
+    // A development fallback is weaker evidence than a persisted store
+    // verification. Keep the RevenueCat cache intact, and never let a locked
+    // mock revoke purchased access while store configuration is unavailable.
+    useEntitlementStore.setState({
+      hasFullGame: current.cachedHasFullGame || hasFullGame,
+    });
+    return;
+  }
+
   useEntitlementStore.setState({
     hasFullGame,
     cachedHasFullGame: hasFullGame,

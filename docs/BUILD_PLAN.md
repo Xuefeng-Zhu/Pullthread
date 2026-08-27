@@ -402,7 +402,7 @@ outstanding.
 - `npm ci` — clean lockfile install and Skia web setup passed.
 - `npm run lint` — passed with no warnings.
 - `npm run typecheck` — passed.
-- `npm test -- --runInBand` — 30 suites and 283 tests passed.
+- `npm test` — 31 suites and 287 tests passed.
 - `npx expo-doctor@latest` — 21 of 21 checks passed after aligning the current
   Expo SDK 57 patch matrix.
 - `npm run export` — web, Android, and iOS bundles exported successfully with
