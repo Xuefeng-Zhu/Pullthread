@@ -311,6 +311,8 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
               ? 'The pull finished, but its result could not be saved.'
               : dailySubmitStatus === 'volatile'
                 ? 'The pull finished, but it is kept only for this session.'
+                : dailyLatestSubmission?.syncStatus === 'expired'
+                  ? 'The pull finished after its shared-board window closed.'
                 : `${completedRun.session?.kind === 'daily' ? completedRun.session.challenge.title : level.name} is recorded for today.`
             : `${level.name} is sewn into the quilt.`}
         </Text>

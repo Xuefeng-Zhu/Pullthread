@@ -8,6 +8,7 @@ export type DailyServiceStatus = 'local' | 'remote' | 'offline';
 export type DailySubmissionSyncStatus =
   | 'local'
   | 'remote'
+  | 'expired'
   | 'pending'
   | 'volatile';
 

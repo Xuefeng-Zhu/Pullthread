@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 
 import {
   compareDailyMetrics,
+  DAILY_SUBMISSION_MIN_INTERVAL_MS,
   getTodayDailyChallenge,
   parseDailyChallenge,
   parseDailyReplay,
@@ -305,6 +306,18 @@ interface ReconciledRemoteSubmission extends FirebaseDailyRemoteSubmission {
 interface PendingFlushOutcome {
   readonly synced: boolean;
   readonly submissions: ReadonlyMap<string, ReconciledRemoteSubmission>;
+  readonly expiredRunIds: ReadonlySet<string>;
+}
+
+type PendingSyncResult =
+  | { readonly kind: 'remote'; readonly submission: ReconciledRemoteSubmission }
+  | { readonly kind: 'expired' }
+  | { readonly kind: 'failed' };
+
+type DailyDelay = (milliseconds: number) => Promise<void>;
+
+function defaultDailyDelay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 /** Local-first Firebase decorator. Every successful run is saved locally first. */
@@ -312,12 +325,14 @@ export class FirebaseDailyChallengeService implements DailyChallengeService {
   readonly kind = 'firebase' as const;
   private connectionStatus: DailyServiceStatus = 'remote';
   private pendingFlush: Promise<PendingFlushOutcome> | null = null;
+  private lastSuccessfulUploadAt: number | null = null;
 
   constructor(
     private readonly local = new LocalDailyChallengeService(),
     private readonly clock: () => Date = () => new Date(),
     private readonly remote: FirebaseDailyRemoteGateway =
       new SdkFirebaseDailyRemoteGateway(),
+    private readonly delay: DailyDelay = defaultDailyDelay,
   ) {}
 
   get status(): DailyServiceStatus {
@@ -345,6 +360,10 @@ export class FirebaseDailyChallengeService implements DailyChallengeService {
   async submitRun(run: DailyRun): Promise<DailySubmissionResult> {
     const validated = parseDailyRun(run);
     const localResult = await this.local.submitRun(validated);
+    if (this.isUploadExpired(validated)) {
+      await this.clearPendingChallenge(validated.challengeId);
+      return this.expiredSubmissionResult(localResult);
+    }
     try {
       const pending = (await this.local.getPendingRuns()).find(
         (candidate) => candidate.challengeId === validated.challengeId,
@@ -352,10 +371,14 @@ export class FirebaseDailyChallengeService implements DailyChallengeService {
       let remoteSubmission: ReconciledRemoteSubmission | null = null;
       let currentRunProcessedRemotely = false;
       if (pending) {
-        remoteSubmission = await this.syncPendingRun(pending);
-        if (!remoteSubmission) {
+        const pendingSync = await this.syncPendingRun(pending);
+        if (pendingSync.kind === 'expired') {
+          return this.expiredSubmissionResult(localResult);
+        }
+        if (pendingSync.kind === 'failed') {
           throw new Error('The pending Daily Scrap run did not sync.');
         }
+        remoteSubmission = pendingSync.submission;
         currentRunProcessedRemotely =
           pending.clientRunId === validated.clientRunId;
       } else {
@@ -456,20 +479,41 @@ export class FirebaseDailyChallengeService implements DailyChallengeService {
   private async uploadRun(
     run: DailyRun,
   ): Promise<FirebaseDailyRemoteSubmission> {
-    return this.remote.submitRun(run);
+    if (this.lastSuccessfulUploadAt !== null) {
+      const elapsedSinceUpload = Math.max(
+        0,
+        this.clock().getTime() - this.lastSuccessfulUploadAt,
+      );
+      const remainingCooldown =
+        DAILY_SUBMISSION_MIN_INTERVAL_MS - elapsedSinceUpload;
+      if (remainingCooldown > 0) await this.delay(remainingCooldown);
+    }
+    if (this.isUploadExpired(run)) {
+      throw new RangeError('Daily Scrap run expired before upload.');
+    }
+    const submission = await this.remote.submitRun(run);
+    this.lastSuccessfulUploadAt = this.clock().getTime();
+    return submission;
   }
 
   private async syncPendingRun(
     pending: DailyRun,
-  ): Promise<ReconciledRemoteSubmission | null> {
+  ): Promise<PendingSyncResult> {
     while (true) {
       const outcome = await this.flushPendingRuns();
       const submission = outcome.submissions.get(pending.clientRunId);
-      if (submission) return submission;
+      if (submission) return { kind: 'remote', submission };
+      if (outcome.expiredRunIds.has(pending.clientRunId)) {
+        return { kind: 'expired' };
+      }
+      if (this.isUploadExpired(pending)) {
+        await this.clearPendingChallenge(pending.challengeId);
+        return { kind: 'expired' };
+      }
       const stillPending = (await this.local.getPendingRuns()).some(
         (candidate) => candidate.clientRunId === pending.clientRunId,
       );
-      if (!stillPending || !outcome.synced) return null;
+      if (!stillPending || !outcome.synced) return { kind: 'failed' };
       // The run was added or replaced after the active flush took its snapshot.
       // Start the next serialized cycle instead of uploading in parallel.
     }
@@ -490,19 +534,28 @@ export class FirebaseDailyChallengeService implements DailyChallengeService {
 
   private async flushPendingRunsOnce(): Promise<PendingFlushOutcome> {
     const submissions = new Map<string, ReconciledRemoteSubmission>();
+    const expiredRunIds = new Set<string>();
     try {
-      const oldestUploadDate = utcChallengeDate(
-        new Date(this.clock().getTime() - ONE_DAY_MS),
-      );
       for (const pending of await this.local.getPendingRuns()) {
-        if (pending.challengeDate < oldestUploadDate) {
+        if (this.isUploadExpired(pending)) {
           // The callable deliberately accepts only today and yesterday. Drop a
           // permanently expired local queue item so it cannot head-of-line
           // block newer offline work forever.
           await this.local.markRunSynced(pending);
+          expiredRunIds.add(pending.clientRunId);
           continue;
         }
-        const remoteSubmission = await this.uploadRun(pending);
+        let remoteSubmission: FirebaseDailyRemoteSubmission;
+        try {
+          remoteSubmission = await this.uploadRun(pending);
+        } catch (error) {
+          if (this.isUploadExpired(pending)) {
+            await this.local.markRunSynced(pending);
+            expiredRunIds.add(pending.clientRunId);
+            continue;
+          }
+          throw error;
+        }
         const localPersisted = await this.local.reconcileRemoteBest(
           remoteSubmission.personalBest,
           pending,
@@ -513,11 +566,37 @@ export class FirebaseDailyChallengeService implements DailyChallengeService {
         );
       }
       this.connectionStatus = 'remote';
-      return Object.freeze({ synced: true, submissions });
+      return Object.freeze({ synced: true, submissions, expiredRunIds });
     } catch {
       this.connectionStatus = 'offline';
-      return Object.freeze({ synced: false, submissions });
+      return Object.freeze({ synced: false, submissions, expiredRunIds });
     }
+  }
+
+  private isUploadExpired(run: DailyRun): boolean {
+    const oldestUploadDate = utcChallengeDate(
+      new Date(this.clock().getTime() - ONE_DAY_MS),
+    );
+    return run.challengeDate < oldestUploadDate;
+  }
+
+  private async clearPendingChallenge(challengeId: string): Promise<void> {
+    const pending = (await this.local.getPendingRuns()).find(
+      (candidate) => candidate.challengeId === challengeId,
+    );
+    if (pending) await this.local.markRunSynced(pending);
+  }
+
+  private expiredSubmissionResult(
+    localResult: DailySubmissionResult,
+  ): DailySubmissionResult {
+    return Object.freeze({
+      ...localResult,
+      syncStatus: localResult.accepted ? 'expired' : 'volatile',
+      message: localResult.accepted
+        ? 'Saved on this device. This Daily Scrap is too old to share.'
+        : 'Kept for this session only. This Daily Scrap is too old to share.',
+    });
   }
 }
 

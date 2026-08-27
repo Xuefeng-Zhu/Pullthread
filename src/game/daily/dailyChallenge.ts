@@ -10,6 +10,7 @@ import {
 export const DAILY_CHALLENGE_SCHEMA_VERSION = 1 as const;
 export const DAILY_REPLAY_SCHEMA_VERSION = 1 as const;
 export const DAILY_POOL_EFFECTIVE_FROM = '2026-01-01';
+export const DAILY_SUBMISSION_MIN_INTERVAL_MS = 5_000;
 
 export interface DailyChallengeTemplate {
   readonly id: string;

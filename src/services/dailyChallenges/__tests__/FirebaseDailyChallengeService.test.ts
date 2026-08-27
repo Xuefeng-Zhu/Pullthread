@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
-import { createDailyRun, getDailyChallengeForDate } from '../../../game/daily';
+import {
+  createDailyRun,
+  DAILY_SUBMISSION_MIN_INTERVAL_MS,
+  getDailyChallengeForDate,
+} from '../../../game/daily';
 import { getCampaignLevel } from '../../../game/levels/levelLoader';
 import { createLevelReplay } from '../../../game/replay';
 import {
@@ -418,6 +422,211 @@ describe('FirebaseDailyChallengeService local-first boundary', () => {
     expect(remote.submitRun).toHaveBeenCalledWith(current);
     await expect(local.getPendingRuns()).resolves.toEqual([]);
     expect(service.status).toBe('remote');
+  });
+
+  test('keeps a newly completed expired run local without claiming a retry', async () => {
+    const remote = new FakeRemote();
+    const local = new LocalDailyChallengeService(new MemoryStorage());
+    const service = new FirebaseDailyChallengeService(
+      local,
+      () => new Date('2026-08-27T12:00:00.000Z'),
+      remote,
+    );
+    const expired = referenceRunForDate(
+      '2026-08-25',
+      'firebase-expired-foreground-0001',
+      '2026-08-25T12:00:00.000Z',
+    );
+
+    const result = await service.submitRun(expired);
+
+    expect(result).toMatchObject({
+      accepted: true,
+      isNewBest: true,
+      personalBest: { clientRunId: expired.clientRunId },
+      syncStatus: 'expired',
+    });
+    expect(result.message).toMatch(/too old to share/i);
+    expect(result.message).not.toMatch(/retry|online/i);
+    expect(remote.submitRun).not.toHaveBeenCalled();
+    expect(remote.ensureGuest).not.toHaveBeenCalled();
+    await expect(local.getPendingRuns()).resolves.toEqual([]);
+    await expect(local.getPersonalBest(expired.challengeId)).resolves.toMatchObject(
+      { clientRunId: expired.clientRunId },
+    );
+    expect(service.status).toBe('remote');
+  });
+
+  test('stops claiming retries when an active upload expires at rollover', async () => {
+    const remote = new FakeRemote();
+    const local = new LocalDailyChallengeService(new MemoryStorage());
+    let now = new Date('2026-08-27T23:59:59.000Z');
+    const service = new FirebaseDailyChallengeService(
+      local,
+      () => now,
+      remote,
+    );
+    const yesterday = referenceRunForDate(
+      '2026-08-26',
+      'firebase-rollover-pending-0001',
+      '2026-08-26T12:00:00.000Z',
+    );
+    const tie = referenceRunForDate(
+      '2026-08-26',
+      'firebase-rollover-tie-0001',
+      '2026-08-26T12:01:00.000Z',
+    );
+    await local.submitRun(yesterday);
+
+    let signalUploadStarted!: () => void;
+    const uploadStarted = new Promise<void>((resolve) => {
+      signalUploadStarted = resolve;
+    });
+    let rejectUpload!: () => void;
+    const uploadGate = new Promise<FirebaseDailyRemoteSubmission>(
+      (_resolve, reject) => {
+        rejectUpload = () => reject(new Error('callable rejected expired run'));
+      },
+    );
+    remote.checkChallenge.mockResolvedValueOnce();
+    remote.submitRun.mockImplementationOnce(() => {
+      signalUploadStarted();
+      return uploadGate;
+    });
+
+    await service.getTodayChallenge();
+    await uploadStarted;
+    const foreground = service.submitRun(tie);
+    await expect(local.attemptsForChallenge(yesterday.challengeId)).resolves.toBe(2);
+    now = new Date('2026-08-28T00:00:01.000Z');
+    rejectUpload();
+
+    const result = await foreground;
+    expect(result).toMatchObject({
+      accepted: true,
+      syncStatus: 'expired',
+      personalBest: { clientRunId: yesterday.clientRunId },
+    });
+    expect(result.message).toMatch(/too old to share/i);
+    expect(result.message).not.toMatch(/retry|online/i);
+    await expect(local.getPendingRuns()).resolves.toEqual([]);
+  });
+
+  test('paces yesterday and today uploads to the server rate limit', async () => {
+    const remote = new FakeRemote();
+    const local = new LocalDailyChallengeService(new MemoryStorage());
+    const yesterday = referenceRunForDate(
+      '2026-08-26',
+      'firebase-paced-yesterday-0001',
+      '2026-08-26T12:00:00.000Z',
+    );
+    const today = referenceRun('firebase-paced-today-0001');
+    await local.submitRun(yesterday);
+    await local.submitRun(today);
+
+    let virtualTime = new Date('2026-08-27T12:00:00.000Z').getTime();
+    let previousUploadAt: number | null = null;
+    const events: string[] = [];
+    remote.submitRun.mockImplementation(async (run) => {
+      events.push(`upload:${run.clientRunId}`);
+      if (
+        previousUploadAt !== null &&
+        virtualTime - previousUploadAt < DAILY_SUBMISSION_MIN_INTERVAL_MS
+      ) {
+        throw new Error('server rate limit');
+      }
+      previousUploadAt = virtualTime;
+      return remoteSubmission(run);
+    });
+    remote.getLeaderboard.mockResolvedValueOnce([]);
+    const delay = jest.fn<(milliseconds: number) => Promise<void>>(
+      async (milliseconds) => {
+        events.push(`delay:${milliseconds}`);
+        virtualTime += milliseconds;
+      },
+    );
+    const service = new FirebaseDailyChallengeService(
+      local,
+      () => new Date(virtualTime),
+      remote,
+      delay,
+    );
+
+    await service.getLeaderboard(today.challengeId);
+
+    expect(events).toEqual([
+      `upload:${yesterday.clientRunId}`,
+      `delay:${DAILY_SUBMISSION_MIN_INTERVAL_MS}`,
+      `upload:${today.clientRunId}`,
+    ]);
+    expect(delay).toHaveBeenCalledWith(DAILY_SUBMISSION_MIN_INTERVAL_MS);
+    expect(remote.submitRun).toHaveBeenCalledTimes(2);
+    await expect(local.getPendingRuns()).resolves.toEqual([]);
+    expect(service.status).toBe('remote');
+  });
+
+  test('keeps pacing when late work drains in a second flush cycle', async () => {
+    const remote = new FakeRemote();
+    const local = new LocalDailyChallengeService(new MemoryStorage());
+    const yesterday = referenceRunForDate(
+      '2026-08-26',
+      'firebase-cycle-yesterday-0001',
+      '2026-08-26T12:00:00.000Z',
+    );
+    const today = referenceRun('firebase-cycle-today-0001');
+    await local.submitRun(yesterday);
+
+    let virtualTime = new Date('2026-08-27T12:00:00.000Z').getTime();
+    const events: string[] = [];
+    let signalUploadStarted!: () => void;
+    const uploadStarted = new Promise<void>((resolve) => {
+      signalUploadStarted = resolve;
+    });
+    let finishFirstUpload!: () => void;
+    const firstUpload = new Promise<FirebaseDailyRemoteSubmission>((resolve) => {
+      finishFirstUpload = () => resolve(remoteSubmission(yesterday));
+    });
+    remote.submitRun
+      .mockImplementationOnce((run) => {
+        events.push(`upload:${run.clientRunId}`);
+        signalUploadStarted();
+        return firstUpload;
+      })
+      .mockImplementationOnce(async (run) => {
+        events.push(`upload:${run.clientRunId}`);
+        return remoteSubmission(run);
+      });
+    remote.getLeaderboard.mockResolvedValueOnce([]);
+    const delay = jest.fn<(milliseconds: number) => Promise<void>>(
+      async (milliseconds) => {
+        events.push(`delay:${milliseconds}`);
+        virtualTime += milliseconds;
+      },
+    );
+    const service = new FirebaseDailyChallengeService(
+      local,
+      () => new Date(virtualTime),
+      remote,
+      delay,
+    );
+
+    const boardRefresh = service.getLeaderboard(today.challengeId);
+    await uploadStarted;
+    const foreground = service.submitRun(today);
+    finishFirstUpload();
+
+    await boardRefresh;
+    await expect(foreground).resolves.toMatchObject({
+      accepted: true,
+      syncStatus: 'remote',
+      personalBest: { clientRunId: today.clientRunId },
+    });
+    expect(events).toEqual([
+      `upload:${yesterday.clientRunId}`,
+      `delay:${DAILY_SUBMISSION_MIN_INTERVAL_MS}`,
+      `upload:${today.clientRunId}`,
+    ]);
+    await expect(local.getPendingRuns()).resolves.toEqual([]);
   });
 
   test('shares one pending flush across reconnect and leaderboard refresh', async () => {

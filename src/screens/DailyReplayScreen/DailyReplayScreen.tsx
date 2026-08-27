@@ -23,6 +23,13 @@ export function DailyReplayScreen({ navigation, route }: DailyReplayScreenProps)
       ? state.leaderboard.find((candidate) => candidate.id === route.params.entryId)
       : undefined,
   );
+  const personalBest = useDailyChallengeStore((state) =>
+    state.challenge?.id === route.params.challengeId &&
+    state.personalBest?.clientRunId === route.params.entryId
+      ? state.personalBest
+      : null,
+  );
+  const replay = entry?.replay ?? personalBest?.replay ?? null;
   const highContrast = usePreferencesStore((state) => state.highContrastEnabled);
   const reducedMotion = useEffectiveReducedMotion();
   const [phase, setPhase] = useState<SimulationPhase>(
@@ -54,12 +61,16 @@ export function DailyReplayScreen({ navigation, route }: DailyReplayScreenProps)
             <Ionicons name="arrow-back" size={23} color="#173746" />
           </Pressable>
           <Text accessibilityRole="header" style={styles.title}>
-            {entry ? `${entry.displayName} · #${entry.rank}` : 'Replay unavailable'}
+            {entry
+              ? `${entry.displayName} · #${entry.rank}`
+              : personalBest
+                ? 'Your best'
+                : 'Replay unavailable'}
           </Text>
         </View>
-        {entry?.replay ? (
+        {replay ? (
           <ReplayStage
-            replay={entry.replay.levelReplay}
+            replay={replay.levelReplay}
             highContrast={highContrast}
             phase={phase}
             status={status}

@@ -153,4 +153,53 @@ describe('LocalDailyChallengeService', () => {
     const reloaded = new LocalDailyChallengeService(failingStorage);
     await expect(reloaded.getLeaderboard(run.challengeId)).resolves.toEqual([]);
   });
+
+  test('never overwrites an unknown payload after its initial read fails', async () => {
+    const persisted = referenceRun(
+      'daily-run-preserved-after-read-failure',
+      '2026-08-27T11:00:00.000Z',
+    );
+    const baselineService = new LocalDailyChallengeService(storage);
+    await baselineService.submitRun(persisted);
+    const originalPayload = storage.values.get(DAILY_SCRAP_STORAGE_KEY);
+    expect(originalPayload).toBeDefined();
+
+    let readAttempts = 0;
+    let writeAttempts = 0;
+    const transientReadStorage: DailyKeyValueStorage = {
+      getItem: async (key) => {
+        readAttempts += 1;
+        if (readAttempts === 1) throw new Error('transient read failure');
+        return storage.getItem(key);
+      },
+      setItem: async (key, value) => {
+        writeAttempts += 1;
+        await storage.setItem(key, value);
+      },
+    };
+    const quarantined = new LocalDailyChallengeService(transientReadStorage);
+    const volatile = referenceRun(
+      'daily-run-volatile-after-read-failure',
+      '2026-08-27T12:00:00.000Z',
+    );
+
+    await expect(quarantined.getLeaderboard(persisted.challengeId)).resolves.toEqual(
+      [],
+    );
+    await expect(quarantined.submitRun(volatile)).resolves.toMatchObject({
+      accepted: false,
+      syncStatus: 'volatile',
+      personalBest: { clientRunId: volatile.clientRunId },
+    });
+    expect(writeAttempts).toBe(0);
+    expect(storage.values.get(DAILY_SCRAP_STORAGE_KEY)).toBe(originalPayload);
+    await expect(quarantined.getPersonalBest(volatile.challengeId)).resolves.toMatchObject(
+      { clientRunId: volatile.clientRunId },
+    );
+
+    const recovered = new LocalDailyChallengeService(transientReadStorage);
+    await expect(recovered.getPersonalBest(persisted.challengeId)).resolves.toMatchObject(
+      { clientRunId: persisted.clientRunId },
+    );
+  });
 });

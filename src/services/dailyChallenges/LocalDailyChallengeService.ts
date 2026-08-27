@@ -117,6 +117,7 @@ export class LocalDailyChallengeService implements DailyChallengeService {
   readonly status = 'local' as const;
   private statePromise: Promise<PersistedDailyScrapState> | null = null;
   private mutationQueue: Promise<void> = Promise.resolve();
+  private storageBaseline: 'unknown' | 'verified' | 'unavailable' = 'unknown';
 
   constructor(
     private readonly storage: DailyKeyValueStorage = AsyncStorage,
@@ -285,12 +286,25 @@ export class LocalDailyChallengeService implements DailyChallengeService {
   private async loadState(): Promise<PersistedDailyScrapState> {
     if (!this.statePromise) {
       this.statePromise = (async () => {
+        let serialized: string | null;
         try {
-          const serialized = await this.storage.getItem(DAILY_SCRAP_STORAGE_KEY);
-          return serialized
-            ? sanitizePersistedDailyScrapState(JSON.parse(serialized) as unknown)
-            : defaultState();
+          serialized = await this.storage.getItem(DAILY_SCRAP_STORAGE_KEY);
+          this.storageBaseline = 'verified';
         } catch {
+          // An I/O failure is not evidence that storage was empty. Keep a
+          // volatile session state, but quarantine writes for this service
+          // instance so an unknown existing payload cannot be overwritten.
+          this.storageBaseline = 'unavailable';
+          return defaultState();
+        }
+        if (!serialized) return defaultState();
+        try {
+          return sanitizePersistedDailyScrapState(
+            JSON.parse(serialized) as unknown,
+          );
+        } catch {
+          // A successful read establishes a safe baseline even when its JSON
+          // is malformed; the invalid payload may be replaced on the next save.
           return defaultState();
         }
       })();
@@ -300,6 +314,7 @@ export class LocalDailyChallengeService implements DailyChallengeService {
 
   private async saveState(state: PersistedDailyScrapState): Promise<boolean> {
     this.statePromise = Promise.resolve(state);
+    if (this.storageBaseline === 'unavailable') return false;
     try {
       await this.storage.setItem(DAILY_SCRAP_STORAGE_KEY, JSON.stringify(state));
       return true;
@@ -316,7 +331,9 @@ export class LocalDailyChallengeService implements DailyChallengeService {
     const operation = this.mutationQueue.then(async () => {
       const current = await this.loadState();
       const updated = updater(current);
-      return updated === current ? true : this.saveState(updated);
+      return updated === current
+        ? this.storageBaseline !== 'unavailable'
+        : this.saveState(updated);
     });
     this.mutationQueue = operation.then(
       () => undefined,

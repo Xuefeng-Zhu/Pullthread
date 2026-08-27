@@ -552,6 +552,34 @@ describe('ResultsScreen', () => {
     ).toBeNull();
   });
 
+  test('does not claim an expired Daily Scrap will join shared standings', async () => {
+    const { personalBest } = seedDailyCompletedRun();
+    useDailyChallengeStore.setState({
+      submitStatus: 'saved',
+      statusMessage:
+        'Saved on this device. This Daily Scrap is too old to share.',
+      latestSubmission: {
+        accepted: true,
+        isNewBest: true,
+        personalBest,
+        syncStatus: 'expired',
+        message: 'Saved on this device. This Daily Scrap is too old to share.',
+      },
+    });
+    const view = await render(
+      <ResultsScreen navigation={navigation().value} />,
+    );
+
+    expect(
+      view.getByText('The pull finished after its shared-board window closed.'),
+    ).toBeTruthy();
+    expect(
+      view.getByText(
+        'Saved on this device. This Daily Scrap is too old to share.',
+      ),
+    ).toBeTruthy();
+  });
+
   test('retries a Daily Scrap run in daily context without touching campaign progress', async () => {
     const { challenge, level } = seedDailyCompletedRun();
     const nav = navigation();

@@ -209,7 +209,32 @@ export function DailyScrapScreen({ navigation }: DailyScrapScreenProps) {
               ) : null}
             </View>
             {personalBest ? (
-              <MetricRow metrics={personalBest.metrics} />
+              <>
+                <MetricRow metrics={personalBest.metrics} />
+                <Pressable
+                  testID="daily-personal-best-replay-button"
+                  accessibilityRole="button"
+                  accessibilityLabel="Watch your best Daily Scrap replay"
+                  onPress={() =>
+                    navigation.navigate('DailyReplay', {
+                      challengeId: visibleChallenge.id,
+                      entryId: personalBest.clientRunId,
+                    })
+                  }
+                  style={({ pressed }) => [
+                    styles.secondaryButton,
+                    styles.replayButton,
+                    pressed && styles.buttonPressed,
+                  ]}
+                >
+                  <Ionicons
+                    name="play-circle-outline"
+                    size={20}
+                    color="#173746"
+                  />
+                  <Text style={styles.secondaryLabel}>WATCH YOUR REPLAY</Text>
+                </Pressable>
+              </>
             ) : (
               <Text style={styles.bodyCopy}>
                 Complete today’s pattern to set your first result.
@@ -468,6 +493,10 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#9D765F',
     backgroundColor: '#FFF9EA',
+  },
+  replayButton: {
+    flexDirection: 'row',
+    gap: spacing.xs,
   },
   secondaryLabel: {
     color: '#173746',

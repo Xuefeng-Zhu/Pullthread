@@ -5,6 +5,7 @@ import {
 } from 'firebase-admin/firestore';
 
 import {
+  DAILY_SUBMISSION_MIN_INTERVAL_MS,
   parseDailyChallenge,
   parseDailyRun,
   type DailyChallenge,
@@ -17,7 +18,6 @@ import {
 
 const DISPLAY_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,23}$/;
 const FIREBASE_ANONYMOUS_UID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
-const MIN_SUBMISSION_INTERVAL_MS = 5_000;
 
 export interface PersistBestDailyRunResult {
   readonly isNewBest: boolean;
@@ -112,10 +112,12 @@ export async function persistBestDailyRun(
     const lastSubmissionAt = submissionGuardSnapshot.get('lastSubmissionAt');
     if (lastSubmissionAt instanceof Timestamp) {
       const elapsedMs = serverNow.getTime() - lastSubmissionAt.toMillis();
-      if (elapsedMs < MIN_SUBMISSION_INTERVAL_MS) {
+      if (elapsedMs < DAILY_SUBMISSION_MIN_INTERVAL_MS) {
         const retryAfterSeconds = Math.max(
           1,
-          Math.ceil((MIN_SUBMISSION_INTERVAL_MS - elapsedMs) / 1_000),
+          Math.ceil(
+            (DAILY_SUBMISSION_MIN_INTERVAL_MS - elapsedMs) / 1_000,
+          ),
         );
         throw new SubmissionRateLimitError(retryAfterSeconds);
       }

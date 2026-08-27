@@ -68,6 +68,7 @@ describe('DailyReplayScreen', () => {
     useDailyChallengeStore.setState({
       challenge,
       leaderboard: [entry],
+      personalBest: null,
     });
   });
 
@@ -105,5 +106,22 @@ describe('DailyReplayScreen', () => {
       view.getByText('This compact stitch replay could not be loaded safely.'),
     ).toBeTruthy();
     expect(view.queryByTestId('mock-daily-replay-stage')).toBeNull();
+  });
+
+  test('plays the personal best even when it is outside the leaderboard', async () => {
+    useDailyChallengeStore.setState({
+      leaderboard: [],
+      personalBest: run,
+    });
+    const harness = screenHarness(run.clientRunId);
+    const view = await render(
+      <DailyReplayScreen
+        navigation={harness.navigation}
+        route={harness.route}
+      />,
+    );
+
+    expect(view.getByText('Your best')).toBeTruthy();
+    expect(view.getByTestId('mock-daily-replay-stage')).toBeTruthy();
   });
 });

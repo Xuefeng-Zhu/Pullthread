@@ -217,6 +217,43 @@ describe('DailyScrapScreen', () => {
     );
   });
 
+  test('opens the personal-best replay when the shared board omits the player', async () => {
+    const otherEntry: DailyLeaderboardEntry = Object.freeze({
+      ...currentEntry,
+      id: 'daily-ui-other-player',
+      displayName: 'Remote Quilter',
+      isCurrentPlayer: false,
+    });
+    resetDailyChallengeStoreForTests(
+      dailyService({
+        kind: 'firebase',
+        status: 'remote',
+        getPersonalBest: jest.fn(async () => personalBest),
+        getLeaderboard: jest.fn(async () => [otherEntry]),
+      }),
+    );
+    const harness = screenHarness();
+    const view = await render(
+      <DailyScrapScreen
+        navigation={harness.navigation}
+        route={harness.route}
+      />,
+    );
+
+    const replayButton = await view.findByTestId(
+      'daily-personal-best-replay-button',
+    );
+    expect(
+      view.queryByTestId(`daily-leaderboard-entry-${personalBest.clientRunId}`),
+    ).toBeNull();
+
+    await fireEvent.press(replayButton);
+    expect(harness.navigate).toHaveBeenCalledWith('DailyReplay', {
+      challengeId: challenge.id,
+      entryId: personalBest.clientRunId,
+    });
+  });
+
   test('retries a challenge preparation failure without trapping navigation', async () => {
     let challengeRequests = 0;
     const getTodayChallenge = jest.fn(async () => {
