@@ -487,7 +487,7 @@ outstanding.
 
 - `npm run lint` — passed with no warnings.
 - `npm run typecheck` — passed.
-- `npm test` — 37 suites and 333 tests passed, including Daily domain,
+- `npm test` — 37 suites and 344 tests passed, including Daily domain,
   persistence, campaign isolation, screen states, Results, and replay coverage.
 - `npm test --prefix functions` — 6 callable-domain tests, 3 Firestore rules
   tests, and 3 best-transaction emulator tests passed.

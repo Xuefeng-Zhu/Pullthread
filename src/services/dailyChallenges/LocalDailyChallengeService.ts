@@ -198,6 +198,11 @@ export class LocalDailyChallengeService implements DailyChallengeService {
     ];
   }
 
+  async getPersonalBest(challengeId: string): Promise<DailyRun | null> {
+    await this.mutationQueue;
+    return (await this.loadState()).bestRunsByChallenge[challengeId] ?? null;
+  }
+
   async getProfile(): Promise<LocalGuestProfile> {
     await this.mutationQueue;
     return (await this.loadState()).profile;
@@ -217,6 +222,58 @@ export class LocalDailyChallengeService implements DailyChallengeService {
       const nextPending = { ...state.pendingRunsByChallenge };
       delete nextPending[validated.challengeId];
       return { ...state, pendingRunsByChallenge: nextPending };
+    });
+  }
+
+  /**
+   * Applies the server-authoritative incumbent without losing a newer local
+   * pending best. When `syncedRun` is supplied, clearing that exact queue item
+   * and reconciling the best happen in one AsyncStorage write.
+   */
+  async reconcileRemoteBest(
+    authoritativeInput: DailyRun,
+    syncedInput: DailyRun | null = null,
+  ): Promise<boolean> {
+    const authoritative = parseDailyRun(authoritativeInput);
+    const syncedRun = syncedInput ? parseDailyRun(syncedInput) : null;
+    if (
+      syncedRun &&
+      syncedRun.challengeId !== authoritative.challengeId
+    ) {
+      throw new RangeError(
+        'Synced Daily run and authoritative best must share a challenge.',
+      );
+    }
+
+    return this.mutate((state) => {
+      const incumbent =
+        state.bestRunsByChallenge[authoritative.challengeId] ?? null;
+      // The remote run is the tie-stable incumbent. A strictly better offline
+      // run still wins and remains queued for its own upload.
+      const personalBest = incumbent
+        ? selectDailyBest(incumbent, authoritative)
+        : authoritative;
+      const pending =
+        state.pendingRunsByChallenge[authoritative.challengeId] ?? null;
+      const shouldClearPending =
+        Boolean(syncedRun) &&
+        pending?.clientRunId === syncedRun?.clientRunId;
+      const bestUnchanged =
+        incumbent?.clientRunId === personalBest.clientRunId;
+      if (!shouldClearPending && bestUnchanged) return state;
+
+      const nextPending: Record<string, DailyRun> = {
+        ...state.pendingRunsByChallenge,
+      };
+      if (shouldClearPending) delete nextPending[authoritative.challengeId];
+      return {
+        ...state,
+        bestRunsByChallenge: {
+          ...state.bestRunsByChallenge,
+          [authoritative.challengeId]: personalBest,
+        },
+        pendingRunsByChallenge: nextPending,
+      };
     });
   }
 
@@ -258,7 +315,8 @@ export class LocalDailyChallengeService implements DailyChallengeService {
   ): Promise<boolean> {
     const operation = this.mutationQueue.then(async () => {
       const current = await this.loadState();
-      return this.saveState(updater(current));
+      const updated = updater(current);
+      return updated === current ? true : this.saveState(updated);
     });
     this.mutationQueue = operation.then(
       () => undefined,

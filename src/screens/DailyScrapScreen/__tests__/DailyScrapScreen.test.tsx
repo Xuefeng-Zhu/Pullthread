@@ -77,6 +77,7 @@ function dailyService(
         message: 'Saved on this device.',
       }),
     ),
+    getPersonalBest: jest.fn(async () => null),
     getLeaderboard: jest.fn(async () => []),
     ...overrides,
   };

@@ -7,6 +7,7 @@ import {
   parseDailyChallenge,
   parseDailyReplay,
   parseDailyRun,
+  selectDailyBest,
   utcChallengeDate,
   type DailyChallenge,
   type DailyLeaderboardEntry,
@@ -58,6 +59,7 @@ interface FirebaseClients {
 }
 
 let clientsPromise: Promise<FirebaseClients> | null = null;
+let anonymousSignIns = new WeakMap<Auth, Promise<string>>();
 
 async function getFirebaseClients(): Promise<FirebaseClients> {
   if (!clientsPromise) {
@@ -100,14 +102,86 @@ async function getFirebaseClients(): Promise<FirebaseClients> {
   return clientsPromise;
 }
 
-async function ensureAnonymousUser(auth: Auth): Promise<string> {
+type AnonymousSignIn = (
+  auth: Auth,
+) => Promise<{ readonly user: { readonly uid: string } }>;
+
+export async function ensureAnonymousUser(
+  auth: Auth,
+  signIn?: AnonymousSignIn,
+): Promise<string> {
   if (auth.currentUser) return auth.currentUser.uid;
-  const { signInAnonymously } = await import('firebase/auth');
-  return (await signInAnonymously(auth)).user.uid;
+  const activeSignIn = anonymousSignIns.get(auth);
+  if (activeSignIn) return activeSignIn;
+
+  const pendingSignIn = (async () => {
+    const signInUser =
+      signIn ?? (await import('firebase/auth')).signInAnonymously;
+    return (await signInUser(auth)).user.uid;
+  })();
+  anonymousSignIns.set(auth, pendingSignIn);
+  try {
+    return await pendingSignIn;
+  } finally {
+    if (anonymousSignIns.get(auth) === pendingSignIn) {
+      anonymousSignIns.delete(auth);
+    }
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseRemoteRun(
+  value: unknown,
+  challenge: DailyChallenge,
+): DailyRun {
+  if (!isRecord(value) || !isRecord(value.metrics)) {
+    throw new TypeError('Firebase Daily Scrap run is malformed.');
+  }
+  return parseDailyRun({
+    clientRunId: value.clientRunId,
+    challengeId: challenge.id,
+    challengeDate: challenge.challengeDate,
+    metrics: value.metrics,
+    replay: value.replay,
+    createdAt: value.createdAt,
+  });
+}
+
+export interface FirebaseDailyRemoteSubmission {
+  readonly isNewBest: boolean;
+  readonly personalBest: DailyRun;
+}
+
+export function parseFirebaseDailySubmissionResponse(
+  value: unknown,
+  submittedInput: DailyRun,
+): FirebaseDailyRemoteSubmission {
+  const submitted = parseDailyRun(submittedInput);
+  if (
+    !isRecord(value) ||
+    value.accepted !== true ||
+    typeof value.isNewBest !== 'boolean'
+  ) {
+    throw new TypeError('Firebase submission returned an invalid response.');
+  }
+  const personalBest = parseDailyRun(value.personalBest);
+  if (
+    personalBest.challengeId !== submitted.challengeId ||
+    personalBest.challengeDate !== submitted.challengeDate ||
+    compareDailyMetrics(personalBest.metrics, submitted.metrics) > 0 ||
+    (value.isNewBest && personalBest.clientRunId !== submitted.clientRunId)
+  ) {
+    throw new RangeError(
+      'Firebase submission returned an invalid authoritative best.',
+    );
+  }
+  return Object.freeze({
+    isNewBest: value.isNewBest,
+    personalBest,
+  });
 }
 
 function parseRemoteEntry(
@@ -117,17 +191,10 @@ function parseRemoteEntry(
   challenge: DailyChallenge,
   uid: string,
 ): DailyLeaderboardEntry {
-  if (!isRecord(value) || !isRecord(value.metrics)) {
+  if (!isRecord(value)) {
     throw new TypeError('Firebase Daily Scrap entry is malformed.');
   }
-  const run = parseDailyRun({
-    clientRunId: value.clientRunId,
-    challengeId: challenge.id,
-    challengeDate: challenge.challengeDate,
-    metrics: value.metrics,
-    replay: value.replay,
-    createdAt: value.createdAt,
-  });
+  const run = parseRemoteRun(value, challenge);
   const displayName =
     typeof value.displayName === 'string' && value.displayName.trim().length > 0
       ? value.displayName.trim().slice(0, 24)
@@ -145,7 +212,8 @@ function parseRemoteEntry(
 export interface FirebaseDailyRemoteGateway {
   checkChallenge(challenge: DailyChallenge): Promise<void>;
   ensureGuest(): Promise<void>;
-  submitRun(run: DailyRun): Promise<boolean>;
+  submitRun(run: DailyRun): Promise<FirebaseDailyRemoteSubmission>;
+  getPersonalBest(challenge: DailyChallenge): Promise<DailyRun | null>;
   getLeaderboard(challenge: DailyChallenge): Promise<DailyLeaderboardEntry[]>;
 }
 
@@ -162,7 +230,7 @@ class SdkFirebaseDailyRemoteGateway implements FirebaseDailyRemoteGateway {
     await ensureAnonymousUser(auth);
   }
 
-  async submitRun(run: DailyRun): Promise<boolean> {
+  async submitRun(run: DailyRun): Promise<FirebaseDailyRemoteSubmission> {
     const { auth, functions } = await getFirebaseClients();
     await ensureAnonymousUser(auth);
     const { httpsCallable } = await import('firebase/functions');
@@ -174,10 +242,19 @@ class SdkFirebaseDailyRemoteGateway implements FirebaseDailyRemoteGateway {
       replay: run.replay,
       createdAt: run.createdAt,
     });
-    if (!isRecord(response.data) || typeof response.data.isNewBest !== 'boolean') {
-      throw new TypeError('Firebase submission returned an invalid response.');
-    }
-    return response.data.isNewBest;
+    return parseFirebaseDailySubmissionResponse(response.data, run);
+  }
+
+  async getPersonalBest(challenge: DailyChallenge): Promise<DailyRun | null> {
+    const { auth, db } = await getFirebaseClients();
+    const uid = await ensureAnonymousUser(auth);
+    const { doc, getDoc } = await import('firebase/firestore');
+    const snapshot = await getDoc(
+      doc(db, 'daily_challenges', challenge.id, 'runs', uid),
+    );
+    return snapshot.exists()
+      ? parseRemoteRun(snapshot.data(), challenge)
+      : null;
   }
 
   async getLeaderboard(
@@ -221,11 +298,20 @@ class SdkFirebaseDailyRemoteGateway implements FirebaseDailyRemoteGateway {
   }
 }
 
+interface ReconciledRemoteSubmission extends FirebaseDailyRemoteSubmission {
+  readonly localPersisted: boolean;
+}
+
+interface PendingFlushOutcome {
+  readonly synced: boolean;
+  readonly submissions: ReadonlyMap<string, ReconciledRemoteSubmission>;
+}
+
 /** Local-first Firebase decorator. Every successful run is saved locally first. */
 export class FirebaseDailyChallengeService implements DailyChallengeService {
   readonly kind = 'firebase' as const;
   private connectionStatus: DailyServiceStatus = 'remote';
-  private pendingFlush: Promise<boolean> | null = null;
+  private pendingFlush: Promise<PendingFlushOutcome> | null = null;
 
   constructor(
     private readonly local = new LocalDailyChallengeService(),
@@ -263,21 +349,40 @@ export class FirebaseDailyChallengeService implements DailyChallengeService {
       const pending = (await this.local.getPendingRuns()).find(
         (candidate) => candidate.challengeId === validated.challengeId,
       );
+      let remoteSubmission: ReconciledRemoteSubmission | null = null;
       let currentRunProcessedRemotely = false;
-      let localPersistenceRecovered = false;
       if (pending) {
-        await this.uploadRun(pending);
+        remoteSubmission = await this.syncPendingRun(pending);
+        if (!remoteSubmission) {
+          throw new Error('The pending Daily Scrap run did not sync.');
+        }
         currentRunProcessedRemotely =
           pending.clientRunId === validated.clientRunId;
-        localPersistenceRecovered = await this.local.markRunSynced(pending);
       } else {
         await this.remote.ensureGuest();
       }
       this.connectionStatus = 'remote';
-      const savedOnDevice = localResult.accepted || localPersistenceRecovered;
-      if (!savedOnDevice && !currentRunProcessedRemotely) {
+      const personalBest = remoteSubmission
+        ? selectDailyBest(
+            localResult.personalBest,
+            remoteSubmission.personalBest,
+          )
+        : localResult.personalBest;
+      const isNewBest = currentRunProcessedRemotely && remoteSubmission
+        ? remoteSubmission.isNewBest
+        : localResult.isNewBest;
+      const savedOnDevice = remoteSubmission
+        ? remoteSubmission.localPersisted ||
+          (localResult.accepted &&
+            localResult.personalBest.clientRunId === personalBest.clientRunId)
+        : localResult.accepted;
+      const accepted =
+        savedOnDevice || Boolean(remoteSubmission) || currentRunProcessedRemotely;
+      if (!accepted) {
         return Object.freeze({
           ...localResult,
+          isNewBest,
+          personalBest,
           syncStatus: 'volatile',
           message:
             'Kept for this session only. Device storage is unavailable.',
@@ -286,12 +391,16 @@ export class FirebaseDailyChallengeService implements DailyChallengeService {
       return Object.freeze({
         ...localResult,
         accepted: true,
+        isNewBest,
+        personalBest,
         syncStatus: 'remote',
         message: savedOnDevice
-          ? localResult.isNewBest
+          ? isNewBest
             ? 'Saved on this device and shared as a new best.'
             : 'Saved on this device. Your shared best still leads this attempt.'
-          : 'Shared successfully, but device storage is unavailable.',
+          : isNewBest
+            ? 'Shared as a new best, but device storage is unavailable.'
+            : 'Shared best is up to date, but device storage is unavailable.',
       });
     } catch {
       this.connectionStatus = 'offline';
@@ -311,13 +420,30 @@ export class FirebaseDailyChallengeService implements DailyChallengeService {
     }
   }
 
+  async getPersonalBest(challengeId: string): Promise<DailyRun | null> {
+    const challenge = getTodayDailyChallenge(this.clock);
+    if (challengeId !== challenge.id) {
+      return this.local.getPersonalBest(challengeId);
+    }
+    await this.flushPendingRuns();
+    const localBest = await this.local.getPersonalBest(challengeId);
+    try {
+      const remoteBest = await this.remote.getPersonalBest(challenge);
+      if (!remoteBest) return localBest;
+      await this.local.reconcileRemoteBest(remoteBest);
+      return (await this.local.getPersonalBest(challengeId)) ?? remoteBest;
+    } catch {
+      return localBest;
+    }
+  }
+
   async getLeaderboard(challengeId: string): Promise<DailyLeaderboardEntry[]> {
     const challenge = getTodayDailyChallenge(this.clock);
     if (challengeId !== challenge.id) return this.local.getLeaderboard(challengeId);
     try {
-      const pendingSynced = await this.flushPendingRuns();
+      const pendingFlush = await this.flushPendingRuns();
       const entries = await this.remote.getLeaderboard(challenge);
-      this.connectionStatus = pendingSynced ? 'remote' : 'offline';
+      this.connectionStatus = pendingFlush.synced ? 'remote' : 'offline';
       return entries.length > 0
         ? entries
         : this.local.getLeaderboard(challengeId);
@@ -327,23 +453,43 @@ export class FirebaseDailyChallengeService implements DailyChallengeService {
     }
   }
 
-  private async uploadRun(run: DailyRun): Promise<boolean> {
+  private async uploadRun(
+    run: DailyRun,
+  ): Promise<FirebaseDailyRemoteSubmission> {
     return this.remote.submitRun(run);
   }
 
-  private async flushPendingRuns(): Promise<boolean> {
-    if (this.pendingFlush) return this.pendingFlush;
-
-    const pendingFlush = this.flushPendingRunsOnce();
-    this.pendingFlush = pendingFlush;
-    try {
-      return await pendingFlush;
-    } finally {
-      if (this.pendingFlush === pendingFlush) this.pendingFlush = null;
+  private async syncPendingRun(
+    pending: DailyRun,
+  ): Promise<ReconciledRemoteSubmission | null> {
+    while (true) {
+      const outcome = await this.flushPendingRuns();
+      const submission = outcome.submissions.get(pending.clientRunId);
+      if (submission) return submission;
+      const stillPending = (await this.local.getPendingRuns()).some(
+        (candidate) => candidate.clientRunId === pending.clientRunId,
+      );
+      if (!stillPending || !outcome.synced) return null;
+      // The run was added or replaced after the active flush took its snapshot.
+      // Start the next serialized cycle instead of uploading in parallel.
     }
   }
 
-  private async flushPendingRunsOnce(): Promise<boolean> {
+  private flushPendingRuns(): Promise<PendingFlushOutcome> {
+    if (this.pendingFlush) return this.pendingFlush;
+    const pendingFlush = (async () => {
+      try {
+        return await this.flushPendingRunsOnce();
+      } finally {
+        this.pendingFlush = null;
+      }
+    })();
+    this.pendingFlush = pendingFlush;
+    return pendingFlush;
+  }
+
+  private async flushPendingRunsOnce(): Promise<PendingFlushOutcome> {
+    const submissions = new Map<string, ReconciledRemoteSubmission>();
     try {
       const oldestUploadDate = utcChallengeDate(
         new Date(this.clock().getTime() - ONE_DAY_MS),
@@ -356,14 +502,21 @@ export class FirebaseDailyChallengeService implements DailyChallengeService {
           await this.local.markRunSynced(pending);
           continue;
         }
-        await this.uploadRun(pending);
-        await this.local.markRunSynced(pending);
+        const remoteSubmission = await this.uploadRun(pending);
+        const localPersisted = await this.local.reconcileRemoteBest(
+          remoteSubmission.personalBest,
+          pending,
+        );
+        submissions.set(
+          pending.clientRunId,
+          Object.freeze({ ...remoteSubmission, localPersisted }),
+        );
       }
       this.connectionStatus = 'remote';
-      return true;
+      return Object.freeze({ synced: true, submissions });
     } catch {
       this.connectionStatus = 'offline';
-      return false;
+      return Object.freeze({ synced: false, submissions });
     }
   }
 }
@@ -376,4 +529,5 @@ export function createDailyChallengeService(): DailyChallengeService {
 
 export function resetFirebaseDailyClientsForTests(): void {
   clientsPromise = null;
+  anonymousSignIns = new WeakMap<Auth, Promise<string>>();
 }

@@ -24,5 +24,6 @@ export interface DailyChallengeService {
   readonly status: DailyServiceStatus;
   getTodayChallenge(): Promise<DailyChallenge>;
   submitRun(run: DailyRun): Promise<DailySubmissionResult>;
+  getPersonalBest(challengeId: string): Promise<DailyRun | null>;
   getLeaderboard(challengeId: string): Promise<DailyLeaderboardEntry[]>;
 }

@@ -5,7 +5,10 @@ import { getCampaignLevel } from '../../../game/levels/levelLoader';
 import { createLevelReplay } from '../../../game/replay';
 import {
   FirebaseDailyChallengeService,
+  ensureAnonymousUser,
   type FirebaseDailyRemoteGateway,
+  type FirebaseDailyRemoteSubmission,
+  parseFirebaseDailySubmissionResponse,
   resetFirebaseDailyClientsForTests,
 } from '../FirebaseDailyChallengeService';
 import {
@@ -39,6 +42,7 @@ class FakeRemote implements FirebaseDailyRemoteGateway {
   readonly submitRun = jest.fn<FirebaseDailyRemoteGateway['submitRun']>();
   readonly ensureGuest = jest.fn<FirebaseDailyRemoteGateway['ensureGuest']>();
   readonly checkChallenge = jest.fn<FirebaseDailyRemoteGateway['checkChallenge']>();
+  readonly getPersonalBest = jest.fn<FirebaseDailyRemoteGateway['getPersonalBest']>();
   readonly getLeaderboard = jest.fn<FirebaseDailyRemoteGateway['getLeaderboard']>();
 }
 
@@ -65,6 +69,85 @@ function referenceRunForDate(
     },
   );
 }
+
+function remoteSubmission(
+  personalBest: ReturnType<typeof referenceRun>,
+  isNewBest = true,
+): FirebaseDailyRemoteSubmission {
+  return Object.freeze({ isNewBest, personalBest });
+}
+
+describe('Firebase anonymous session coordination', () => {
+  test('shares one cold-start anonymous sign-in across concurrent readers', async () => {
+    const auth = { currentUser: null } as unknown as Parameters<
+      typeof ensureAnonymousUser
+    >[0];
+    let finishSignIn!: () => void;
+    const signInGate = new Promise<void>((resolve) => {
+      finishSignIn = resolve;
+    });
+    const signIn = jest.fn<
+      NonNullable<Parameters<typeof ensureAnonymousUser>[1]>
+    >(async () => {
+      await signInGate;
+      return { user: { uid: 'shared-anonymous-user' } };
+    });
+
+    const first = ensureAnonymousUser(auth, signIn);
+    const second = ensureAnonymousUser(auth, signIn);
+    expect(signIn).toHaveBeenCalledTimes(1);
+
+    finishSignIn();
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      'shared-anonymous-user',
+      'shared-anonymous-user',
+    ]);
+    expect(signIn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Firebase Daily submission response parsing', () => {
+  test('accepts a canonical authoritative incumbent', () => {
+    const submitted = referenceRun('firebase-parser-submitted-0001');
+    const incumbent = referenceRun('firebase-parser-incumbent-0001');
+
+    expect(
+      parseFirebaseDailySubmissionResponse(
+        { accepted: true, isNewBest: false, personalBest: incumbent },
+        submitted,
+      ),
+    ).toEqual(remoteSubmission(incumbent, false));
+  });
+
+  test('rejects missing, cross-challenge, and false new-best responses', () => {
+    const submitted = referenceRun('firebase-parser-submitted-0002');
+    const differentDay = referenceRunForDate(
+      '2026-08-26',
+      'firebase-parser-yesterday-0001',
+      '2026-08-26T12:00:00.000Z',
+    );
+    const tiedOtherId = referenceRun('firebase-parser-other-0001');
+
+    expect(() =>
+      parseFirebaseDailySubmissionResponse(
+        { accepted: true, isNewBest: false },
+        submitted,
+      ),
+    ).toThrow();
+    expect(() =>
+      parseFirebaseDailySubmissionResponse(
+        { accepted: true, isNewBest: false, personalBest: differentDay },
+        submitted,
+      ),
+    ).toThrow(/authoritative best/);
+    expect(() =>
+      parseFirebaseDailySubmissionResponse(
+        { accepted: true, isNewBest: true, personalBest: tiedOtherId },
+        submitted,
+      ),
+    ).toThrow(/authoritative best/);
+  });
+});
 
 describe('FirebaseDailyChallengeService local-first boundary', () => {
   beforeEach(() => {
@@ -110,7 +193,7 @@ describe('FirebaseDailyChallengeService local-first boundary', () => {
     await expect(local.getPendingRuns()).resolves.toEqual([run]);
     await expect(local.getLeaderboard(run.challengeId)).resolves.toHaveLength(1);
 
-    remote.submitRun.mockResolvedValueOnce(true);
+    remote.submitRun.mockResolvedValueOnce(remoteSubmission(run));
     remote.getLeaderboard.mockResolvedValueOnce([]);
     await expect(service.getLeaderboard(run.challengeId)).resolves.toEqual([
       expect.objectContaining({ id: run.clientRunId, isCurrentPlayer: true }),
@@ -138,7 +221,7 @@ describe('FirebaseDailyChallengeService local-first boundary', () => {
     );
     remote.submitRun.mockRejectedValueOnce(new Error('offline'));
     await service.submitRun(first);
-    remote.submitRun.mockResolvedValueOnce(true);
+    remote.submitRun.mockResolvedValueOnce(remoteSubmission(first));
 
     await expect(service.submitRun(tie)).resolves.toMatchObject({
       isNewBest: false,
@@ -158,13 +241,13 @@ describe('FirebaseDailyChallengeService local-first boundary', () => {
       remote,
     );
     const run = referenceRun('firebase-volatile-remote-0001');
-    remote.submitRun.mockResolvedValueOnce(true);
+    remote.submitRun.mockResolvedValueOnce(remoteSubmission(run));
 
     await expect(service.submitRun(run)).resolves.toMatchObject({
       accepted: true,
       isNewBest: true,
       syncStatus: 'remote',
-      message: 'Shared successfully, but device storage is unavailable.',
+      message: 'Shared as a new best, but device storage is unavailable.',
     });
     expect(remote.submitRun).toHaveBeenCalledWith(run);
     await expect(local.getPendingRuns()).resolves.toEqual([]);
@@ -190,6 +273,126 @@ describe('FirebaseDailyChallengeService local-first boundary', () => {
     await expect(local.getPendingRuns()).resolves.toEqual([run]);
   });
 
+  test('preserves a local personal best omitted from the remote top 50', async () => {
+    const remote = new FakeRemote();
+    const local = new LocalDailyChallengeService(new MemoryStorage());
+    const service = new FirebaseDailyChallengeService(
+      local,
+      () => new Date('2026-08-27T12:00:00.000Z'),
+      remote,
+    );
+    const run = referenceRun('firebase-outside-top-fifty-0001');
+    await local.submitRun(run);
+    await local.markRunSynced(run);
+    const remoteBoard = Array.from({ length: 50 }, (_, index) => ({
+      id: `remote-top-${index + 1}`,
+      rank: index + 1,
+      displayName: `Remote ${index + 1}`,
+      metrics: run.metrics,
+      replay: run.replay,
+      isCurrentPlayer: false,
+    }));
+    remote.getLeaderboard.mockResolvedValueOnce(remoteBoard);
+    remote.getPersonalBest.mockResolvedValueOnce(null);
+
+    await expect(service.getLeaderboard(run.challengeId)).resolves.toEqual(
+      remoteBoard,
+    );
+    await expect(service.getPersonalBest(run.challengeId)).resolves.toMatchObject(
+      { clientRunId: run.clientRunId },
+    );
+  });
+
+  test('uses and caches the authoritative best after local storage resets', async () => {
+    const remote = new FakeRemote();
+    const local = new LocalDailyChallengeService(new MemoryStorage());
+    const service = new FirebaseDailyChallengeService(
+      local,
+      () => new Date('2026-08-27T12:00:00.000Z'),
+      remote,
+    );
+    const candidate = referenceRun('firebase-reset-candidate-0001');
+    const incumbent = referenceRun('firebase-server-incumbent-0001');
+    remote.submitRun.mockResolvedValueOnce(remoteSubmission(incumbent, false));
+
+    await expect(service.submitRun(candidate)).resolves.toMatchObject({
+      accepted: true,
+      isNewBest: false,
+      personalBest: { clientRunId: incumbent.clientRunId },
+      syncStatus: 'remote',
+    });
+    await expect(local.getPersonalBest(candidate.challengeId)).resolves.toMatchObject(
+      { clientRunId: incumbent.clientRunId },
+    );
+    await expect(local.getPendingRuns()).resolves.toEqual([]);
+  });
+
+  test('keeps the authoritative best in memory when device writes fail', async () => {
+    const remote = new FakeRemote();
+    const local = new LocalDailyChallengeService(new FailingWriteStorage());
+    const service = new FirebaseDailyChallengeService(
+      local,
+      () => new Date('2026-08-27T12:00:00.000Z'),
+      remote,
+    );
+    const candidate = referenceRun('firebase-volatile-candidate-0001');
+    const incumbent = referenceRun('firebase-volatile-incumbent-0001');
+    remote.submitRun.mockResolvedValueOnce(remoteSubmission(incumbent, false));
+
+    await expect(service.submitRun(candidate)).resolves.toMatchObject({
+      accepted: true,
+      isNewBest: false,
+      personalBest: { clientRunId: incumbent.clientRunId },
+      syncStatus: 'remote',
+      message: 'Shared best is up to date, but device storage is unavailable.',
+    });
+    await expect(local.getPersonalBest(candidate.challengeId)).resolves.toMatchObject(
+      { clientRunId: incumbent.clientRunId },
+    );
+    await expect(local.getPendingRuns()).resolves.toEqual([]);
+  });
+
+  test('returns the reconciled best when its parallel direct read fails', async () => {
+    const remote = new FakeRemote();
+    const local = new LocalDailyChallengeService(new MemoryStorage());
+    const service = new FirebaseDailyChallengeService(
+      local,
+      () => new Date('2026-08-27T12:00:00.000Z'),
+      remote,
+    );
+    const candidate = referenceRun('firebase-racing-candidate-0001');
+    const incumbent = referenceRun('firebase-racing-incumbent-0001');
+    await local.submitRun(candidate);
+
+    let signalUploadStarted!: () => void;
+    const uploadStarted = new Promise<void>((resolve) => {
+      signalUploadStarted = resolve;
+    });
+    let finishUpload!: () => void;
+    const uploadGate = new Promise<FirebaseDailyRemoteSubmission>((resolve) => {
+      finishUpload = () => resolve(remoteSubmission(incumbent, false));
+    });
+    remote.submitRun.mockImplementationOnce(() => {
+      signalUploadStarted();
+      return uploadGate;
+    });
+    remote.getLeaderboard.mockResolvedValueOnce([]);
+    remote.getPersonalBest.mockRejectedValueOnce(new Error('read unavailable'));
+
+    const leaderboard = service.getLeaderboard(candidate.challengeId);
+    await uploadStarted;
+    const personalBest = service.getPersonalBest(candidate.challengeId);
+    await Promise.resolve();
+    expect(remote.getPersonalBest).not.toHaveBeenCalled();
+
+    finishUpload();
+    await leaderboard;
+    await expect(personalBest).resolves.toMatchObject({
+      clientRunId: incumbent.clientRunId,
+    });
+    expect(remote.getPersonalBest).toHaveBeenCalledTimes(1);
+  });
+
   test('drops expired pending days without blocking a current upload', async () => {
     const remote = new FakeRemote();
     const local = new LocalDailyChallengeService(new MemoryStorage());
@@ -206,7 +409,7 @@ describe('FirebaseDailyChallengeService local-first boundary', () => {
     const current = referenceRun('firebase-current-pending-0001');
     await local.submitRun(expired);
     await local.submitRun(current);
-    remote.submitRun.mockResolvedValueOnce(true);
+    remote.submitRun.mockResolvedValueOnce(remoteSubmission(current));
     remote.getLeaderboard.mockResolvedValueOnce([]);
 
     await service.getLeaderboard(current.challengeId);
@@ -233,8 +436,8 @@ describe('FirebaseDailyChallengeService local-first boundary', () => {
       signalUploadStarted = resolve;
     });
     let finishUpload!: () => void;
-    const uploadGate = new Promise<boolean>((resolve) => {
-      finishUpload = () => resolve(true);
+    const uploadGate = new Promise<FirebaseDailyRemoteSubmission>((resolve) => {
+      finishUpload = () => resolve(remoteSubmission(run));
     });
     remote.checkChallenge.mockResolvedValueOnce();
     remote.submitRun.mockImplementationOnce(() => {
@@ -255,5 +458,52 @@ describe('FirebaseDailyChallengeService local-first boundary', () => {
     expect(remote.submitRun).toHaveBeenCalledTimes(1);
     await expect(local.getPendingRuns()).resolves.toEqual([]);
     expect(service.status).toBe('remote');
+  });
+
+  test('shares a background pending flush with a tied foreground submission', async () => {
+    const remote = new FakeRemote();
+    const local = new LocalDailyChallengeService(new MemoryStorage());
+    const service = new FirebaseDailyChallengeService(
+      local,
+      () => new Date('2026-08-27T12:00:00.000Z'),
+      remote,
+    );
+    const first = referenceRun('firebase-background-pending-0001');
+    const tie = referenceRun(
+      'firebase-foreground-tie-0001',
+      '2026-08-27T12:01:00.000Z',
+    );
+    await local.submitRun(first);
+
+    let signalUploadStarted!: () => void;
+    const uploadStarted = new Promise<void>((resolve) => {
+      signalUploadStarted = resolve;
+    });
+    let finishUpload!: () => void;
+    const uploadGate = new Promise<FirebaseDailyRemoteSubmission>((resolve) => {
+      finishUpload = () => resolve(remoteSubmission(first));
+    });
+    remote.checkChallenge.mockResolvedValueOnce();
+    remote.submitRun.mockImplementationOnce(() => {
+      signalUploadStarted();
+      return uploadGate;
+    });
+
+    await service.getTodayChallenge();
+    await uploadStarted;
+    const foreground = service.submitRun(tie);
+    await expect(local.attemptsForChallenge(first.challengeId)).resolves.toBe(2);
+    await Promise.resolve();
+    expect(remote.submitRun).toHaveBeenCalledTimes(1);
+
+    finishUpload();
+    await expect(foreground).resolves.toMatchObject({
+      accepted: true,
+      isNewBest: false,
+      personalBest: { clientRunId: first.clientRunId },
+      syncStatus: 'remote',
+    });
+    expect(remote.submitRun).toHaveBeenCalledTimes(1);
+    await expect(local.getPendingRuns()).resolves.toEqual([]);
   });
 });

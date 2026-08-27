@@ -78,6 +78,10 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
   const dailySubmitStatus = useDailyChallengeStore((state) => state.submitStatus);
   const dailyStatusMessage = useDailyChallengeStore((state) => state.statusMessage);
   const dailyErrorMessage = useDailyChallengeStore((state) => state.errorMessage);
+  const dailyPersonalBest = useDailyChallengeStore((state) => state.personalBest);
+  const dailyLatestSubmission = useDailyChallengeStore(
+    (state) => state.latestSubmission,
+  );
   const activeLevelId = useGameStore((state) => state.activeLevelId);
   const startLevel = useGameStore((state) => state.startLevel);
   const resetSession = useGameStore((state) => state.resetSession);
@@ -263,6 +267,20 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
   );
   const level = getCampaignLevel(completedRun.levelId);
   const nextLevel = isDaily ? null : getNextCampaignLevel(level.id);
+  const activeDailySubmission =
+    completedRun.session?.kind === 'daily' &&
+    dailyLatestSubmission?.personalBest.challengeId ===
+      completedRun.session.challenge.id
+      ? dailyLatestSubmission
+      : null;
+  const resultIsNewBest = activeDailySubmission
+    ? activeDailySubmission.isNewBest
+    : completedRun.isNewBest;
+  const resultBestMetrics =
+    completedRun.session?.kind === 'daily' &&
+    dailyPersonalBest?.challengeId === completedRun.session.challenge.id
+      ? dailyPersonalBest.metrics
+      : completedRun.bestMetrics;
   const availableThimbles = level.collectible ? 3 : 2;
   const timeSeconds = `${(completedRun.outcome.completionMs / 1000).toFixed(1)}s`;
   return (
@@ -393,9 +411,9 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
         >
           <Ionicons name="ribbon-outline" size={17} color="#4f3b24" />
           <Text style={styles.bestText}>
-            {completedRun.isNewBest
+            {resultIsNewBest
               ? 'NEW BEST'
-              : `BEST ${completedRun.bestMetrics.threadUsed} THREAD`}
+              : `BEST ${resultBestMetrics.threadUsed} THREAD`}
           </Text>
         </View>
 

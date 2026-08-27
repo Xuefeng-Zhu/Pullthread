@@ -69,11 +69,12 @@ function serviceWith(
   methods: Pick<
     DailyChallengeService,
     'getLeaderboard' | 'getTodayChallenge' | 'submitRun'
-  >,
+  > & Partial<Pick<DailyChallengeService, 'getPersonalBest'>>,
 ): DailyChallengeService {
   return {
     kind: 'local',
     status: 'local',
+    getPersonalBest: jest.fn(async () => null),
     ...methods,
   };
 }
@@ -193,6 +194,70 @@ describe('useDailyChallengeStore request coordination', () => {
       personalBest: null,
       latestSubmission: null,
       leaderboard: [],
+    });
+  });
+
+  test('loads the personal best independently when the shared top 50 omits it', async () => {
+    const sharedTopFifty = Array.from({ length: 50 }, (_, index) => ({
+      ...firstDay.entry,
+      id: `shared-player-${index + 1}`,
+      rank: index + 1,
+      displayName: `Quilter ${index + 1}`,
+      isCurrentPlayer: false,
+    }));
+    const service = serviceWith({
+      getTodayChallenge: jest.fn(async () => firstDay.challenge),
+      getLeaderboard: jest.fn(async () => sharedTopFifty),
+      getPersonalBest: jest.fn(async () => firstDay.run),
+      submitRun: jest.fn(async (run: DailyRun) => ({
+        accepted: true,
+        isNewBest: true,
+        personalBest: run,
+        syncStatus: 'remote' as const,
+        message: 'Shared as a new best.',
+      })),
+    });
+    resetDailyChallengeStoreForTests(service);
+
+    await useDailyChallengeStore.getState().loadToday();
+
+    expect(useDailyChallengeStore.getState()).toMatchObject({
+      leaderboard: { length: 50 },
+      personalBest: { clientRunId: firstDay.run.clientRunId },
+    });
+  });
+
+  test('keeps the authoritative incumbent after a tied submission refreshes', async () => {
+    const service = serviceWith({
+      getTodayChallenge: jest.fn(async () => firstDay.challenge),
+      getLeaderboard: jest.fn(async () => []),
+      getPersonalBest: jest.fn(async () => null),
+      submitRun: jest.fn(async () => ({
+        accepted: true,
+        isNewBest: false,
+        personalBest: firstDay.run,
+        syncStatus: 'remote' as const,
+        message: 'Shared. Your existing best still leads this attempt.',
+      })),
+    });
+    resetDailyChallengeStoreForTests(service);
+    await useDailyChallengeStore.getState().loadToday();
+
+    await expect(
+      useDailyChallengeStore
+        .getState()
+        .submitCompletedReplay(firstDay.challenge, firstDay.replay),
+    ).resolves.toMatchObject({
+      isNewBest: false,
+      personalBest: { clientRunId: firstDay.run.clientRunId },
+    });
+    expect(useDailyChallengeStore.getState()).toMatchObject({
+      submitStatus: 'saved',
+      personalBest: { clientRunId: firstDay.run.clientRunId },
+      latestSubmission: {
+        isNewBest: false,
+        personalBest: { clientRunId: firstDay.run.clientRunId },
+      },
     });
   });
 });

@@ -173,6 +173,7 @@ function seedDailyCompletedRun() {
     submitStatus: 'saved',
     statusMessage: 'Saved on this device.',
     personalBest,
+    latestSubmission: null,
   });
   useGameStore.setState({
     activeLevelId: level.id,
@@ -192,7 +193,7 @@ function seedDailyCompletedRun() {
     bestRun: metrics,
   });
 
-  return { challenge, level };
+  return { challenge, level, personalBest };
 }
 
 function completedThrough(levelCount: number) {
@@ -474,6 +475,36 @@ describe('ResultsScreen', () => {
     expect(nav.popTo).toHaveBeenCalledWith('DailyScrap');
     expect(useGameStore.getState().completedRun).toBeNull();
     expect(useCampaignProgressStore.getState().progressByLevel).toEqual({});
+  });
+
+  test('replaces the optimistic Daily badge with the authoritative best', async () => {
+    const { challenge, personalBest } = seedDailyCompletedRun();
+    const authoritativeBest = createDailyRun(
+      challenge,
+      personalBest.replay.levelReplay,
+      {
+        clientRunId: 'daily-results-authoritative-best',
+        createdAt: '2026-08-27T11:00:00.000Z',
+      },
+    );
+    useDailyChallengeStore.setState({
+      personalBest: authoritativeBest,
+      latestSubmission: {
+        accepted: true,
+        isNewBest: false,
+        personalBest: authoritativeBest,
+        syncStatus: 'remote',
+        message: 'Your shared best still leads this attempt.',
+      },
+    });
+    const view = await render(
+      <ResultsScreen navigation={navigation().value} />,
+    );
+
+    expect(view.queryByText('NEW BEST')).toBeNull();
+    expect(
+      view.getByText(`BEST ${authoritativeBest.metrics.threadUsed} THREAD`),
+    ).toBeTruthy();
   });
 
   test('truthfully reports a Daily Scrap local-save failure', async () => {

@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import {
   createDailyClientRunId,
   createDailyRun,
+  selectDailyBest,
   type DailyChallenge,
   type DailyLeaderboardEntry,
   type DailyRun,
@@ -61,6 +62,18 @@ function personalBestFromEntries(
   } catch {
     return null;
   }
+}
+
+function selectPersonalBest(
+  challenge: DailyChallenge,
+  ...candidates: readonly (DailyRun | null | undefined)[]
+): DailyRun | null {
+  let best: DailyRun | null = null;
+  for (const candidate of candidates) {
+    if (!candidate || candidate.challengeId !== challenge.id) continue;
+    best = best ? selectDailyBest(candidate, best) : candidate;
+  }
+  return best;
 }
 
 export const useDailyChallengeStore = create<DailyChallengeStore>((set, get) => ({
@@ -130,7 +143,10 @@ export const useDailyChallengeStore = create<DailyChallengeStore>((set, get) => 
         : state,
     );
     try {
-      const leaderboard = await service.getLeaderboard(challenge.id);
+      const [leaderboard, servicePersonalBest] = await Promise.all([
+        service.getLeaderboard(challenge.id),
+        service.getPersonalBest(challenge.id),
+      ]);
       if (
         request !== leaderboardRequest ||
         get().challenge?.id !== challengeId
@@ -141,8 +157,12 @@ export const useDailyChallengeStore = create<DailyChallengeStore>((set, get) => 
       const offline = service.status === 'offline';
       set((state) => ({
         leaderboard,
-        personalBest:
-          personalBestFromEntries(leaderboard, challenge) ?? state.personalBest,
+        personalBest: selectPersonalBest(
+          challenge,
+          servicePersonalBest,
+          personalBestFromEntries(leaderboard, challenge),
+          state.personalBest,
+        ),
         boardStatus: localOnly ? 'local' : offline ? 'offline' : 'ready',
         statusMessage: localOnly
           ? 'LOCAL BOARD — Remote leaderboard is not configured.'
@@ -172,7 +192,11 @@ export const useDailyChallengeStore = create<DailyChallengeStore>((set, get) => 
       clientRunId: createDailyClientRunId(challenge),
       createdAt: new Date().toISOString(),
     });
-    set({ submitStatus: 'saving', errorMessage: null });
+    set({
+      submitStatus: 'saving',
+      errorMessage: null,
+      latestSubmission: null,
+    });
     try {
       const result = await service.submitRun(run);
       if (
@@ -187,12 +211,16 @@ export const useDailyChallengeStore = create<DailyChallengeStore>((set, get) => 
           : result.syncStatus === 'pending'
             ? 'pending'
             : 'saved';
-      const submissionState = {
-        personalBest: result.personalBest,
+      const submissionState = (state: DailyChallengeStore) => ({
+        personalBest: selectPersonalBest(
+          challenge,
+          result.personalBest,
+          state.personalBest,
+        ),
         latestSubmission: result,
         submitStatus,
         statusMessage: result.message,
-      } as const;
+      });
       set(submissionState);
       await get().refreshLeaderboard();
       if (
