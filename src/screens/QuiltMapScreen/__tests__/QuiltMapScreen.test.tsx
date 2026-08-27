@@ -10,9 +10,25 @@ import {
   type CampaignLevelProgress,
 } from '../../../store/useCampaignProgressStore';
 import {
+  selectHasFullGame,
+  useEntitlementStore,
+} from '../../../store/useEntitlementStore';
+import {
+  resetGameStoreForTests,
+  useGameStore,
+} from '../../../store/useGameStore';
+import {
   QuiltMapScreen,
   type QuiltMapScreenProps,
 } from '../QuiltMapScreen';
+
+jest.mock('react-native-purchases', () => ({
+  __esModule: true,
+  default: {},
+  PURCHASES_ERROR_CODE: {
+    PURCHASE_CANCELLED_ERROR: 'PURCHASE_CANCELLED_ERROR',
+  },
+}));
 
 function completedLevel(
   thimbles: 1 | 2 | 3,
@@ -40,9 +56,22 @@ function navigation() {
   };
 }
 
+function completedThrough(order: number): Record<string, CampaignLevelProgress> {
+  return Object.fromEntries(
+    CAMPAIGN_LEVELS.slice(0, order).map((level) => [
+      level.id,
+      completedLevel(2),
+    ]),
+  );
+}
+
 describe('QuiltMapScreen', () => {
   beforeEach(() => {
-    useCampaignProgressStore.setState({ progressByLevel: {} });
+    resetGameStoreForTests();
+    useEntitlementStore.setState({
+      hasFullGame: false,
+      debugOverride: null,
+    });
     jest.clearAllMocks();
   });
 
@@ -169,5 +198,93 @@ describe('QuiltMapScreen', () => {
     expect(
       view.getByTestId(`level-node-${secondLevel.id}`).props.accessibilityHint,
     ).toBe('Opens this level.');
+  });
+
+  test('opens the Full Atelier paywall when Level 7 is reached but locked', async () => {
+    const levelSeven = CAMPAIGN_LEVELS[6];
+    useCampaignProgressStore.setState({
+      progressByLevel: completedThrough(6),
+    });
+    const nav = navigation();
+    const view = await render(<QuiltMapScreen navigation={nav.value} />);
+    const node = view.getByTestId(`level-node-${levelSeven.id}`);
+
+    expect(view.getByTestId(`level-state-${levelSeven.id}`).props.children).toBe(
+      'ATELIER LOCKED',
+    );
+    expect(node.props.accessibilityState).toEqual({
+      disabled: false,
+      selected: false,
+    });
+    expect(node.props.accessibilityLabel).toContain(
+      'opens the one-time unlock paywall',
+    );
+    expect(node.props.accessibilityHint).toBe(
+      'Opens the Full Atelier one-time unlock.',
+    );
+
+    await fireEvent.press(node);
+
+    expect(nav.navigate).toHaveBeenCalledWith('Paywall', {
+      levelId: levelSeven.id,
+    });
+    expect(useGameStore.getState().activeLevelId).toBe(CAMPAIGN_LEVELS[0].id);
+  });
+
+  test('reacts to a mock entitlement unlock and makes reached Level 7 current', async () => {
+    const levelSeven = CAMPAIGN_LEVELS[6];
+    useCampaignProgressStore.setState({
+      progressByLevel: completedThrough(6),
+    });
+    const nav = navigation();
+    const view = await render(<QuiltMapScreen navigation={nav.value} />);
+
+    await act(async () => {
+      useEntitlementStore.getState().setDebugEntitlement(true);
+    });
+
+    expect(selectHasFullGame(useEntitlementStore.getState())).toBe(true);
+    expect(view.getByTestId(`level-state-${levelSeven.id}`).props.children).toBe(
+      'CURRENT',
+    );
+    expect(
+      view.getByTestId(`level-node-${levelSeven.id}`).props.accessibilityState,
+    ).toEqual({ disabled: false, selected: true });
+
+    await fireEvent.press(view.getByTestId(`level-node-${levelSeven.id}`));
+
+    expect(nav.navigate).toHaveBeenCalledWith('SpikeLevel', {
+      levelId: levelSeven.id,
+    });
+    expect(useGameStore.getState().activeLevelId).toBe(levelSeven.id);
+  });
+
+  test('keeps Level 7 sequence-locked after purchase without prior progress', async () => {
+    const levelSeven = CAMPAIGN_LEVELS[6];
+    const nav = navigation();
+    const view = await render(<QuiltMapScreen navigation={nav.value} />);
+
+    expect(view.getByTestId(`level-state-${levelSeven.id}`).props.children).toBe(
+      'ATELIER LOCKED',
+    );
+
+    await act(async () => {
+      useEntitlementStore.getState().setDebugEntitlement(true);
+    });
+
+    const node = view.getByTestId(`level-node-${levelSeven.id}`);
+    expect(view.getByTestId(`level-state-${levelSeven.id}`).props.children).toBe(
+      'LOCKED',
+    );
+    expect(node.props.accessibilityState).toEqual({
+      disabled: true,
+      selected: false,
+    });
+    expect(node.props.accessibilityHint).toBe(
+      'Complete the previous level to unlock.',
+    );
+
+    await fireEvent.press(node);
+    expect(nav.navigate).not.toHaveBeenCalled();
   });
 });

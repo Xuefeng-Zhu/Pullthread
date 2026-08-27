@@ -13,10 +13,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useEffectiveReducedMotion } from '../../accessibility/useEffectiveReducedMotion';
 import type { RootStackParamList } from '../../app/navigation/RootNavigator';
 import type { SimulationOutcome, SimulationPhase } from '../../game/core/types';
+import { getCampaignLevelAccess } from '../../game/levels/campaignAccess';
 import {
   getCampaignLevel,
   getNextCampaignLevel,
 } from '../../game/levels/levelLoader';
+import { useCampaignProgressStore } from '../../store/useCampaignProgressStore';
+import {
+  selectHasFullGame,
+  useEntitlementStore,
+} from '../../store/useEntitlementStore';
 import { useGameStore } from '../../store/useGameStore';
 import { usePreferencesStore } from '../../store/usePreferencesStore';
 import {
@@ -70,6 +76,10 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
   const activeLevelId = useGameStore((state) => state.activeLevelId);
   const startLevel = useGameStore((state) => state.startLevel);
   const resetSession = useGameStore((state) => state.resetSession);
+  const progressByLevel = useCampaignProgressStore(
+    (state) => state.progressByLevel,
+  );
+  const hasFullGame = useEntitlementStore(selectHasFullGame);
   const highContrast = usePreferencesStore(
     (state) => state.highContrastEnabled,
   );
@@ -113,9 +123,31 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
 
   const handleTryAgain = useCallback(() => {
     const levelId = completedRun?.levelId ?? activeLevelId;
+    const access = getCampaignLevelAccess(
+      levelId,
+      progressByLevel,
+      hasFullGame,
+    );
+    if (access.openPaywall) {
+      navigation.navigate('Paywall', { levelId });
+      return;
+    }
+    if (!access.canPlay) {
+      resetSession();
+      navigation.popTo('QuiltMap');
+      return;
+    }
     startLevel(levelId);
     navigation.popTo('SpikeLevel', { levelId });
-  }, [activeLevelId, completedRun?.levelId, navigation, startLevel]);
+  }, [
+    activeLevelId,
+    completedRun?.levelId,
+    hasFullGame,
+    navigation,
+    progressByLevel,
+    resetSession,
+    startLevel,
+  ]);
 
   const handleMap = useCallback(() => {
     resetSession();
@@ -129,9 +161,29 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
       handleMap();
       return;
     }
+    const access = getCampaignLevelAccess(
+      nextLevel.id,
+      progressByLevel,
+      hasFullGame,
+    );
+    if (access.openPaywall) {
+      navigation.navigate('Paywall', { levelId: nextLevel.id });
+      return;
+    }
+    if (!access.canPlay) {
+      handleMap();
+      return;
+    }
     startLevel(nextLevel.id);
     navigation.popTo('SpikeLevel', { levelId: nextLevel.id });
-  }, [completedRun, handleMap, navigation, startLevel]);
+  }, [
+    completedRun,
+    handleMap,
+    hasFullGame,
+    navigation,
+    progressByLevel,
+    startLevel,
+  ]);
 
   const handleSettings = useCallback(() => {
     navigation.navigate('Settings');

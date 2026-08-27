@@ -7,12 +7,14 @@ import {
 } from 'zustand/middleware';
 
 import {
+  calculateThreadUsed,
   mergeBestRun,
   scoreRun,
   type RunMetrics,
   type ScoredRun,
   type ThimbleCount,
 } from '../game/core/scoring';
+import { FREE_CAMPAIGN_LEVEL_COUNT } from '../game/levels/campaignAccess';
 import { CAMPAIGN_LEVELS } from '../game/levels/campaignLevels';
 import type { LevelDefinition } from '../game/levels/schema';
 
@@ -38,6 +40,8 @@ export interface CampaignProgressStore extends PersistedCampaignProgress {
     targetThreadUsage: number,
   ) => ScoredRun;
   readonly resetProgress: () => void;
+  /** Development-only seed used by native paywall acceptance flows. */
+  readonly debugCompleteFreeCampaign: () => void;
 }
 
 export const defaultCampaignProgress: PersistedCampaignProgress = {
@@ -261,6 +265,25 @@ export const useCampaignProgressStore = create<CampaignProgressStore>()(
         return bestRun;
       },
       resetProgress: () => set({ progressByLevel: {} }),
+      debugCompleteFreeCampaign: () => {
+        if (!__DEV__) return;
+
+        for (const level of CAMPAIGN_LEVELS.slice(
+          0,
+          FREE_CAMPAIGN_LEVEL_COUNT,
+        )) {
+          get().recordRun(
+            level.id,
+            {
+              threadUsed: calculateThreadUsed(level.referenceSolution),
+              stitchesUsed: level.referenceSolution.length,
+              completionMs: 1_000,
+              collectedPatch: false,
+            },
+            level.targetThreadUsage,
+          );
+        }
+      },
     }),
     {
       name: CAMPAIGN_PROGRESS_STORAGE_KEY,

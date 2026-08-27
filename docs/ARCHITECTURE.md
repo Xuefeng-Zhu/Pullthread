@@ -1,17 +1,17 @@
-# Pullthread Campaign Architecture
+# Pullthread Campaign and Entitlement Architecture
 
 ## Scope
 
-Milestone 3 extends the proven physics-puzzle slice into a complete local
-campaign. The app launches at a three-quilt map, runs 15 catalog-authored
-levels, persists per-level progress, and keeps every simulation and replay
-deterministic. It supports pinch and pocket stitches, felt/silk/elastic
-materials, holes, thorns, circular bumpers, collectible patches, thimble
-scoring, Results, and campaign-aware replay.
+Milestones 3 and 4 extend the proven physics-puzzle slice into a complete local
+campaign with a fail-soft one-time purchase boundary. The app launches at a
+three-quilt map, runs 15 catalog-authored levels, persists per-level progress,
+keeps every simulation and replay deterministic, and gates Levels 7–15 behind
+the Full Atelier entitlement without making gameplay depend on a network.
 
-The campaign does not depend on an account, RevenueCat, InsForge, remote level
-delivery, or a network-backed leaderboard. Those service boundaries remain
-later milestones.
+The campaign does not require an account, remote level delivery, InsForge, or a
+network-backed leaderboard. RevenueCat wraps the premium access boundary, but
+its initialization, offer retrieval, purchase, and restore calls are never
+prerequisites for Levels 1–6 or already verified offline access.
 
 ## Dependency direction
 
@@ -21,6 +21,13 @@ App hydration / navigation
         +--> Quilt Map <-------- persisted campaign progress
         |                              ^
         |                              |
+        +--> access policy <----- cached effective entitlement
+        |                              ^
+        |                              |
+        +--> Paywall / Settings --> entitlement store --> service interface
+        |                                                /              \
+        |                                       development mock     RevenueCat
+        |
         +--> gameplay store -------- scoring
         |          |                   ^
         |          v                   |
@@ -53,6 +60,7 @@ src/
     QuiltMapScreen/
     SpikeLevelScreen/
     ResultsScreen/
+    PaywallScreen/
     SettingsScreen/
   game/
     core/
@@ -65,6 +73,7 @@ src/
     levels/
       schema.ts
       campaignLevels.ts
+      campaignAccess.ts      # pure sequence + entitlement access policy
       levelLoader.ts
       spikeLevel.ts          # Level 1 compatibility exports
     input/stitchGesture.ts
@@ -79,6 +88,13 @@ src/
     useGameStore.ts
     usePreferencesStore.ts
     useCampaignProgressStore.ts
+    useEntitlementStore.ts
+  services/
+    entitlements/
+      EntitlementService.ts
+      MockEntitlementService.ts
+      RevenueCatEntitlementService.ts
+      createEntitlementService.ts
   accessibility/
   components/
   theme/
@@ -175,22 +191,89 @@ Control semantics remain explicit:
 `usePreferencesStore` persists feedback/accessibility settings and tutorial
 completion. `useCampaignProgressStore` separately persists a versioned
 `progressByLevel` record containing completion and the merged best scored run.
-Both stores use fail-soft AsyncStorage adapters: gameplay remains available if
-storage fails, but that in-memory state must not be reported as durable.
+`useEntitlementStore` persists the last verified Full Atelier result, service
+source, and verification time. All three use fail-soft AsyncStorage adapters:
+gameplay remains available if storage fails, but in-memory state must not be
+reported as durable.
 
-`App.tsx` awaits explicit hydration of both stores before rendering navigation.
-This prevents a clean-map lock state from flashing before saved progress is
-known. Sanitization treats stored data as untrusted, drops malformed level
-entries, and accepts supported legacy field names through the migration path.
+`App.tsx` awaits explicit hydration of all three local stores before rendering
+navigation. This prevents a clean-map or premium-lock flash before saved state
+is known. RevenueCat initialization begins only after local hydration and is
+not awaited by navigation, so a slow or unavailable network cannot hold the
+campaign on its loading screen. Sanitization treats stored data as untrusted,
+drops malformed values, and accepts supported legacy campaign fields through
+the migration path.
 
-The Quilt Map derives state in campaign order:
+The pure `campaignAccess.ts` policy derives one of four states from catalog
+order, durable progress, and the effective entitlement:
 
-- a recorded completion is `completed`
-- Level 1 or a level immediately after a completion is `current`
-- every later level is `locked`
+- `completed`: recorded completion and, for premium levels, Full Atelier access
+- `current`: Level 1 or the next incomplete level, with any required entitlement
+- `sequence-locked`: the predecessor is incomplete
+- `premium-locked`: Level 7–15 lacks Full Atelier; the node remains
+  paywall-routable but cannot start gameplay
 
-No separate mutable unlock list is stored, so completion data and visible lock
-state cannot drift apart.
+Premium entitlement is required even to replay a completed premium level.
+After purchase, the same pure policy re-evaluates predecessor completion, so a
+purchase cannot skip Levels 1–6 or any later sequence step. No separate mutable
+unlock list is stored, keeping completion, entitlement, and visible access from
+drifting apart.
+
+The Quilt Map, Results `Next Level`, and `SpikeLevelScreen` direct-route guard
+all use this policy. A locked premium route is replaced by Paywall; an entitled
+but out-of-sequence route returns to the map. This makes the access boundary a
+gameplay invariant rather than a cosmetic map state.
+
+## Full Atelier service and offline boundary
+
+`EntitlementService` is the platform-neutral purchase contract. The stable
+identifiers are:
+
+```text
+RevenueCat entitlement: full_atelier
+store product:          pullthread_full_game
+```
+
+The implementations are intentionally small:
+
+- `MockEntitlementService` starts locked and provides deterministic offer,
+  purchase, cancellation/error injection, restore, and debug state for tests
+  and development.
+- `RevenueCatEntitlementService` configures the process-wide SDK once, reads
+  active `CustomerInfo`, selects the product from the current offering,
+  rejects subscription/unknown-category/consumable metadata that contradicts
+  the one-time unlock, normalizes purchase cancellation/errors, restores only
+  after an explicit user action, and subscribes to customer-info updates.
+- The factory selects `auto`, `mock`, or `revenuecat` from public Expo
+  environment configuration. Missing production configuration resolves to an
+  unavailable locked service, and production also rejects explicit mock mode;
+  it never grants access by default.
+
+The entitlement store owns UI-facing status, localized offer data, notices,
+purchase/restore commands, and a development-only override. The override is
+not persisted and is excluded from production UI. Purchase cancellation and
+service errors retain the prior entitlement. A successfully verified purchase
+or restore updates the local cache; an explicit successful restore with no
+purchase records the locked result.
+
+Offline behavior is deliberately asymmetric:
+
+- A previously RevenueCat-verified Full Atelier entitlement is available from
+  the sanitized local cache before SDK refresh finishes.
+- Refresh failure retains that known result and never blocks free gameplay.
+- A new purchase or restore still requires the platform store and RevenueCat
+  transaction path; failure is shown without mutating campaign progress.
+- Offer copy and price are presentation data, not entitlement proof. If no
+  offer is available, purchase is disabled while Restore remains reachable.
+- The development mock and its Maestro flow prove application state handling,
+  not StoreKit, Play Billing, receipt validation, or real offline entitlement.
+
+The custom Paywall communicates a one-time purchase with no subscription,
+lists the nine premium levels and mechanics, and is only reached after player
+intent. Settings exposes Restore Purchases from outside the paywall. Real SDK
+testing requires rebuilding the native development client after adding
+`react-native-purchases`; a JavaScript update inside an older binary is not
+sufficient.
 
 ## Scoring and best-run merge
 
@@ -244,15 +327,17 @@ silently when an Expo capability is unavailable. High Contrast selects a full
 game palette. OS reduced motion is always honored; the app toggle may add
 reduction but cannot override the OS.
 
-## Deferred service boundaries
+## Remaining service boundaries
 
-RevenueCat and InsForge are not campaign dependencies:
+InsForge remains outside the campaign dependency graph:
 
-- no SDK initialization, production keys, or entitlement cache
-- no purchase/restore UI or premium level gate
 - no remote level, run, leaderboard, or guest-identity call
 - no Daily Scrap generation or remote best result
+- no account or network requirement for the campaign
 
-Those integrations begin after the local campaign passes its automated and
-physical-device gates. They must wrap the working offline catalog rather than
-becoming prerequisites for deterministic gameplay.
+RevenueCat production configuration and real store transactions also remain
+external acceptance gates. The implemented abstraction, mock, UI, persistence,
+and access policy cannot by themselves prove Apple/Google product approval,
+localized offerings, purchase cancellation, restore on a fresh install, or a
+physical-device offline cold launch. Those gates must be recorded separately
+without weakening the working offline catalog.
