@@ -6,7 +6,9 @@ import {
 } from '../RevenueCatEntitlementService';
 import { createEntitlementService } from '../createEntitlementService';
 
-const makeClient = (): PurchasesClient => ({
+const makeClient = (
+  overrides: Partial<PurchasesClient> = {},
+): PurchasesClient => ({
   isConfigured: jest.fn(async () => false),
   configure:
     jest.fn<(configuration: Readonly<{ apiKey: string }>) => void>(),
@@ -22,6 +24,7 @@ const makeClient = (): PurchasesClient => ({
   })),
   addCustomerInfoUpdateListener: jest.fn(),
   removeCustomerInfoUpdateListener: jest.fn(() => true),
+  ...overrides,
 });
 
 describe('createEntitlementService', () => {
@@ -58,6 +61,41 @@ describe('createEntitlementService', () => {
     expect(client.configure).toHaveBeenCalledWith({
       apiKey: 'android_public_key',
     });
+  });
+
+  it('propagates Android product semantics through the factory', async () => {
+    const androidPackage = {
+      product: {
+        identifier: 'pullthread_full_game',
+        title: 'Full Atelier',
+        description: 'Unlock the complete campaign.',
+        priceString: '$4.99',
+        productCategory: 'NON_SUBSCRIPTION' as const,
+        productType: 'CONSUMABLE' as const,
+      },
+    };
+    const client = makeClient({
+      getOfferings: jest.fn(async () => ({
+        current: { availablePackages: [androidPackage] },
+      })),
+    });
+    const service = createEntitlementService({
+      platform: 'android',
+      isDevelopment: false,
+      mode: 'revenuecat',
+      androidApiKey: 'android_public_key',
+      purchasesClient: client,
+    });
+
+    await expect(service.getFullGameOffer()).resolves.toMatchObject({
+      productId: 'pullthread_full_game',
+      priceString: '$4.99',
+    });
+    await expect(service.purchaseFullGame()).resolves.toEqual({
+      status: 'error',
+      message: 'The purchase completed, but Full Atelier access is not active.',
+    });
+    expect(client.purchasePackage).toHaveBeenCalledWith(androidPackage);
   });
 
   it('uses the deterministic mock for native development without keys', () => {

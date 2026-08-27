@@ -103,7 +103,11 @@ export const createEntitlementService = (
   const apiKey = platform === 'ios' ? iosApiKey : androidApiKey;
 
   if (apiKey) {
-    return new RevenueCatEntitlementService(apiKey, options.purchasesClient);
+    return new RevenueCatEntitlementService(
+      apiKey,
+      options.purchasesClient,
+      platform,
+    );
   }
 
   if (mode === 'auto' && isDevelopment) {

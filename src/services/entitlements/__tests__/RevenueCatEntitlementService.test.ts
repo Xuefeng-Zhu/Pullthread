@@ -113,6 +113,54 @@ describe('RevenueCatEntitlementService', () => {
     });
   });
 
+  it('accepts an explicit non-consumable when its category is null', async () => {
+    const androidPackage = makePackage('pullthread_full_game', {
+      productCategory: null,
+      productType: 'NON_CONSUMABLE',
+    });
+    const client = makeClient({
+      getOfferings: jest.fn(async () => makeOfferings([androidPackage])),
+    });
+    const service = new RevenueCatEntitlementService(
+      'public_android_key',
+      client,
+      'android',
+    );
+
+    await expect(service.getFullGameOffer()).resolves.toMatchObject({
+      productId: 'pullthread_full_game',
+      priceString: '$4.99',
+    });
+    await expect(service.purchaseFullGame()).resolves.toEqual({
+      status: 'purchased',
+    });
+    expect(client.purchasePackage).toHaveBeenCalledWith(androidPackage);
+  });
+
+  it('accepts the installed Google Play INAPP metadata mapping', async () => {
+    const androidPackage = makePackage('pullthread_full_game', {
+      productCategory: 'NON_SUBSCRIPTION',
+      productType: 'CONSUMABLE',
+    });
+    const client = makeClient({
+      getOfferings: jest.fn(async () => makeOfferings([androidPackage])),
+    });
+    const service = new RevenueCatEntitlementService(
+      'public_android_key',
+      client,
+      'android',
+    );
+
+    await expect(service.getFullGameOffer()).resolves.toMatchObject({
+      productId: 'pullthread_full_game',
+      priceString: '$4.99',
+    });
+    await expect(service.purchaseFullGame()).resolves.toEqual({
+      status: 'purchased',
+    });
+    expect(client.purchasePackage).toHaveBeenCalledWith(androidPackage);
+  });
+
   it('returns null when the current offering lacks the full-game product', async () => {
     const client = makeClient({
       getOfferings: jest.fn(async () =>
@@ -136,6 +184,18 @@ describe('RevenueCatEntitlementService', () => {
     {
       productCategory: 'NON_SUBSCRIPTION' as const,
       productType: 'CONSUMABLE' as const,
+    },
+    {
+      productCategory: null,
+      productType: 'CONSUMABLE' as const,
+    },
+    {
+      productCategory: null,
+      productType: 'AUTO_RENEWABLE_SUBSCRIPTION' as const,
+    },
+    {
+      productCategory: null,
+      productType: 'UNKNOWN' as const,
     },
   ])('rejects a Full Atelier product that is not a known one-time unlock', async (metadata) => {
     const client = makeClient({

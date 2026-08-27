@@ -185,7 +185,10 @@ For a real store pass:
    Google Play Console as applicable.
 2. Mark the Android product non-consumable in RevenueCat, then attach the
    product to the `full_atelier` entitlement and current offering. Pullthread
-   rejects subscription, unknown-category, and consumable offering metadata.
+   rejects subscriptions and ambiguous offering metadata. The installed native
+   bridge labels Google Play one-time products `NON_SUBSCRIPTION` + `CONSUMABLE`;
+   RevenueCat's dashboard non-consumable setting controls repeat purchase and
+   restore behavior on Android. Apple consumables remain rejected.
 3. Put only the matching platform public SDK key in the local `.env` or build
    environment and use `EXPO_PUBLIC_ENTITLEMENT_MODE=revenuecat`.
 4. Rebuild the native app, sign in with a sandbox/test store account, and test
@@ -341,5 +344,6 @@ complete the campaign checklist before calling Milestone 3 device-complete.
 - [Expo CLI native run and export commands](https://docs.expo.dev/more/expo-cli/)
 - [Maestro command reference](https://docs.maestro.dev/api-reference/commands)
 - [RevenueCat with Expo](https://www.revenuecat.com/docs/getting-started/installation/expo)
+- [RevenueCat Google Play product setup](https://www.revenuecat.com/docs/getting-started/entitlements/android-products)
 - [RevenueCat CustomerInfo and entitlement status](https://www.revenuecat.com/docs/customers/customer-info)
 - [RevenueCat purchase restore guidance](https://www.revenuecat.com/docs/getting-started/restoring-purchases)

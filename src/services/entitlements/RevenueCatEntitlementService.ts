@@ -50,6 +50,8 @@ export type RevenueCatCustomerInfoListener = (
   customerInfo: RevenueCatCustomerInfo,
 ) => void;
 
+export type RevenueCatNativePlatform = 'ios' | 'android';
+
 /**
  * Narrow seam around RevenueCat's process-wide singleton. Production delegates
  * to `react-native-purchases`; tests can supply a deterministic client without
@@ -119,16 +121,37 @@ const hasFullAtelier = (customerInfo: RevenueCatCustomerInfo): boolean =>
   customerInfo.entitlements.active[FULL_ATELIER_ENTITLEMENT_ID]?.isActive ===
   true;
 
-const isOneTimeUnlockProduct = (aPackage: RevenueCatPackage): boolean => {
+const isSubscriptionProductType = (
+  productType: RevenueCatPackage['product']['productType'],
+): boolean =>
+  productType === 'NON_RENEWABLE_SUBSCRIPTION' ||
+  productType === 'AUTO_RENEWABLE_SUBSCRIPTION' ||
+  productType === 'PREPAID_SUBSCRIPTION';
+
+const isOneTimeUnlockProduct = (
+  aPackage: RevenueCatPackage,
+  platform: RevenueCatNativePlatform,
+): boolean => {
   const { productCategory, productType } = aPackage.product;
 
-  return (
-    productCategory === 'NON_SUBSCRIPTION' &&
-    productType !== 'CONSUMABLE' &&
-    productType !== 'NON_RENEWABLE_SUBSCRIPTION' &&
-    productType !== 'AUTO_RENEWABLE_SUBSCRIPTION' &&
-    productType !== 'PREPAID_SUBSCRIPTION'
-  );
+  // A category-less package is accepted only when its specific type is an
+  // explicit non-consumable, as some SDK/store combinations omit the category.
+  if (productCategory === null) return productType === 'NON_CONSUMABLE';
+  if (
+    productCategory !== 'NON_SUBSCRIPTION' ||
+    isSubscriptionProductType(productType)
+  ) {
+    return false;
+  }
+
+  // Hybrid Common 18.32.1 maps every Google Play INAPP product to
+  // NON_SUBSCRIPTION + CONSUMABLE. Actual repeat-purchase behavior is selected
+  // by the product's non-consumable setting in the RevenueCat dashboard.
+  if (platform === 'android') return true;
+
+  // Apple exposes the real consumability distinction, so a consumable must not
+  // back Pullthread's permanent Full Atelier entitlement.
+  return productType === 'NON_CONSUMABLE' || productType === 'UNKNOWN';
 };
 
 const errorMessage = (error: unknown, fallback: string): string => {
@@ -173,6 +196,7 @@ export class RevenueCatEntitlementService implements EntitlementService {
   constructor(
     apiKey: string,
     private readonly client: PurchasesClient = purchasesClient,
+    private readonly platform: RevenueCatNativePlatform = 'ios',
   ) {
     this.apiKey = apiKey.trim();
 
@@ -313,7 +337,7 @@ export class RevenueCatEntitlementService implements EntitlementService {
       offerings.current?.availablePackages.find(
         (aPackage) =>
           aPackage.product.identifier === FULL_GAME_PRODUCT_ID &&
-          isOneTimeUnlockProduct(aPackage),
+          isOneTimeUnlockProduct(aPackage, this.platform),
       ) ?? null
     );
   }

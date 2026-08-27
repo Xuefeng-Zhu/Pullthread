@@ -241,9 +241,10 @@ The implementations are intentionally small:
   and development.
 - `RevenueCatEntitlementService` configures the process-wide SDK once, reads
   active `CustomerInfo`, selects the product from the current offering,
-  rejects subscription/unknown-category/consumable metadata that contradicts
-  the one-time unlock, normalizes purchase cancellation/errors, restores only
-  after an explicit user action, and subscribes to customer-info updates.
+  rejects subscription and ambiguous metadata that contradicts the one-time
+  unlock, accepts the native Android bridge's non-subscription INAPP mapping,
+  rejects Apple consumables, normalizes purchase cancellation/errors, restores
+  only after an explicit user action, and subscribes to customer-info updates.
 - The factory selects `auto`, `mock`, or `revenuecat` from public Expo
   environment configuration. Missing production configuration resolves to an
   unavailable locked service, and production also rejects explicit mock mode;

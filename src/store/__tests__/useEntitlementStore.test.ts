@@ -308,6 +308,235 @@ describe('entitlement store', () => {
     });
   });
 
+  test('retries failed initialization and restores one active listener', async () => {
+    let initializeAttempts = 0;
+    let subscriptionCount = 0;
+    const listenerRef: {
+      current: ((hasFullGame: boolean) => void) | null;
+    } = { current: null };
+    const recoveringService: EntitlementService = {
+      kind: 'revenuecat',
+      initialize: async () => {
+        initializeAttempts += 1;
+        if (initializeAttempts === 1) throw new Error('Temporarily offline');
+      },
+      hasFullGame: async () => true,
+      getFullGameOffer: async () => null,
+      purchaseFullGame: async () => ({ status: 'purchased' }),
+      restorePurchases: async () => ({ status: 'restored' }),
+      subscribe: (listener) => {
+        subscriptionCount += 1;
+        listenerRef.current = listener;
+        return () => {
+          listenerRef.current = null;
+        };
+      },
+    };
+
+    await initializeEntitlements(recoveringService);
+    expect(useEntitlementStore.getState().status).toBe('error');
+    expect(subscriptionCount).toBe(0);
+
+    await Promise.all([
+      useEntitlementStore.getState().refreshEntitlement(),
+      useEntitlementStore.getState().refreshEntitlement(),
+    ]);
+    expect(useEntitlementStore.getState().status).toBe('ready');
+    expect(initializeAttempts).toBe(2);
+    expect(subscriptionCount).toBe(1);
+    expect(listenerRef.current).not.toBeNull();
+
+    listenerRef.current?.(false);
+    expect(useEntitlementStore.getState()).toMatchObject({
+      hasFullGame: false,
+      cachedHasFullGame: false,
+      cacheSource: 'revenuecat',
+    });
+
+    await useEntitlementStore.getState().refreshEntitlement();
+    expect(subscriptionCount).toBe(1);
+  });
+
+  test('retains one listener when entitlement refresh fails after subscribing', async () => {
+    let initializeAttempts = 0;
+    let entitlementChecks = 0;
+    let subscriptionCount = 0;
+    const service: EntitlementService = {
+      kind: 'revenuecat',
+      initialize: async () => {
+        initializeAttempts += 1;
+      },
+      hasFullGame: async () => {
+        entitlementChecks += 1;
+        if (entitlementChecks === 1) throw new Error('Temporarily offline');
+        return false;
+      },
+      getFullGameOffer: async () => null,
+      purchaseFullGame: async () => ({ status: 'purchased' }),
+      restorePurchases: async () => ({ status: 'restored' }),
+      subscribe: () => {
+        subscriptionCount += 1;
+        return () => undefined;
+      },
+    };
+
+    await initializeEntitlements(service);
+    expect(useEntitlementStore.getState().status).toBe('error');
+    expect(subscriptionCount).toBe(1);
+
+    await Promise.all([
+      useEntitlementStore.getState().refreshEntitlement(),
+      useEntitlementStore.getState().refreshEntitlement(),
+    ]);
+
+    expect(useEntitlementStore.getState().status).toBe('ready');
+    expect(initializeAttempts).toBe(1);
+    expect(subscriptionCount).toBe(1);
+  });
+
+  test('does not report recovery when a full initialization retry also fails', async () => {
+    let initializeAttempts = 0;
+    let entitlementChecks = 0;
+    let subscriptionCount = 0;
+    const service: EntitlementService = {
+      kind: 'revenuecat',
+      initialize: async () => {
+        initializeAttempts += 1;
+        if (initializeAttempts < 3) throw new Error('Temporarily offline');
+      },
+      hasFullGame: async () => {
+        entitlementChecks += 1;
+        return false;
+      },
+      getFullGameOffer: async () => null,
+      purchaseFullGame: async () => ({ status: 'purchased' }),
+      restorePurchases: async () => ({ status: 'restored' }),
+      subscribe: () => {
+        subscriptionCount += 1;
+        return () => undefined;
+      },
+    };
+
+    await initializeEntitlements(service);
+    await useEntitlementStore.getState().refreshEntitlement();
+
+    expect(useEntitlementStore.getState().status).toBe('error');
+    expect(initializeAttempts).toBe(2);
+    expect(entitlementChecks).toBe(0);
+    expect(subscriptionCount).toBe(0);
+
+    await useEntitlementStore.getState().refreshEntitlement();
+
+    expect(useEntitlementStore.getState().status).toBe('ready');
+    expect(initializeAttempts).toBe(3);
+    expect(subscriptionCount).toBe(1);
+    expect(entitlementChecks).toBe(2);
+  });
+
+  test('does not purchase or restore until initialization installs a listener', async () => {
+    let initializeAttempts = 0;
+    let purchaseCalls = 0;
+    let restoreCalls = 0;
+    const service: EntitlementService = {
+      kind: 'revenuecat',
+      initialize: async () => {
+        initializeAttempts += 1;
+        throw new Error('Temporarily offline');
+      },
+      hasFullGame: async () => false,
+      getFullGameOffer: async () => null,
+      purchaseFullGame: async () => {
+        purchaseCalls += 1;
+        return { status: 'purchased' };
+      },
+      restorePurchases: async () => {
+        restoreCalls += 1;
+        return { status: 'restored' };
+      },
+      subscribe: () => () => undefined,
+    };
+
+    await initializeEntitlements(service);
+    await expect(
+      useEntitlementStore.getState().purchaseFullGame(),
+    ).resolves.toEqual({
+      status: 'error',
+      message:
+        'Full Atelier could not be refreshed. Cached access remains unchanged.',
+    });
+    await expect(
+      useEntitlementStore.getState().restorePurchases(),
+    ).resolves.toEqual({
+      status: 'error',
+      message:
+        'Full Atelier could not be refreshed. Cached access remains unchanged.',
+    });
+
+    expect(initializeAttempts).toBe(3);
+    expect(purchaseCalls).toBe(0);
+    expect(restoreCalls).toBe(0);
+    expect(useEntitlementStore.getState().status).toBe('error');
+  });
+
+  test('does not subscribe a service superseded during initialization', async () => {
+    const deferred = () => {
+      let resolve!: () => void;
+      const promise = new Promise<void>((complete) => {
+        resolve = complete;
+      });
+      return { promise, resolve };
+    };
+    const firstInitialization = deferred();
+    const secondInitialization = deferred();
+    let firstSubscriptions = 0;
+    let secondInitializeAttempts = 0;
+    let secondSubscriptions = 0;
+    const firstService: EntitlementService = {
+      kind: 'revenuecat',
+      initialize: () => firstInitialization.promise,
+      hasFullGame: async () => false,
+      getFullGameOffer: async () => null,
+      purchaseFullGame: async () => ({ status: 'purchased' }),
+      restorePurchases: async () => ({ status: 'restored' }),
+      subscribe: () => {
+        firstSubscriptions += 1;
+        return () => undefined;
+      },
+    };
+    const secondService: EntitlementService = {
+      kind: 'revenuecat',
+      initialize: () => {
+        secondInitializeAttempts += 1;
+        return secondInitialization.promise;
+      },
+      hasFullGame: async () => false,
+      getFullGameOffer: async () => null,
+      purchaseFullGame: async () => ({ status: 'purchased' }),
+      restorePurchases: async () => ({ status: 'restored' }),
+      subscribe: () => {
+        secondSubscriptions += 1;
+        return () => undefined;
+      },
+    };
+
+    const firstPending = initializeEntitlements(firstService);
+    const secondPending = initializeEntitlements(secondService);
+    firstInitialization.resolve();
+    await firstPending;
+
+    const coalescedSecondPending = initializeEntitlements(secondService);
+    expect(secondInitializeAttempts).toBe(1);
+    secondInitialization.resolve();
+    await Promise.all([secondPending, coalescedSecondPending]);
+
+    expect(firstSubscriptions).toBe(0);
+    expect(secondSubscriptions).toBe(1);
+    expect(useEntitlementStore.getState()).toMatchObject({
+      serviceKind: 'revenuecat',
+      status: 'ready',
+    });
+  });
+
   test('keeps cached RevenueCat access when production purchases are unavailable', async () => {
     await persistEntitlementCache(true, 'revenuecat');
     await useEntitlementStore.persist.rehydrate();

@@ -20,6 +20,9 @@ import type {
 export const ENTITLEMENT_STORAGE_KEY = 'pullthread.entitlement';
 export const ENTITLEMENT_STORAGE_VERSION = 1;
 
+const ENTITLEMENT_REFRESH_ERROR_MESSAGE =
+  'Full Atelier could not be refreshed. Cached access remains unchanged.';
+
 export type EntitlementCacheSource = 'mock' | 'revenuecat';
 export type EntitlementStatus =
   | 'idle'
@@ -180,8 +183,13 @@ export async function initializeEntitlements(
   if (activeService === service && initializationPromise) {
     return initializationPromise;
   }
-  if (activeService === service && useEntitlementStore.getState().status !== 'idle') {
-    return;
+  if (activeService === service) {
+    const status = useEntitlementStore.getState().status;
+    const needsFullRetry =
+      service.kind !== 'unavailable' &&
+      status === 'error' &&
+      serviceUnsubscribe === null;
+    if (status !== 'idle' && !needsFullRetry) return;
   }
 
   serviceUnsubscribe?.();
@@ -193,7 +201,7 @@ export async function initializeEntitlements(
     notice: null,
   });
 
-  initializationPromise = (async () => {
+  const pendingInitialization = (async () => {
     const state = useEntitlementStore.getState();
     if (
       service.kind === 'mock' &&
@@ -218,6 +226,7 @@ export async function initializeEntitlements(
 
     try {
       await service.initialize();
+      if (activeService !== service) return;
       serviceUnsubscribe = service.subscribe((hasFullGame) => {
         if (activeService === service) {
           commitVerifiedEntitlement(service, hasFullGame);
@@ -236,23 +245,32 @@ export async function initializeEntitlements(
           status: 'error',
           notice: {
             kind: 'error',
-            message:
-              'Full Atelier could not be refreshed. Cached access remains unchanged.',
+            message: ENTITLEMENT_REFRESH_ERROR_MESSAGE,
           },
         });
       }
     }
   })().finally(() => {
-    initializationPromise = null;
+    // An older service can finish after a replacement starts. It must not
+    // clear the replacement's in-flight initialization guard.
+    if (initializationPromise === pendingInitialization) {
+      initializationPromise = null;
+    }
   });
+
+  initializationPromise = pendingInitialization;
 
   return initializationPromise;
 }
 
-async function ensureService(): Promise<EntitlementService> {
+async function ensureService(): Promise<EntitlementService | null> {
   const service = activeService ?? runtimeService();
   await initializeEntitlements(service);
-  return service;
+
+  if (service.kind === 'unavailable') return service;
+  return activeService === service && serviceUnsubscribe !== null
+    ? service
+    : null;
 }
 
 export const useEntitlementStore = create<EntitlementStore>()(
@@ -268,6 +286,9 @@ export const useEntitlementStore = create<EntitlementStore>()(
 
       purchaseFullGame: async () => {
         const service = await ensureService();
+        if (!service) {
+          return unavailableResult(ENTITLEMENT_REFRESH_ERROR_MESSAGE);
+        }
         if (service.kind === 'unavailable') {
           const result = unavailableResult(
             'Full Atelier purchases are unavailable in this build.',
@@ -310,6 +331,12 @@ export const useEntitlementStore = create<EntitlementStore>()(
 
       restorePurchases: async () => {
         const service = await ensureService();
+        if (!service) {
+          return {
+            status: 'error',
+            message: ENTITLEMENT_REFRESH_ERROR_MESSAGE,
+          };
+        }
         if (service.kind === 'unavailable') {
           const result: RestoreResult = {
             status: 'error',
@@ -354,7 +381,7 @@ export const useEntitlementStore = create<EntitlementStore>()(
 
       refreshEntitlement: async () => {
         const service = await ensureService();
-        if (service.kind === 'unavailable') return;
+        if (!service || service.kind === 'unavailable') return;
 
         set({ status: 'refreshing', notice: null });
         try {
@@ -367,8 +394,7 @@ export const useEntitlementStore = create<EntitlementStore>()(
             status: 'error',
             notice: {
               kind: 'error',
-              message:
-                'Full Atelier could not be refreshed. Cached access remains unchanged.',
+              message: ENTITLEMENT_REFRESH_ERROR_MESSAGE,
             },
           });
         }
