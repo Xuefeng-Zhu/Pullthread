@@ -12,7 +12,7 @@ campaign and monetization work: a deterministic UTC challenge, explicit
 handcrafted template pool, unlimited local attempts, persisted personal best,
 compact stitch replay, ranking by thread/stitches/time, a local-first hub, and a
 Firebase adapter/backend with anonymous guest Auth and server-verified scores.
-The dedicated Firebase project and production deployment remain external gates.
+Full remote Firebase activation and production proof remain external gates.
 
 > **Physical-device gate: limited Milestone 3 iOS smoke passed; full checklist
 > pending.** A locally signed Release build with an embedded Hermes bundle for
@@ -28,13 +28,14 @@ The dedicated Firebase project and production deployment remain external gates.
 > sandbox product, purchase/cancellation pass, restore pass, and verified
 > offline cold launch are still required on physical hardware.
 
-> **Milestone 5 cloud gate: local implementation and backend are complete;
-> deployment pending.** No dedicated Pullthread Firebase project existed during
-> this change, so no unrelated project was reused and nothing was deployed.
-> Anonymous Auth enablement, Firestore/Functions deployment, two-user remote
-> proof, native App Check enforcement, and offline/reconnect device evidence
-> remain open. The current unenforced callable is for emulator or tightly
-> monitored private-beta validation only; it must not be publicly activated.
+> **Milestone 5 cloud gate: free infrastructure is provisioned; remote mode is
+> still blocked.** The dedicated `pullthread-xuefeng-zhu` project is on the
+> no-cost Spark plan. Its web app and `us-west1` Firestore database exist, and
+> the reviewed rules/indexes were deployed on 2026-08-27. Anonymous Auth and the
+> callable function are not active. Cloud Functions deployment requires Blaze,
+> so Firebase Daily Scrap mode remains disabled unless billing is explicitly
+> approved. Two-user remote proof, native App Check enforcement, and physical
+> offline/reconnect evidence also remain open.
 
 ## Technology
 
@@ -401,9 +402,10 @@ limited physical campaign pass and remaining checklist are recorded in
 The following remain external acceptance work and should not be inferred from
 the implemented local/client/backend slices:
 
-- A dedicated Pullthread Firebase project, Anonymous Auth enablement, a
-  monitored private-beta deploy, native App Check integration, and enforced
-  App Check before Firebase mode is publicly activated
+- Anonymous Auth enablement, an explicit Blaze billing decision, a monitored
+  private-beta callable deploy, native App Check integration, and enforced App
+  Check before Firebase mode is publicly activated. The dedicated Spark project,
+  web app, Firestore database, rules, and indexes are already provisioned.
 - Two-user shared leaderboard, forged-score rejection, pending-upload retry,
   and offline/reconnect proof against the deployed project
 - Remote content delivery and broader social systems

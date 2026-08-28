@@ -359,8 +359,11 @@ outstanding.
       bounded leaderboard index, and deny-by-default Firestore rules.
 - [x] App Jest coverage plus function domain, transaction, and Firestore rules
       emulator coverage.
-- [ ] Dedicated Firebase project, Anonymous Auth, Firestore, billing, project
-      alias, and tightly monitored private-beta rules/index/function deployment.
+- [x] Dedicated Spark Firebase project, web app, project alias, free-tier
+      `us-west1` Firestore database, and reviewed rules/index deployment.
+- [ ] Anonymous Auth enablement and an explicit Blaze billing decision before
+      any tightly monitored private-beta callable deployment. Spark cannot
+      deploy the required Cloud Function, so Firebase mode remains disabled.
 - [ ] Two-user remote leaderboard, forged-score, offline pending-sync, native
       App Check client attestation, callable enforcement, and physical-device
       evidence before public Firebase activation.
@@ -502,14 +505,16 @@ outstanding.
 - Exported web diagnostic at 390 x 844 — Quilt Map → Daily Scrap → First Pull
   Sampler → Daily gameplay rendered with truthful local-board copy, reachable
   controls, and zero warning/error console entries.
-- Firebase project/deploy and two-user remote/offline proof — pending because no
-  dedicated Pullthread project existed and unrelated projects were not reused.
+- Firebase callable deployment and two-user remote/offline proof — pending.
+  The dedicated Spark project, web app, Firestore database, rules, and indexes
+  exist, but Anonymous Auth is not enabled and Spark cannot deploy the callable.
 
 ## Next milestone
 
-Create a dedicated Pullthread Firebase project, enable Anonymous Auth and
-Firestore, deploy the reviewed rules/index/function set, and record the
-two-user plus offline/reconnect matrix in
+Keep `EXPO_PUBLIC_DAILY_SERVICE=local` on the free Spark project. If Blaze
+billing is explicitly approved later, enable Anonymous Auth, deploy the
+reviewed function for a tightly monitored private beta, and record the two-user
+plus offline/reconnect matrix in
 [`FIREBASE_DAILY_SCRAP.md`](FIREBASE_DAILY_SCRAP.md). Keep that evidence
 separate from the still-open RevenueCat sandbox/device matrix and the physical
 campaign sections in [`CAMPAIGN_SMOKE_TEST.md`](CAMPAIGN_SMOKE_TEST.md) and

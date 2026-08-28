@@ -8,11 +8,16 @@ credentials, authenticate, or wait for a network.
 
 ## Current activation state
 
-The repository contains the Firebase client adapter, Firestore rules/indexes,
-and the `submitDailyRun` callable function. It is intentionally **not linked or
-deployed**: the Firebase account available during Milestone 5 had no Pullthread
-project, and unrelated projects were not reused. Until a dedicated project is
-created and the environment is configured, keep:
+The repository is linked through `.firebaserc` to the dedicated
+`pullthread-xuefeng-zhu` project. That project remains on the no-cost Spark plan.
+A Firebase web app named `Pullthread Mobile` and the default Standard Firestore
+database in `us-west1` were created on 2026-08-27; database deletion protection
+is enabled, and the reviewed rules/indexes are deployed.
+
+Anonymous Auth is not enabled, and `submitDailyRun` is not deployed. Cloud Functions
+deployment requires the Blaze plan, so the shared replay-verified leaderboard
+cannot run on this free-only setup. Until billing is explicitly approved and
+the remaining private-beta/App Check gates are complete, keep:
 
 ```text
 EXPO_PUBLIC_DAILY_SERVICE=local
