@@ -3,6 +3,8 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { useEffectiveReducedMotion } from '../../accessibility/useEffectiveReducedMotion';
 import { PaywallScreen } from '../../screens/PaywallScreen/PaywallScreen';
+import { DailyReplayScreen } from '../../screens/DailyReplayScreen/DailyReplayScreen';
+import { DailyScrapScreen } from '../../screens/DailyScrapScreen/DailyScrapScreen';
 import { QuiltMapScreen } from '../../screens/QuiltMapScreen/QuiltMapScreen';
 import { ResultsScreen } from '../../screens/ResultsScreen/ResultsScreen';
 import { SettingsScreen } from '../../screens/SettingsScreen/SettingsScreen';
@@ -10,7 +12,13 @@ import { SpikeLevelScreen } from '../../screens/SpikeLevelScreen/SpikeLevelScree
 
 export type RootStackParamList = {
   QuiltMap: undefined;
-  SpikeLevel: { readonly levelId: string };
+  DailyScrap: undefined;
+  DailyReplay: { readonly challengeId: string; readonly entryId: string };
+  SpikeLevel: {
+    readonly levelId: string;
+    readonly mode?: 'daily';
+    readonly challengeId?: string;
+  };
   Results: undefined;
   Settings: undefined;
   Paywall: { readonly levelId?: string } | undefined;
@@ -31,6 +39,8 @@ export function RootNavigator() {
         }}
       >
         <Stack.Screen name="QuiltMap" component={QuiltMapScreen} />
+        <Stack.Screen name="DailyScrap" component={DailyScrapScreen} />
+        <Stack.Screen name="DailyReplay" component={DailyReplayScreen} />
         <Stack.Screen name="SpikeLevel" component={SpikeLevelScreen} />
         <Stack.Screen name="Results" component={ResultsScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />

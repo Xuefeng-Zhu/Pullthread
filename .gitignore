@@ -9,5 +9,8 @@ dist/
 build/
 web-build/
 coverage/
+functions/lib/
+functions/lib-test/
+*-debug.log*
 *.tsbuildinfo
 npm-debug.log*

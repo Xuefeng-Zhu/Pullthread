@@ -55,6 +55,7 @@ import {
   tutorialFlowReducer,
 } from '../../game/tutorial/tutorialFlow';
 import { useCampaignProgressStore } from '../../store/useCampaignProgressStore';
+import { useDailyChallengeStore } from '../../store/useDailyChallengeStore';
 import {
   selectHasFullGame,
   useEntitlementStore,
@@ -121,19 +122,37 @@ export function SpikeLevelScreen({
     () => getCampaignLevel(screenRoute.params.levelId),
     [screenRoute.params.levelId],
   );
+  const isDaily = screenRoute.params.mode === 'daily';
+  const dailyChallenge = useDailyChallengeStore((state) => state.challenge);
+  const validDailyChallenge =
+    isDaily &&
+    dailyChallenge &&
+    dailyChallenge.id === screenRoute.params.challengeId &&
+    dailyChallenge.levelId === level.id
+      ? dailyChallenge
+      : null;
   const progressByLevel = useCampaignProgressStore(
     (state) => state.progressByLevel,
   );
   const hasFullGame = useEntitlementStore(selectHasFullGame);
   const levelAccess = useMemo(
-    () => getCampaignLevelAccess(level.id, progressByLevel, hasFullGame),
-    [hasFullGame, level.id, progressByLevel],
+    () =>
+      isDaily
+        ? {
+            state: 'current' as const,
+            canPlay: Boolean(validDailyChallenge),
+            openPaywall: false,
+            requiresFullGame: false,
+          }
+        : getCampaignLevelAccess(level.id, progressByLevel, hasFullGame),
+    [hasFullGame, isDaily, level.id, progressByLevel, validDailyChallenge],
   );
   const viewport = useWindowDimensions();
   const compactViewport = viewport.width < 350 || viewport.height < 700;
   const phase = useGameStore((state) => state.phase);
   const storedStitches = useGameStore((state) => state.stitches);
   const activeLevelId = useGameStore((state) => state.activeLevelId);
+  const activeSession = useGameStore((state) => state.activeSession);
   const stitches = useMemo(
     () => (activeLevelId === level.id ? storedStitches : []),
     [activeLevelId, level.id, storedStitches],
@@ -204,6 +223,10 @@ export function SpikeLevelScreen({
   );
 
   useEffect(() => {
+    if (isDaily && !validDailyChallenge) {
+      navigation.replace('DailyScrap');
+      return;
+    }
     if (levelAccess.openPaywall) {
       navigation.replace('Paywall', { levelId: level.id });
       return;
@@ -212,13 +235,36 @@ export function SpikeLevelScreen({
     if (!levelAccess.canPlay) {
       navigation.replace('QuiltMap');
     }
-  }, [level.id, levelAccess.canPlay, levelAccess.openPaywall, navigation]);
+  }, [
+    isDaily,
+    level.id,
+    levelAccess.canPlay,
+    levelAccess.openPaywall,
+    navigation,
+    validDailyChallenge,
+  ]);
 
   useEffect(() => {
-    if (levelAccess.canPlay && activeLevelId !== level.id) {
-      startLevel(level.id);
+    const sessionMatches = isDaily
+      ? activeSession.kind === 'daily' &&
+        activeSession.challenge.id === validDailyChallenge?.id
+      : activeSession.kind === 'campaign';
+    if (levelAccess.canPlay && (activeLevelId !== level.id || !sessionMatches)) {
+      if (validDailyChallenge) {
+        startLevel(level.id, { kind: 'daily', challenge: validDailyChallenge });
+      } else {
+        startLevel(level.id);
+      }
     }
-  }, [activeLevelId, level.id, levelAccess.canPlay, startLevel]);
+  }, [
+    activeLevelId,
+    activeSession,
+    isDaily,
+    level.id,
+    levelAccess.canPlay,
+    startLevel,
+    validDailyChallenge,
+  ]);
 
   useEffect(() => {
     feedback.setPreferences({ hapticsEnabled, soundEnabled });
@@ -451,14 +497,22 @@ export function SpikeLevelScreen({
 
   const handleRelease = useCallback(() => {
     setDraft(null);
-    if (route.outcome.status === 'success' && !tutorial.completed) {
+    if (!isDaily && route.outcome.status === 'success' && !tutorial.completed) {
       dispatchTutorial({ type: 'released' });
       completeTutorial(CURRENT_TUTORIAL_VERSION);
     }
     void feedback.play('travelerRelease');
     void feedback.play('travelerRoll');
     release();
-  }, [completeTutorial, feedback, release, route.outcome.status, setDraft, tutorial]);
+  }, [
+    completeTutorial,
+    feedback,
+    isDaily,
+    release,
+    route.outcome.status,
+    setDraft,
+    tutorial,
+  ]);
 
   const handleUndo = useCallback(() => {
     undo();
@@ -497,8 +551,8 @@ export function SpikeLevelScreen({
   const handleOpenMap = useCallback(() => {
     resetSession();
     void feedback.play('buttonClick');
-    navigation.popTo('QuiltMap');
-  }, [feedback, navigation, resetSession]);
+    navigation.popTo(isDaily ? 'DailyScrap' : 'QuiltMap');
+  }, [feedback, isDaily, navigation, resetSession]);
 
   const handleResults = useCallback(() => {
     void feedback.play('buttonClick');
@@ -517,6 +571,7 @@ export function SpikeLevelScreen({
     activeStitchType,
   );
   const showTutorial =
+    !isDaily &&
     level.id === SPIKE_LEVEL.id &&
     phase === 'planning' &&
     tutorialHintsEnabled &&
@@ -533,7 +588,9 @@ export function SpikeLevelScreen({
         <Text style={styles.accessGuardText}>
           {levelAccess.openPaywall
             ? 'Opening Full Atelier…'
-            : 'Returning to the quilt map…'}
+            : isDaily
+              ? 'Returning to Daily Scrap…'
+              : 'Returning to the quilt map…'}
         </Text>
       </SafeAreaView>
     );
@@ -541,7 +598,7 @@ export function SpikeLevelScreen({
 
   return (
     <SafeAreaView
-      testID="spike-level-screen"
+      testID={isDaily ? 'daily-level-screen' : 'spike-level-screen'}
       style={[styles.screen, highContrast && styles.screenHighContrast]}
       edges={['top', 'bottom']}
     >
@@ -549,7 +606,7 @@ export function SpikeLevelScreen({
         <Pressable
           testID="game-map-button"
           accessibilityRole="button"
-          accessibilityLabel="Return to quilt map"
+          accessibilityLabel={isDaily ? 'Return to Daily Scrap' : 'Return to quilt map'}
           accessibilityState={{ disabled: phase === 'running' }}
           disabled={phase === 'running'}
           onPress={handleOpenMap}
@@ -560,7 +617,11 @@ export function SpikeLevelScreen({
             pressed && phase !== 'running' && styles.settingsButtonPressed,
           ]}
         >
-          <Ionicons name="map-outline" size={23} color="#173746" />
+          <Ionicons
+            name={isDaily ? 'calendar-outline' : 'map-outline'}
+            size={23}
+            color="#173746"
+          />
         </Pressable>
         <View
           style={[
@@ -569,7 +630,7 @@ export function SpikeLevelScreen({
           ]}
         >
           <Text style={[styles.title, compactViewport && styles.titleCompact]}>
-            {level.name}
+            {validDailyChallenge?.title ?? level.name}
           </Text>
         </View>
         <Pressable

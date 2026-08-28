@@ -364,6 +364,28 @@ export function QuiltMapScreen({ navigation }: QuiltMapScreenProps) {
           </Pressable>
         </View>
 
+        <Pressable
+          testID="quilt-map-daily-scrap-button"
+          accessibilityRole="button"
+          accessibilityLabel="Open today’s Daily Scrap challenge"
+          accessibilityHint="One pattern for the current UTC day with unlimited attempts."
+          onPress={() => navigation.navigate('DailyScrap')}
+          style={({ pressed }) => [
+            styles.dailyCard,
+            pressed && styles.levelNodePressed,
+          ]}
+        >
+          <View style={styles.dailyIcon}>
+            <Ionicons name="calendar-outline" size={26} color="#F8EDDA" />
+          </View>
+          <View style={styles.dailyCopy}>
+            <Text style={styles.dailyEyebrow}>TODAY’S SCRAP</Text>
+            <Text style={styles.dailyTitle}>One pattern. One day.</Text>
+            <Text style={styles.dailyDescription}>Unlimited pulls. Lowest thread wins.</Text>
+          </View>
+          <Ionicons name="arrow-forward" size={24} color="#173746" />
+        </Pressable>
+
         <View style={styles.summaryCard}>
           <View style={styles.summaryItem}>
             <Ionicons name="ribbon" size={22} color="#8B5C22" />
@@ -493,6 +515,45 @@ const styles = StyleSheet.create({
     borderColor: '#496574',
     backgroundColor: '#F8EDDA',
     ...shadows.soft,
+  },
+  dailyCard: {
+    minHeight: 92,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.lg,
+    borderRadius: radii.xl,
+    borderWidth: 3,
+    borderColor: '#D88474',
+    backgroundColor: '#F2E2C5',
+    ...shadows.raised,
+  },
+  dailyIcon: {
+    width: 50,
+    height: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.pill,
+    backgroundColor: '#A93238',
+  },
+  dailyCopy: { flex: 1 },
+  dailyEyebrow: {
+    color: '#A93238',
+    fontFamily: 'NunitoSans_800ExtraBold',
+    fontSize: 10,
+    letterSpacing: 0.9,
+  },
+  dailyTitle: {
+    color: colors.textPrimary,
+    fontFamily: 'Fraunces_700Bold',
+    fontSize: 21,
+    lineHeight: 26,
+  },
+  dailyDescription: {
+    color: '#604B45',
+    fontFamily: 'NunitoSans_600SemiBold',
+    fontSize: 12,
+    lineHeight: 17,
   },
   summaryItem: {
     flex: 1,

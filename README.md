@@ -7,12 +7,12 @@ Native. The player draws pinch and pocket stitches across a quilt, the stitches
 deform a shared height field, and a button-shaped traveler rolls over that
 changed surface toward an embroidered goal.
 
-The repository now contains the Milestone 4 campaign and monetization slice: a
-three-quilt map, 15 authored levels, sequential unlocking, durable per-level
-progress, deterministic gameplay/replay, a one-time Full Atelier entitlement,
-RevenueCat and development-mock implementations, a custom paywall, restore
-purchases, offline entitlement caching, and premium access guards. InsForge,
-Daily Scrap, production store configuration, and final content remain deferred.
+The repository now contains the Milestone 5 Daily Scrap slice on top of the
+campaign and monetization work: a deterministic UTC challenge, explicit
+handcrafted template pool, unlimited local attempts, persisted personal best,
+compact stitch replay, ranking by thread/stitches/time, a local-first hub, and a
+Firebase adapter/backend with anonymous guest Auth and server-verified scores.
+The dedicated Firebase project and production deployment remain external gates.
 
 > **Physical-device gate: limited Milestone 3 iOS smoke passed; full checklist
 > pending.** A locally signed Release build with an embedded Hermes bundle for
@@ -28,6 +28,14 @@ Daily Scrap, production store configuration, and final content remain deferred.
 > sandbox product, purchase/cancellation pass, restore pass, and verified
 > offline cold launch are still required on physical hardware.
 
+> **Milestone 5 cloud gate: local implementation and backend are complete;
+> deployment pending.** No dedicated Pullthread Firebase project existed during
+> this change, so no unrelated project was reused and nothing was deployed.
+> Anonymous Auth enablement, Firestore/Functions deployment, two-user remote
+> proof, native App Check enforcement, and offline/reconnect device evidence
+> remain open. The current unenforced callable is for emulator or tightly
+> monitored private-beta validation only; it must not be publicly activated.
+
 ## Technology
 
 - Expo SDK 57, React Native 0.86, and React 19.2
@@ -36,9 +44,12 @@ Daily Scrap, production store configuration, and final content remain deferred.
 - React Native Reanimated and Gesture Handler for tactile interaction
 - Zustand for coarse gameplay state
 - AsyncStorage for versioned preferences, tutorial completion, and campaign
-  progress plus the last verified Full Atelier entitlement
+  progress, Daily Scrap bests, pending uploads, and the last verified Full
+  Atelier entitlement
 - RevenueCat `react-native-purchases` behind a platform-neutral entitlement
   service, with a credential-free development mock
+- Firebase Anonymous Auth, Firestore, and a replay-validating callable function
+  behind a lazy local-first Daily Scrap service
 - Expo Audio and Expo Haptics behind a feedback abstraction
 - Jest and React Native Testing Library
 - Maestro for the installed-app smoke flow
@@ -56,9 +67,10 @@ development and CI environment more narrowly to **Node 24.x** through
   Xcode, and either a simulator or a trusted phone with Developer Mode enabled
 - Optional for the smoke flow: the [Maestro CLI](https://docs.maestro.dev/)
 
-No RevenueCat or InsForge credentials are needed to play Levels 1–6 or use the
-development mock. Real Full Atelier transactions require platform-specific
-RevenueCat public SDK keys and matching App Store / Play products.
+No RevenueCat or Firebase configuration is needed to play the campaign or use
+Daily Scrap locally. Real Full Atelier transactions require platform-specific
+RevenueCat public SDK keys and matching App Store / Play products. Shared Daily
+Scrap standings require a dedicated Firebase project and public web-app config.
 
 ## Install
 
@@ -202,6 +214,56 @@ verified access. Purchase and restore still require the platform store and may
 fail offline; the paywall reports that failure without changing campaign
 progress. Offer details are not treated as durable entitlement proof.
 
+## Daily Scrap and Firebase
+
+Daily Scrap is available from the Quilt Map without an account. The UTC date is
+hashed into a stable seed and selects one of six explicitly versioned free
+campaign templates. Attempts are unlimited; only the best result is retained,
+with lower thread first, then fewer stitches, then lower deterministic
+completion time. Watching a compact stitch replay never records campaign
+progress.
+
+Every shipped template pool has a finite inclusive date range. Pool v1 covers
+2026-01-01 through 2027-12-31; the app and callable must ship the next contiguous
+pool before that boundary. An older build fails closed with an update-required
+message after its final known date instead of silently generating a challenge
+that the backend no longer recognizes.
+
+Local mode is the default and requires no service configuration:
+
+```text
+EXPO_PUBLIC_DAILY_SERVICE=local
+```
+
+Firebase mode preserves that local save, then lazily signs the player in with
+Firebase Anonymous Auth and syncs a verified best to Firestore. The callable
+function ignores client score claims, re-runs the canonical replay, derives the
+metric tuple, and updates one best document per user in a transaction. Exact
+committed retries are idempotent, and leaderboard cutoff ties use the
+server-authored recording time rather than a client timestamp. Direct
+client writes to challenge and run documents are denied by Firestore rules.
+The backend also accepts only today or yesterday, rate-limits each guest, and
+caps function scaling. Those controls do not replace App Check: public Firebase
+mode is blocked until native attestation is wired and callable enforcement is
+enabled.
+
+The Firebase web-app values are public identifiers, but environment-specific
+values still belong in `.env`, never source control:
+
+| Variable | Meaning |
+| --- | --- |
+| `EXPO_PUBLIC_DAILY_SERVICE` | `local` or `firebase` |
+| `EXPO_PUBLIC_FIREBASE_API_KEY` | Firebase public web API key |
+| `EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN` | Firebase Auth domain |
+| `EXPO_PUBLIC_FIREBASE_PROJECT_ID` | Dedicated Pullthread project id |
+| `EXPO_PUBLIC_FIREBASE_APP_ID` | Firebase web-app id |
+
+Never put a service-account key, private key, or Admin SDK credential in an
+`EXPO_PUBLIC_*` variable. The campaign does not initialize Firebase at launch
+and remains playable if Firebase is absent or unreachable. See
+[`docs/FIREBASE_DAILY_SCRAP.md`](docs/FIREBASE_DAILY_SCRAP.md) for project
+creation, emulator verification, deployment, and the remaining cloud proof.
+
 ### Simulator, emulator, and web diagnostics
 
 With a compatible development client already installed:
@@ -229,6 +291,7 @@ npm run lint
 npm run typecheck
 npm test
 npm run export
+npm run test:firebase
 ```
 
 Additional local compatibility check:
@@ -273,6 +336,13 @@ The flows expect an installed app with identifier
 - `paywall-restore-button`
 - `paywall-close-button`
 - `undo-button`
+- `quilt-map-daily-scrap-button`
+- `daily-scrap-screen`
+- `daily-scrap-play-button`
+- `daily-level-screen`
+- `daily-scrap-personal-best`
+- `daily-leaderboard-section`
+- `daily-replay-screen`
 - `reset-button`
 
 Start Metro if the installed development build needs it, then run:
@@ -281,6 +351,7 @@ Start Metro if the installed development build needs it, then run:
 maestro test .maestro/spike-smoke.yaml
 maestro test .maestro/failure-retry.yaml
 maestro test .maestro/full-atelier-mock.yaml
+maestro test .maestro/daily-scrap-local.yaml
 ```
 
 The main flow launches cleanly on the Quilt Map, enters Level 1, starts its pull
@@ -302,6 +373,13 @@ tests prove that entitlement alone cannot bypass sequence. This flow does
 real localized offer, or a real restore. Record those as separate
 physical-device transaction evidence.
 
+`daily-scrap-local.yaml` is a date-agnostic installed-app route smoke for the
+local/offline mode: Quilt Map entry, prepared challenge, truthful local board,
+Daily gameplay shell, and back navigation. Deterministic completion and best
+persistence are exercised in Jest because the selected handcrafted template
+rotates at the UTC day boundary. The flow does not prove Firebase deployment or
+shared standings.
+
 ## Architecture and proof standard
 
 The campaign keeps geometry, deformation, physics, level validation, replay
@@ -320,12 +398,15 @@ limited physical campaign pass and remaining checklist are recorded in
 
 ## Remaining work and explicit boundaries
 
-The following remain outside the implemented local campaign and should not be
-inferred from it:
+The following remain external acceptance work and should not be inferred from
+the implemented local/client/backend slices:
 
-- InsForge, Daily Scrap, guest identity, and leaderboards
-- Remote/cloud save synchronization
-- Remote content delivery, daily challenge content, and social systems
+- A dedicated Pullthread Firebase project, Anonymous Auth enablement, a
+  monitored private-beta deploy, native App Check integration, and enforced
+  App Check before Firebase mode is publicly activated
+- Two-user shared leaderboard, forged-score rejection, pending-upload retry,
+  and offline/reconnect proof against the deployed project
+- Remote content delivery and broader social systems
 - Production audio, final art, store builds, and release signing
 - RevenueCat dashboard/store product configuration and real iOS/Android
   sandbox purchase, cancellation, restore, and offline-device evidence
@@ -348,3 +429,5 @@ complete the campaign checklist before calling Milestone 3 device-complete.
 - [RevenueCat Google Play product setup](https://www.revenuecat.com/docs/getting-started/entitlements/android-products)
 - [RevenueCat CustomerInfo and entitlement status](https://www.revenuecat.com/docs/customers/customer-info)
 - [RevenueCat purchase restore guidance](https://www.revenuecat.com/docs/getting-started/restoring-purchases)
+- [Firebase anonymous authentication](https://firebase.google.com/docs/auth/web/anonymous-auth)
+- [Cloud Firestore Security Rules conditions](https://firebase.google.com/docs/firestore/security/rules-conditions)

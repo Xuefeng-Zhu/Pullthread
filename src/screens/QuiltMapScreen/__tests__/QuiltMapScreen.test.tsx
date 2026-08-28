@@ -200,6 +200,26 @@ describe('QuiltMapScreen', () => {
     ).toBe('Opens this level.');
   });
 
+  test('opens Daily Scrap from the map without starting a campaign level', async () => {
+    const nav = navigation();
+    const view = await render(<QuiltMapScreen navigation={nav.value} />);
+    const dailyButton = view.getByTestId('quilt-map-daily-scrap-button');
+
+    expect(dailyButton.props.accessibilityRole).toBe('button');
+    expect(dailyButton.props.accessibilityLabel).toBe(
+      'Open today’s Daily Scrap challenge',
+    );
+
+    await fireEvent.press(dailyButton);
+
+    expect(nav.navigate).toHaveBeenCalledWith('DailyScrap');
+    expect(useGameStore.getState()).toMatchObject({
+      activeLevelId: CAMPAIGN_LEVELS[0].id,
+      activeSession: { kind: 'campaign' },
+      phase: 'planning',
+    });
+  });
+
   test('opens the Full Atelier paywall when Level 7 is reached but locked', async () => {
     const levelSeven = CAMPAIGN_LEVELS[6];
     useCampaignProgressStore.setState({

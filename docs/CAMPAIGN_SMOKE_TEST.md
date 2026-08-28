@@ -43,7 +43,7 @@ identifiers:
 - [ ] `npm run lint`, `npm run typecheck`, `npm test`, `npx expo-doctor@latest`,
       and `npm run export` pass on that change set.
 - [ ] Capture starts before clearing campaign data or beginning a clean run.
-- [ ] No RevenueCat, InsForge, account, paywall, or network-backed gameplay
+- [ ] No RevenueCat, Firebase, account, paywall, or network-backed gameplay
       service is expected in this milestone.
 
 ## 1. Clean Quilt Map and Level 1

@@ -151,10 +151,36 @@ new access; a previously RevenueCat-verified offline cache remains available.
 
 ## Daily Scrap
 
-Daily Scrap remains a later, optional mode. It must not change campaign physics,
-require an account before campaign play, or weaken the offline Full Atelier
-boundary. The future local deterministic challenge should work before the
-InsForge leaderboard adapter is enabled.
+Daily Scrap is an optional secondary mode reached deliberately from the Quilt
+Map. One global UTC date produces one immutable challenge identity and selects
+one handcrafted template from the effective, append-only free-level pool. Pool
+ranges are finite and contiguous so an older build asks for an update instead
+of generating a superseded challenge after its last shipped date. A new scrap
+begins at 00:00 UTC. Attempts are unlimited and local play never requires an
+account, purchase, service configuration, or network.
+
+The Daily ranking contract is deliberately different from campaign thimbles:
+
+1. lower thread used
+2. fewer stitches
+3. lower deterministic completion time
+
+Patch collection does not change Daily rank. Exact ties retain the incumbent.
+The personal best is saved on-device first and a compact, versioned stitch
+replay remains watchable without submitting or changing campaign progress.
+
+Firebase is an optional shared-board enhancement. Opening Daily Scrap may
+lazily create an anonymous guest; there is no account screen and campaign launch
+never initializes Firebase. Clients cannot author challenge definitions or
+write leaderboard rows directly. An authenticated callable function validates
+and re-simulates the replay, ignores claimed metrics, and transactionally keeps
+one best row per challenge/player.
+
+Truthful failure behavior is part of the design: local mode says it is local,
+remote loading never disables Play, an outage retains the device best, and a
+pending result says it was saved on this device rather than claiming upload.
+Daily play must not unlock a campaign level, change Full Atelier entitlement,
+show the paywall, or expose campaign Next Level behavior.
 
 ## Acceptance boundary
 
