@@ -9,9 +9,11 @@ progress, deterministic replay, a fail-soft Full Atelier entitlement, and a
 local-first Daily Scrap leaderboard that never becomes a campaign dependency.
 
 Milestone 5 adds deterministic Daily Scrap locally and a Firebase
-Anonymous-Auth/Firestore adapter with server-verified replay submission. A
-dedicated Firebase project, cloud deployment, production store configuration,
-and final device evidence remain external acceptance gates.
+Anonymous-Auth/Firestore adapter with server-verified replay submission. The
+dedicated Firebase project, web app, Firestore database, rules, and indexes are
+provisioned. Callable deployment, Anonymous Auth activation, production store
+configuration, App Check enforcement, and final device evidence remain external
+acceptance gates.
 
 ## Milestone 1 plan
 

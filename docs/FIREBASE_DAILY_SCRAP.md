@@ -61,37 +61,29 @@ never edit a historical range. A build past its last shipped range shows an
 update-required state and does not create or submit a superseded challenge,
 including while offline.
 
-## Create and link a dedicated project
+## Provisioned project and remaining setup
 
-Project creation and deployment are external state changes. Run these only
-after choosing a globally unique project id and confirming its billing/region
-policy:
+Project provisioning was completed on 2026-08-27. The repository alias,
+`Pullthread Mobile` web app, immutable `us-west1` Firestore location, and
+deployed rules/indexes all belong to `pullthread-xuefeng-zhu`. Do not run
+`firebase projects:create`, `firebase use --add`, or create another web app for
+this repository. Inspect the existing public client configuration with:
 
 ```sh
-firebase projects:create <pullthread-project-id> --display-name Pullthread
-firebase use --add
-firebase apps:create WEB "Pullthread Mobile"
-firebase apps:sdkconfig WEB <firebase-app-id>
+firebase apps:list --project pullthread-xuefeng-zhu
+firebase apps:sdkconfig WEB --project pullthread-xuefeng-zhu
 ```
 
-Then, in Firebase Console:
+The remaining Firebase Console and release steps are:
 
-1. Enable **Authentication → Sign-in method → Anonymous**.
-2. Create the default Cloud Firestore database in the selected production
-   location. The location cannot be changed later.
-3. Review Cloud Functions billing requirements before the first deployment.
-4. Register the production apps with App Check, monitor unenforced metrics
+1. Enable **Authentication → Sign-in method → Anonymous** only when the
+   monitored private beta is ready.
+2. Review Cloud Functions billing requirements and explicitly approve the Blaze
+   upgrade before the first callable deployment.
+3. Register the production apps with App Check, monitor unenforced metrics
    during a limited beta, then set `enforceAppCheck: true` on the callable before
    general release. Firebase recommends App Check for callable abuse defense;
    the initial Expo Firebase JS adapter does not claim native attestation yet.
-
-If the default Firestore database was not created in Console, the current CLI
-also supports:
-
-```sh
-firebase firestore:locations
-firebase firestore:databases:create "(default)" --location <location>
-```
 
 Do not copy a config from another Firebase project. Do not commit `.env`.
 
@@ -164,6 +156,6 @@ Cloud completion requires evidence beyond a green deploy:
    the callable to `enforceAppCheck: true`, redeploy, and repeat submission from
    release builds before publicly activating Firebase mode.
 
-Firebase deployment, Anonymous Auth enablement, two-user remote proof, native
-App Check enforcement, and a physical-device offline/reconnect pass remain
-explicit gates until recorded.
+Firestore rules and indexes are deployed. Callable deployment, Anonymous Auth
+enablement, two-user remote proof, native App Check enforcement, and a
+physical-device offline/reconnect pass remain explicit gates until recorded.
