@@ -287,9 +287,10 @@ Admin SDK transaction to retain the incumbent on tied/worse submissions. Admin
 SDK writes add `recordedAt`, which is the trusted fourth ordering key for the
 bounded top-50 query; client `createdAt` never controls the cutoff. Exact
 committed retries return the incumbent without another guard write. Admin
-credentials exist only in the function runtime. The dedicated project is not
-yet created/deployed; [`FIREBASE_DAILY_SCRAP.md`](FIREBASE_DAILY_SCRAP.md)
-records that activation boundary.
+credentials exist only in the function runtime. The dedicated project, web app,
+Firestore database, rules, and indexes are provisioned; Anonymous Auth and the
+callable remain inactive. [`FIREBASE_DAILY_SCRAP.md`](FIREBASE_DAILY_SCRAP.md)
+records the remaining activation boundary.
 
 ## Full Atelier service and offline boundary
 

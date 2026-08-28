@@ -8,11 +8,16 @@ credentials, authenticate, or wait for a network.
 
 ## Current activation state
 
-The repository contains the Firebase client adapter, Firestore rules/indexes,
-and the `submitDailyRun` callable function. It is intentionally **not linked or
-deployed**: the Firebase account available during Milestone 5 had no Pullthread
-project, and unrelated projects were not reused. Until a dedicated project is
-created and the environment is configured, keep:
+The repository is linked through `.firebaserc` to the dedicated
+`pullthread-xuefeng-zhu` project. That project remains on the no-cost Spark plan.
+A Firebase web app named `Pullthread Mobile` and the default Standard Firestore
+database in `us-west1` were created on 2026-08-27; database deletion protection
+is enabled, and the reviewed rules/indexes are deployed.
+
+Anonymous Auth is not enabled, and `submitDailyRun` is not deployed. Cloud Functions
+deployment requires the Blaze plan, so the shared replay-verified leaderboard
+cannot run on this free-only setup. Until billing is explicitly approved and
+the remaining private-beta/App Check gates are complete, keep:
 
 ```text
 EXPO_PUBLIC_DAILY_SERVICE=local
@@ -56,37 +61,29 @@ never edit a historical range. A build past its last shipped range shows an
 update-required state and does not create or submit a superseded challenge,
 including while offline.
 
-## Create and link a dedicated project
+## Provisioned project and remaining setup
 
-Project creation and deployment are external state changes. Run these only
-after choosing a globally unique project id and confirming its billing/region
-policy:
+Project provisioning was completed on 2026-08-27. The repository alias,
+`Pullthread Mobile` web app, immutable `us-west1` Firestore location, and
+deployed rules/indexes all belong to `pullthread-xuefeng-zhu`. Do not run
+`firebase projects:create`, `firebase use --add`, or create another web app for
+this repository. Inspect the existing public client configuration with:
 
 ```sh
-firebase projects:create <pullthread-project-id> --display-name Pullthread
-firebase use --add
-firebase apps:create WEB "Pullthread Mobile"
-firebase apps:sdkconfig WEB <firebase-app-id>
+firebase apps:list --project pullthread-xuefeng-zhu
+firebase apps:sdkconfig WEB --project pullthread-xuefeng-zhu
 ```
 
-Then, in Firebase Console:
+The remaining Firebase Console and release steps are:
 
-1. Enable **Authentication → Sign-in method → Anonymous**.
-2. Create the default Cloud Firestore database in the selected production
-   location. The location cannot be changed later.
-3. Review Cloud Functions billing requirements before the first deployment.
-4. Register the production apps with App Check, monitor unenforced metrics
+1. Enable **Authentication → Sign-in method → Anonymous** only when the
+   monitored private beta is ready.
+2. Review Cloud Functions billing requirements and explicitly approve the Blaze
+   upgrade before the first callable deployment.
+3. Register the production apps with App Check, monitor unenforced metrics
    during a limited beta, then set `enforceAppCheck: true` on the callable before
    general release. Firebase recommends App Check for callable abuse defense;
    the initial Expo Firebase JS adapter does not claim native attestation yet.
-
-If the default Firestore database was not created in Console, the current CLI
-also supports:
-
-```sh
-firebase firestore:locations
-firebase firestore:databases:create "(default)" --location <location>
-```
 
 Do not copy a config from another Firebase project. Do not commit `.env`.
 
@@ -159,6 +156,6 @@ Cloud completion requires evidence beyond a green deploy:
    the callable to `enforceAppCheck: true`, redeploy, and repeat submission from
    release builds before publicly activating Firebase mode.
 
-Firebase deployment, Anonymous Auth enablement, two-user remote proof, native
-App Check enforcement, and a physical-device offline/reconnect pass remain
-explicit gates until recorded.
+Firestore rules and indexes are deployed. Callable deployment, Anonymous Auth
+enablement, two-user remote proof, native App Check enforcement, and a
+physical-device offline/reconnect pass remain explicit gates until recorded.
