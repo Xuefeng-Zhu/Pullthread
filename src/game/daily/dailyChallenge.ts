@@ -1,6 +1,6 @@
 import type { RunMetrics } from '../core/scoring';
 import { calculateThreadUsed } from '../core/scoring';
-import { getCampaignLevel } from '../levels/levelLoader';
+import { getLevelVersion } from '../levels/levelLoader';
 import {
   parseLevelReplay,
   simulateLevelReplay,
@@ -267,8 +267,10 @@ export function getDailyChallengeForDate(challengeDate: string): DailyChallenge 
   const pool = getDailyChallengePool(normalizedDate);
   const seed = dailySeedForDate(normalizedDate);
   const template = pool.templates[seed % pool.templates.length];
-  const level = getCampaignLevel(template.levelId);
-  if (level.version !== template.levelVersion) {
+  let level: ReturnType<typeof getLevelVersion>;
+  try {
+    level = getLevelVersion(template.levelId, template.levelVersion);
+  } catch {
     throw new RangeError(
       `Daily Scrap template "${template.id}" requires level version ${template.levelVersion}.`,
     );
@@ -370,7 +372,10 @@ export function deriveDailyRunMetrics(
   if (result.outcome.status !== 'success') {
     throw new RangeError('Only successful Daily Scrap replays can be submitted.');
   }
-  const level = getCampaignLevel(validatedReplay.levelReplay.levelId);
+  const level = getLevelVersion(
+    validatedReplay.levelReplay.levelId,
+    validatedReplay.levelReplay.levelVersion,
+  );
 
   return Object.freeze({
     threadUsed: calculateThreadUsed(validatedReplay.levelReplay.stitches),

@@ -4,7 +4,7 @@ import {
   createDailyRun,
   getDailyChallengeForDate,
 } from '../../../game/daily';
-import { getCampaignLevel } from '../../../game/levels/levelLoader';
+import { getLevelVersion } from '../../../game/levels/levelLoader';
 import { createLevelReplay } from '../../../game/replay';
 import {
   DAILY_SCRAP_STORAGE_KEY,
@@ -26,7 +26,7 @@ class MemoryStorage implements DailyKeyValueStorage {
 
 function referenceRun(clientRunId: string, createdAt: string) {
   const challenge = getDailyChallengeForDate('2026-08-27');
-  const level = getCampaignLevel(challenge.levelId);
+  const level = getLevelVersion(challenge.levelId, challenge.levelVersion);
   return createDailyRun(
     challenge,
     createLevelReplay(level, level.referenceSolution),

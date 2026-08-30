@@ -16,7 +16,7 @@ import {
   getDailyChallengeForDate,
   type DailyLeaderboardEntry,
 } from '../../../game/daily';
-import { getCampaignLevel } from '../../../game/levels/levelLoader';
+import { getLevelVersion } from '../../../game/levels/levelLoader';
 import { createLevelReplay } from '../../../game/replay';
 import { useDailyChallengeStore } from '../../../store/useDailyChallengeStore';
 import {
@@ -39,7 +39,7 @@ jest.mock('../../ResultsScreen/ReplayStage', () => ({
 }));
 
 const challenge = getDailyChallengeForDate('2026-08-27');
-const level = getCampaignLevel(challenge.levelId);
+const level = getLevelVersion(challenge.levelId, challenge.levelVersion);
 const levelReplay = createLevelReplay(level, level.referenceSolution);
 const run = createDailyRun(challenge, levelReplay, {
   clientRunId: 'daily-replay-screen-best',

@@ -6,7 +6,7 @@ import {
   DailyCatalogUpdateRequiredError,
   getDailyChallengeForDate,
 } from '../../../game/daily';
-import { getCampaignLevel } from '../../../game/levels/levelLoader';
+import { getLevelVersion } from '../../../game/levels/levelLoader';
 import { createLevelReplay } from '../../../game/replay';
 import {
   FirebaseDailyChallengeService,
@@ -64,7 +64,7 @@ function referenceRunForDate(
   createdAt: string,
 ) {
   const challenge = getDailyChallengeForDate(challengeDate);
-  const level = getCampaignLevel(challenge.levelId);
+  const level = getLevelVersion(challenge.levelId, challenge.levelVersion);
   return createDailyRun(
     challenge,
     createLevelReplay(level, level.referenceSolution),

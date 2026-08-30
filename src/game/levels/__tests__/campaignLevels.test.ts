@@ -6,6 +6,7 @@ import type { Stitch } from '../../core/types';
 import {
   CAMPAIGN_LEVELS,
   CAMPAIGN_QUILTS,
+  LEGACY_DAILY_LEVELS_V1,
 } from '../campaignLevels';
 import {
   createLevelPhysicsConfig,
@@ -14,6 +15,7 @@ import {
   getCampaignLevel,
   getCampaignLevelsForQuilt,
   getCampaignQuilt,
+  getLevelVersion,
   getNextCampaignLevel,
 } from '../levelLoader';
 import type { LevelDefinition } from '../schema';
@@ -110,6 +112,64 @@ describe('campaign catalog', () => {
         level.allowedStitchTypes.includes('pocket'),
       ),
     ).toBe(true);
+  });
+
+  test('varies the campaign across every travel direction and seam axis', () => {
+    const redesignedLevels = CAMPAIGN_LEVELS.slice(1);
+    const directions = new Set(
+      CAMPAIGN_LEVELS.map(({ baseSlope }) => {
+        if (Math.abs(baseSlope.x) > Math.abs(baseSlope.y)) {
+          return baseSlope.x < 0 ? 'right' : 'left';
+        }
+        return baseSlope.y < 0 ? 'down' : 'up';
+      }),
+    );
+    const pinchAxes = new Set(
+      CAMPAIGN_LEVELS.flatMap((level) =>
+        level.referenceSolution
+          .filter((stitch) => stitch.type === 'pinch')
+          .map((stitch) => {
+            const deltaX = Math.abs(stitch.end.x - stitch.start.x);
+            const deltaY = Math.abs(stitch.end.y - stitch.start.y);
+            if (deltaX < 0.001) return 'vertical';
+            if (deltaY < 0.001) return 'horizontal';
+            return 'diagonal';
+          }),
+      ),
+    );
+    const courseSignatures = new Set(
+      CAMPAIGN_LEVELS.map((level) =>
+        JSON.stringify({
+          start: level.traveler.start,
+          goal: level.goal.center,
+          slope: level.baseSlope,
+          regions: level.fabricRegions,
+          hazards: level.hazards,
+          bumpers: level.bumpers,
+        }),
+      ),
+    );
+
+    expect(CAMPAIGN_LEVELS[0].version).toBe(1);
+    expect(redesignedLevels.every((level) => level.version === 2)).toBe(true);
+    expect(directions).toEqual(new Set(['down', 'left', 'right', 'up']));
+    expect(pinchAxes).toEqual(new Set(['horizontal', 'vertical']));
+    expect(courseSignatures.size).toBeGreaterThanOrEqual(14);
+  });
+
+  test('retains the five historical Daily v1 levels beside campaign v2', () => {
+    expect(LEGACY_DAILY_LEVELS_V1).toHaveLength(5);
+
+    for (const legacyLevel of LEGACY_DAILY_LEVELS_V1) {
+      const campaignLevel = getCampaignLevel(legacyLevel.id);
+      expect(legacyLevel.version).toBe(1);
+      expect(campaignLevel.version).toBe(2);
+      expect(getLevelVersion(legacyLevel.id, 1)).toBe(legacyLevel);
+      expect(getLevelVersion(campaignLevel.id, 2)).toBe(campaignLevel);
+      expect(
+        runLevel(legacyLevel, legacyLevel.referenceSolution).outcome?.status,
+      ).toBe('success');
+    }
   });
 
   test('the hidden-patch solution collects its authored patch', () => {

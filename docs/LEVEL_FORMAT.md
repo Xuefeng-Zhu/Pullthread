@@ -100,6 +100,8 @@ Runtime consumers use `levelLoader.ts`:
 
 - `getCampaignLevel(levelId)` and `getCampaignQuilt(quiltId)` perform strict
   catalog lookup.
+- `getLevelVersion(levelId, version)` resolves current campaign content or an
+  explicitly retained historical Daily definition.
 - `getCampaignLevelsForQuilt(quiltId)` and `getNextCampaignLevel(levelId)`
   expose campaign order.
 - `createLevelWorld(level, stitches, preview?)` builds the shared deformed
@@ -119,3 +121,6 @@ Runtime consumers use `levelLoader.ts`:
    `simulateLevelReplay`; do not add a level-specific replay path.
 7. If a shipped level's deterministic outcome changes, increment its version
    and add any required save/replay migration policy before release.
+8. Do not rewrite a level version referenced by a shipped Daily Scrap pool.
+   Preserve the historical definition in the versioned loader or leave that
+   level unchanged.

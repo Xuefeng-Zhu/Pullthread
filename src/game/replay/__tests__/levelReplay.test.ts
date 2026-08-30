@@ -8,6 +8,7 @@ import {
   createLevelSimulation,
   createLevelWorld,
   getCampaignLevel,
+  getLevelVersion,
 } from '../../levels/levelLoader';
 import {
   createLevelReplay,
@@ -21,6 +22,7 @@ import {
 const firstLevel = getCampaignLevel('bedroom-01-first-pull');
 const pocketLevel = getCampaignLevel('attic-07-pocket-catch');
 const mixedLevel = getCampaignLevel('festival-13-pinch-pocket');
+const legacyEdgeLevel = getLevelVersion('bedroom-02-edge-redirect', 1);
 
 function canonicalReferenceStitches(
   level: typeof firstLevel,
@@ -63,7 +65,7 @@ function directRun(level: typeof firstLevel, stitches: readonly Stitch[]) {
 }
 
 describe('campaign replay records', () => {
-  test.each([firstLevel, pocketLevel, mixedLevel])(
+  test.each([firstLevel, legacyEdgeLevel, pocketLevel, mixedLevel])(
     'round-trips and deterministically reproduces $id',
     (level) => {
       const stitches = canonicalReferenceStitches(level);

@@ -1,7 +1,10 @@
 import { describe, expect, test } from '@jest/globals';
 
 import type { RunMetrics } from '../../core/scoring';
-import { getCampaignLevel } from '../../levels/levelLoader';
+import {
+  getCampaignLevel,
+  getLevelVersion,
+} from '../../levels/levelLoader';
 import { createLevelReplay, simulateLevelReplay } from '../../replay';
 import {
   DAILY_CHALLENGE_TEMPLATES,
@@ -60,8 +63,12 @@ describe('Daily Scrap deterministic domain', () => {
     ]);
 
     for (const template of DAILY_CHALLENGE_TEMPLATES) {
-      const level = getCampaignLevel(template.levelId);
+      const level = getLevelVersion(template.levelId, template.levelVersion);
       expect(level.order).toBeLessThanOrEqual(6);
+      expect(level.version).toBe(template.levelVersion);
+      if (level.order > 1) {
+        expect(getCampaignLevel(level.id).version).toBe(2);
+      }
       expect(
         simulateLevelReplay(createLevelReplay(level, level.referenceSolution)).outcome
           .status,
@@ -115,7 +122,7 @@ describe('Daily Scrap deterministic domain', () => {
 
   test('rejects remote descriptors and replay envelopes that drift from the day', () => {
     const challenge = getDailyChallengeForDate('2026-08-27');
-    const level = getCampaignLevel(challenge.levelId);
+    const level = getLevelVersion(challenge.levelId, challenge.levelVersion);
     const dailyReplay = createDailyReplay(
       challenge,
       createLevelReplay(level, level.referenceSolution),
@@ -137,7 +144,7 @@ describe('Daily Scrap deterministic domain', () => {
 
   test('derives submitted metrics from the compact deterministic replay', () => {
     const challenge = getDailyChallengeForDate('2026-08-27');
-    const level = getCampaignLevel(challenge.levelId);
+    const level = getLevelVersion(challenge.levelId, challenge.levelVersion);
     const run = createDailyRun(
       challenge,
       createLevelReplay(level, level.referenceSolution),

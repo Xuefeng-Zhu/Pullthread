@@ -4,11 +4,14 @@ import type { ComponentProps } from 'react';
 import MockReact from 'react';
 import { View as MockView } from 'react-native';
 
+import { getDailyChallengeForDate } from '../../../game/daily';
 import { CAMPAIGN_LEVELS } from '../../../game/levels/campaignLevels';
+import { getLevelVersion } from '../../../game/levels/levelLoader';
 import {
   useCampaignProgressStore,
   type CampaignLevelProgress,
 } from '../../../store/useCampaignProgressStore';
+import { useDailyChallengeStore } from '../../../store/useDailyChallengeStore';
 import { useEntitlementStore } from '../../../store/useEntitlementStore';
 import {
   resetGameStoreForTests,
@@ -110,6 +113,7 @@ describe('SpikeLevelScreen direct-route campaign access', () => {
       hasFullGame: false,
       debugOverride: null,
     });
+    useDailyChallengeStore.setState({ challenge: null });
     startLevel = jest.fn();
     useGameStore.setState({ startLevel });
   });
@@ -171,8 +175,50 @@ describe('SpikeLevelScreen direct-route campaign access', () => {
     );
 
     expect(view.getByTestId('spike-level-screen')).toBeTruthy();
+    expect(view.getByTestId('level-mechanic').props.children).toBe(
+      levelSeven.mechanic,
+    );
     await waitFor(() => {
       expect(startLevel).toHaveBeenCalledWith(levelSeven.id);
+    });
+    expect(harness.replace).not.toHaveBeenCalled();
+  });
+
+  test('plays the historical Daily level version instead of campaign v2', async () => {
+    const challenge = getDailyChallengeForDate('2026-01-01');
+    const legacyLevel = getLevelVersion(
+      challenge.levelId,
+      challenge.levelVersion,
+    );
+    const campaignLevel = CAMPAIGN_LEVELS.find(
+      (level) => level.id === challenge.levelId,
+    );
+    if (!campaignLevel) throw new Error('Expected a matching campaign level.');
+    const harness = screenHarness(challenge.levelId);
+    const route = {
+      ...harness.route,
+      params: {
+        levelId: challenge.levelId,
+        mode: 'daily',
+        challengeId: challenge.id,
+      },
+    } as ScreenProps['route'];
+    useDailyChallengeStore.setState({ challenge });
+
+    const view = await render(
+      <SpikeLevelScreen navigation={harness.navigation} route={route} />,
+    );
+
+    expect(view.getByTestId('daily-level-screen')).toBeTruthy();
+    expect(view.getByTestId('level-mechanic').props.children).toBe(
+      legacyLevel.mechanic,
+    );
+    expect(legacyLevel.mechanic).not.toBe(campaignLevel.mechanic);
+    await waitFor(() => {
+      expect(startLevel).toHaveBeenCalledWith(challenge.levelId, {
+        kind: 'daily',
+        challenge,
+      });
     });
     expect(harness.replace).not.toHaveBeenCalled();
   });

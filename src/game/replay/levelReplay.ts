@@ -16,6 +16,7 @@ import {
   createLevelSimulation,
   createLevelWorld,
   getCampaignLevel,
+  getLevelVersion,
 } from '../levels/levelLoader';
 import type { LevelDefinition } from '../levels/schema';
 
@@ -55,24 +56,35 @@ function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function catalogLevelForReplay(levelId: unknown): LevelDefinition {
+function catalogLevelForReplay(
+  levelId: unknown,
+  levelVersion: unknown,
+): LevelDefinition {
   if (typeof levelId !== 'string') {
     throw new TypeError('Replay level id must be a string.');
   }
+  if (
+    typeof levelVersion !== 'number' ||
+    !Number.isSafeInteger(levelVersion) ||
+    levelVersion <= 0
+  ) {
+    throw new RangeError('Replay level version is not supported.');
+  }
 
   try {
-    return getCampaignLevel(levelId);
+    return getLevelVersion(levelId, levelVersion);
   } catch {
-    throw new RangeError('Replay level is not supported.');
+    try {
+      getCampaignLevel(levelId);
+    } catch {
+      throw new RangeError('Replay level is not supported.');
+    }
+    throw new RangeError('Replay level version is not supported.');
   }
 }
 
 function assertCatalogLevel(level: LevelDefinition): LevelDefinition {
-  const catalogLevel = catalogLevelForReplay(level.id);
-  if (level.version !== catalogLevel.version) {
-    throw new RangeError('Replay level version is not supported.');
-  }
-  return catalogLevel;
+  return catalogLevelForReplay(level.id, level.version);
 }
 
 function pointInsideBounds(point: Point, level: LevelDefinition): boolean {
@@ -174,10 +186,7 @@ export function parseLevelReplay(value: unknown): LevelReplayV1 {
     throw new RangeError('Replay schema version is not supported.');
   }
 
-  const level = catalogLevelForReplay(value.levelId);
-  if (value.levelVersion !== level.version) {
-    throw new RangeError('Replay level version is not supported.');
-  }
+  const level = catalogLevelForReplay(value.levelId, value.levelVersion);
   if (!Array.isArray(value.stitches)) {
     throw new TypeError('Replay stitches must be an array.');
   }
@@ -235,7 +244,7 @@ export function simulateLevelReplay(
   }
 
   const validated = parseLevelReplay(replay);
-  const level = getCampaignLevel(validated.levelId);
+  const level = getLevelVersion(validated.levelId, validated.levelVersion);
   const simulation = createLevelSimulation(level);
   const world = createLevelWorld(level, validated.stitches);
   const points: Point[] = [Object.freeze({ ...simulation.traveler.position })];

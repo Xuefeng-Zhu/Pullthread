@@ -9,7 +9,7 @@ import type { SimulationOutcome, SimulationPhase } from '../../game/core/types';
 import type { CanvasSize } from '../../game/input/stitchGesture';
 import {
   createLevelWorld,
-  getCampaignLevel,
+  getLevelVersion,
 } from '../../game/levels/levelLoader';
 import type { LevelReplayV1 } from '../../game/replay';
 import { simulateLevelReplay } from '../../game/replay';
@@ -52,8 +52,8 @@ export function ReplayStage({
   const [size, setSize] = useState(EMPTY_SIZE);
   const stitchProgress = useSharedValue(1);
   const level = useMemo(
-    () => getCampaignLevel(replay.levelId),
-    [replay.levelId],
+    () => getLevelVersion(replay.levelId, replay.levelVersion),
+    [replay.levelId, replay.levelVersion],
   );
   const run = useMemo(() => simulateLevelReplay(replay), [replay]);
   const world = useMemo(

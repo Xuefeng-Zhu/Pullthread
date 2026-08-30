@@ -9,7 +9,7 @@ import {
   getDailyChallengeForDate,
   parseDailyChallenge,
 } from '../../src/game/daily';
-import { getCampaignLevel } from '../../src/game/levels/levelLoader';
+import { getLevelVersion } from '../../src/game/levels/levelLoader';
 import { createLevelReplay } from '../../src/game/replay';
 import {
   ClientRunIdConflictError,
@@ -28,7 +28,7 @@ after(async () => {
 
 function referenceRun(clientRunId: string, createdAt: string) {
   const challenge = getDailyChallengeForDate('2026-08-27');
-  const level = getCampaignLevel(challenge.levelId);
+  const level = getLevelVersion(challenge.levelId, challenge.levelVersion);
   return {
     challenge,
     run: createDailyRun(

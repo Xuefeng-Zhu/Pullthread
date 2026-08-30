@@ -17,7 +17,10 @@ import {
   type DailyChallenge,
 } from '../game/daily';
 import { CAMPAIGN_LEVELS } from '../game/levels/campaignLevels';
-import { getCampaignLevel } from '../game/levels/levelLoader';
+import {
+  getCampaignLevel,
+  getLevelVersion,
+} from '../game/levels/levelLoader';
 import {
   createLevelReplay,
   type LevelReplayV1,
@@ -93,7 +96,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
   bestRun: null,
 
   startLevel: (levelId, requestedSession = CAMPAIGN_SESSION) => {
-    getCampaignLevel(levelId);
     const activeSession =
       requestedSession.kind === 'daily'
         ? Object.freeze({
@@ -106,6 +108,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
       activeSession.challenge.levelId !== levelId
     ) {
       throw new RangeError('Daily Scrap session does not match its level.');
+    }
+    if (activeSession.kind === 'daily') {
+      getLevelVersion(levelId, activeSession.challenge.levelVersion);
+    } else {
+      getCampaignLevel(levelId);
     }
     const durableBest =
       activeSession.kind === 'daily'
@@ -197,7 +204,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
         };
       }
 
-      const level = getCampaignLevel(state.activeLevelId);
+      const level =
+        state.activeSession.kind === 'daily'
+          ? getLevelVersion(
+              state.activeLevelId,
+              state.activeSession.challenge.levelVersion,
+            )
+          : getCampaignLevel(state.activeLevelId);
       const metrics: RunMetrics = Object.freeze({
         threadUsed: calculateThreadUsed(state.stitches),
         stitchesUsed: state.stitches.length,

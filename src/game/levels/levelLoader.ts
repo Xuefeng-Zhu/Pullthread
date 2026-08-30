@@ -7,7 +7,11 @@ import {
 import type { PhysicsConfig, PhysicsWorld } from '../core/physics';
 import { createSimulation, type SimulationState } from '../core/simulation';
 import type { Stitch } from '../core/types';
-import { CAMPAIGN_LEVELS, CAMPAIGN_QUILTS } from './campaignLevels';
+import {
+  CAMPAIGN_LEVELS,
+  CAMPAIGN_QUILTS,
+  LEGACY_DAILY_LEVELS_V1,
+} from './campaignLevels';
 import type { LevelDefinition, QuiltDefinition } from './schema';
 
 const levelsById = new Map(
@@ -16,10 +20,30 @@ const levelsById = new Map(
 const quiltsById = new Map(
   CAMPAIGN_QUILTS.map((quilt) => [quilt.id, quilt] as const),
 );
+const levelsByVersion = new Map<string, LevelDefinition>();
+for (const level of [...CAMPAIGN_LEVELS, ...LEGACY_DAILY_LEVELS_V1]) {
+  const key = `${level.id}@${level.version}`;
+  if (levelsByVersion.has(key)) {
+    throw new Error(`Duplicate level version "${key}".`);
+  }
+  levelsByVersion.set(key, level);
+}
 
 export function getCampaignLevel(levelId: string): LevelDefinition {
   const level = levelsById.get(levelId);
   if (!level) throw new Error(`Unknown campaign level "${levelId}".`);
+  return level;
+}
+
+/** Resolves current campaign content or an immutable historical Daily version. */
+export function getLevelVersion(
+  levelId: string,
+  version: number,
+): LevelDefinition {
+  const level = levelsByVersion.get(`${levelId}@${version}`);
+  if (!level) {
+    throw new Error(`Unknown level version "${levelId}@${version}".`);
+  }
   return level;
 }
 

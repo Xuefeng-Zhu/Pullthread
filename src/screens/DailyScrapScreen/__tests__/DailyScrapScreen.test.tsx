@@ -22,7 +22,7 @@ import {
   type DailyLeaderboardEntry,
   type DailyRun,
 } from '../../../game/daily';
-import { getCampaignLevel } from '../../../game/levels/levelLoader';
+import { getLevelVersion } from '../../../game/levels/levelLoader';
 import { createLevelReplay } from '../../../game/replay';
 import type {
   DailyChallengeService,
@@ -37,7 +37,7 @@ import { DailyScrapScreen } from '../DailyScrapScreen';
 
 const challenge = getDailyChallengeForDate('2026-08-27');
 const nextChallenge = getDailyChallengeForDate('2026-08-28');
-const level = getCampaignLevel(challenge.levelId);
+const level = getLevelVersion(challenge.levelId, challenge.levelVersion);
 const replay = createLevelReplay(level, level.referenceSolution);
 const personalBest = createDailyRun(challenge, replay, {
   clientRunId: 'daily-ui-current-best',

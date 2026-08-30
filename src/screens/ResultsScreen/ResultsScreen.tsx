@@ -16,7 +16,7 @@ import type { SimulationOutcome, SimulationPhase } from '../../game/core/types';
 import { utcChallengeDate } from '../../game/daily';
 import { getCampaignLevelAccess } from '../../game/levels/campaignAccess';
 import {
-  getCampaignLevel,
+  getLevelVersion,
   getNextCampaignLevel,
 } from '../../game/levels/levelLoader';
 import { useCampaignProgressStore } from '../../store/useCampaignProgressStore';
@@ -271,7 +271,10 @@ export function ResultsScreen({ navigation }: ResultsScreenProps) {
     (total, stitch) => total + stitch.threadCost,
     0,
   );
-  const level = getCampaignLevel(completedRun.levelId);
+  const level = getLevelVersion(
+    completedRun.levelId,
+    completedRun.replay.levelVersion,
+  );
   const nextLevel = isDaily ? null : getNextCampaignLevel(level.id);
   const activeDailySubmission =
     completedRun.session?.kind === 'daily' &&

@@ -8,7 +8,7 @@ import {
   DailyCatalogUpdateRequiredError,
   getDailyChallengeForDate,
 } from '../../src/game/daily';
-import { getCampaignLevel } from '../../src/game/levels/levelLoader';
+import { getLevelVersion } from '../../src/game/levels/levelLoader';
 import { createLevelReplay } from '../../src/game/replay';
 import {
   selectTrustedDailyBest,
@@ -21,7 +21,7 @@ function referenceRun(
   createdAt = `${challengeDate}T12:00:00.000Z`,
 ) {
   const challenge = getDailyChallengeForDate(challengeDate);
-  const level = getCampaignLevel(challenge.levelId);
+  const level = getLevelVersion(challenge.levelId, challenge.levelVersion);
   const replay = createLevelReplay(level, level.referenceSolution);
   return createDailyRun(challenge, replay, { clientRunId, createdAt });
 }
@@ -105,7 +105,7 @@ describe('Daily Scrap callable validation', () => {
 
   test('rejects replays that do not finish successfully', () => {
     const challenge = getDailyChallengeForDate('2026-08-27');
-    const level = getCampaignLevel(challenge.levelId);
+    const level = getLevelVersion(challenge.levelId, challenge.levelVersion);
     const levelReplay = createLevelReplay(level, []);
     const replay = createDailyReplay(challenge, levelReplay);
 
@@ -127,7 +127,7 @@ describe('Daily Scrap callable validation', () => {
 
   test('bounds replay-authored identifiers before persistence', () => {
     const challenge = getDailyChallengeForDate('2026-08-27');
-    const level = getCampaignLevel(challenge.levelId);
+    const level = getLevelVersion(challenge.levelId, challenge.levelVersion);
     const stitches = level.referenceSolution.map((stitch, index) => ({
       ...stitch,
       id: `${index}-${'x'.repeat(81)}`,

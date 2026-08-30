@@ -85,6 +85,19 @@ The campaign contains three ordered quilts and 15 levels:
 - Attic Quilt: Levels 6–10
 - Festival Quilt: Levels 11–15
 
+The Full Atelier route deliberately changes the direction of travel instead of
+repeating the Bedroom solution. Levels 7–15 send the traveler left, right, up,
+and down; mix horizontal and vertical pinch gestures; reverse the starting
+corner; and turn materials, hazards, pockets, and bumpers into distinct course
+shapes. The named objective is shown on the play screen so each layout's idea
+is legible before the player draws.
+
+The tutorial remains Level 1 v1. Campaign Levels 2–15 use redesigned v2
+definitions, while immutable v1 snapshots of Levels 2–6 remain available only
+to the append-only Daily Scrap pool. Version-aware loading therefore keeps
+dated challenge ids, saved Daily replays, and server re-simulation unchanged
+without forcing the campaign to retain its old layouts.
+
 Completion unlocks only the next level. Progress is derived from saved
 successful runs; there is no mutable unlock list. Purchasing Full Atelier never
 marks a level complete and therefore never skips sequence.

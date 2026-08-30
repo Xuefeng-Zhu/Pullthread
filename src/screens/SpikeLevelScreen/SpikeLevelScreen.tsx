@@ -44,6 +44,7 @@ import { getCampaignLevelAccess } from '../../game/levels/campaignAccess';
 import {
   createLevelWorld,
   getCampaignLevel,
+  getLevelVersion,
 } from '../../game/levels/levelLoader';
 import { FabricCanvas } from '../../game/rendering/FabricCanvas';
 import {
@@ -118,7 +119,7 @@ export function SpikeLevelScreen({
   navigation,
   route: screenRoute,
 }: SpikeLevelScreenProps) {
-  const level = useMemo(
+  const campaignLevel = useMemo(
     () => getCampaignLevel(screenRoute.params.levelId),
     [screenRoute.params.levelId],
   );
@@ -128,9 +129,19 @@ export function SpikeLevelScreen({
     isDaily &&
     dailyChallenge &&
     dailyChallenge.id === screenRoute.params.challengeId &&
-    dailyChallenge.levelId === level.id
+    dailyChallenge.levelId === campaignLevel.id
       ? dailyChallenge
       : null;
+  const level = useMemo(
+    () =>
+      validDailyChallenge
+        ? getLevelVersion(
+            validDailyChallenge.levelId,
+            validDailyChallenge.levelVersion,
+          )
+        : campaignLevel,
+    [campaignLevel, validDailyChallenge],
+  );
   const progressByLevel = useCampaignProgressStore(
     (state) => state.progressByLevel,
   );
@@ -629,8 +640,21 @@ export function SpikeLevelScreen({
             highContrast && styles.outlineHighContrast,
           ]}
         >
-          <Text style={[styles.title, compactViewport && styles.titleCompact]}>
+          <Text
+            numberOfLines={1}
+            style={[styles.title, compactViewport && styles.titleCompact]}
+          >
             {validDailyChallenge?.title ?? level.name}
+          </Text>
+          <Text
+            testID="level-mechanic"
+            numberOfLines={1}
+            style={[
+              styles.levelMechanic,
+              compactViewport && styles.levelMechanicCompact,
+            ]}
+          >
+            {level.mechanic}
           </Text>
         </View>
         <Pressable
@@ -838,7 +862,7 @@ const styles = StyleSheet.create({
   },
   screenHighContrast: { backgroundColor: '#071e27' },
   header: {
-    minHeight: 56,
+    minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
@@ -846,14 +870,16 @@ const styles = StyleSheet.create({
     paddingTop: spacing.xs,
   },
   headerCompact: {
-    minHeight: 48,
+    minHeight: 54,
     paddingTop: 0,
   },
   titlePlaque: {
     flex: 1,
-    minHeight: 50,
+    minHeight: 58,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 4,
     borderRadius: radii.md,
     borderWidth: 2,
     borderColor: '#c8a979',
@@ -885,7 +911,19 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
   },
   titleCompact: {
-    fontSize: 22,
+    fontSize: 20,
+  },
+  levelMechanic: {
+    color: '#6f5142',
+    fontFamily: 'NunitoSans_700Bold',
+    fontSize: 10,
+    letterSpacing: 0.25,
+    lineHeight: 13,
+    textAlign: 'center',
+  },
+  levelMechanicCompact: {
+    fontSize: 9,
+    lineHeight: 11,
   },
   hudRow: {
     flexDirection: 'row',

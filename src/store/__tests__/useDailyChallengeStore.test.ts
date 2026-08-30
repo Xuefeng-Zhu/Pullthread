@@ -9,7 +9,7 @@ import {
   type DailyLeaderboardEntry,
   type DailyRun,
 } from '../../game/daily';
-import { getCampaignLevel } from '../../game/levels/levelLoader';
+import { getLevelVersion } from '../../game/levels/levelLoader';
 import { createLevelReplay, type LevelReplayV1 } from '../../game/replay';
 import type {
   DailyChallengeService,
@@ -42,7 +42,7 @@ function deferred<T>(): Deferred<T> {
 
 function dailyFixture(date: string, suffix: string): DailyFixture {
   const challenge = getDailyChallengeForDate(date);
-  const level = getCampaignLevel(challenge.levelId);
+  const level = getLevelVersion(challenge.levelId, challenge.levelVersion);
   const replay = createLevelReplay(level, level.referenceSolution);
   const run = createDailyRun(challenge, replay, {
     clientRunId: `daily-store-${suffix}`,
