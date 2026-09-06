@@ -1,4 +1,10 @@
-# Milestone 2 Design Contract
+# Archived Milestone 2 Design Contract
+
+This document and its screenshots record the earlier classic game's design.
+Its tutorial, results, replay, and commercial UI are not active app screens.
+Current product behavior is documented in [GAME_DESIGN.md](GAME_DESIGN.md).
+
+---
 
 Reference: `docs/design/pullthread-milestone-2-concept-sheet.png`
 

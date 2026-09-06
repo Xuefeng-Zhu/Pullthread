@@ -1,45 +1,16 @@
 import { NavigationContainer } from '@react-navigation/native';
-import {
-  createNativeStackNavigator,
-  type NativeStackScreenProps,
-} from '@react-navigation/native-stack';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { useEffectiveReducedMotion } from '../../accessibility/useEffectiveReducedMotion';
-import { PaywallScreen } from '../../screens/PaywallScreen/PaywallScreen';
-import { DailyReplayScreen } from '../../screens/DailyReplayScreen/DailyReplayScreen';
-import { DailyScrapScreen } from '../../screens/DailyScrapScreen/DailyScrapScreen';
-import { QuiltMapScreen } from '../../screens/QuiltMapScreen/QuiltMapScreen';
-import { ResultsScreen } from '../../screens/ResultsScreen/ResultsScreen';
 import { SettingsScreen } from '../../screens/SettingsScreen/SettingsScreen';
-import { SpikeLevelScreen } from '../../screens/SpikeLevelScreen/SpikeLevelScreen';
+import { EndlessGameScreen } from '../../screens/EndlessGameScreen/EndlessGameScreen';
 
 export type RootStackParamList = {
-  QuiltMap: undefined;
-  DailyScrap: undefined;
-  DailyReplay: { readonly challengeId: string; readonly entryId: string };
-  SpikeLevel: {
-    readonly levelId: string;
-    readonly mode?: 'daily';
-    readonly challengeId?: string;
-  };
-  Results: undefined;
+  EndlessGame: undefined;
   Settings: undefined;
-  Paywall: { readonly levelId?: string } | undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
-
-type SpikeLevelRouteProps = NativeStackScreenProps<
-  RootStackParamList,
-  'SpikeLevel'
->;
-
-function SpikeLevelRoute(props: SpikeLevelRouteProps) {
-  const { challengeId, levelId, mode } = props.route.params;
-  const sessionKey = `${mode ?? 'campaign'}:${challengeId ?? ''}:${levelId}`;
-
-  return <SpikeLevelScreen key={sessionKey} {...props} />;
-}
 
 export function RootNavigator() {
   const reducedMotion = useEffectiveReducedMotion();
@@ -47,19 +18,15 @@ export function RootNavigator() {
   return (
     <NavigationContainer>
       <Stack.Navigator
+        initialRouteName="EndlessGame"
         screenOptions={{
           headerShown: false,
           animation: reducedMotion ? 'none' : 'fade',
           contentStyle: { backgroundColor: '#162f3a' },
         }}
       >
-        <Stack.Screen name="QuiltMap" component={QuiltMapScreen} />
-        <Stack.Screen name="DailyScrap" component={DailyScrapScreen} />
-        <Stack.Screen name="DailyReplay" component={DailyReplayScreen} />
-        <Stack.Screen name="SpikeLevel" component={SpikeLevelRoute} />
-        <Stack.Screen name="Results" component={ResultsScreen} />
+        <Stack.Screen name="EndlessGame" component={EndlessGameScreen} options={{ title: 'Pullthread' }} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
-        <Stack.Screen name="Paywall" component={PaywallScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

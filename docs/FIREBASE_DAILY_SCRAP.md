@@ -1,4 +1,12 @@
-# Firebase Daily Scrap activation
+# Archived Firebase Daily Scrap Backend Reference
+
+This document preserves the historical Daily Scrap backend contract and setup
+record. Daily Scrap, Firebase configuration, and account flows are absent from
+the current client. Retained functions/rules support compatibility work; setup
+and activation instructions below are historical service reference, not steps
+needed to run Pullthread. No backend deployment or data change is implied.
+
+---
 
 Daily Scrap is local-first. With no cloud configuration, the deterministic UTC
 challenge, unlimited attempts, personal best, and one-player device board all

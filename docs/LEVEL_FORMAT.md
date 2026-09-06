@@ -1,4 +1,11 @@
-# Campaign Level Format
+# Archived Campaign Level Format
+
+This is the schema and authoring reference for removed classic content and
+historical replay/backend fixtures. These level definitions do not describe the
+current endless game's generated pockets. Current runtime documentation is in
+[ARCHITECTURE.md](ARCHITECTURE.md).
+
+---
 
 Pullthread levels are immutable TypeScript data in
 `src/game/levels/campaignLevels.ts`. The schema lives in

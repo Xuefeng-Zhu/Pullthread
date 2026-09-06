@@ -1,4 +1,10 @@
-# Milestone 3 Physical Campaign Smoke Test
+# Classic Campaign Physical Smoke Test
+
+Archived evidence and checklist for the classic builds identified below. The
+classic mode has been removed from the current app; these routes and checklist
+steps cannot be used with its endless-only navigation. Dated observations are
+retained unchanged. Use [ENDLESS_SMOKE_TEST.md](ENDLESS_SMOKE_TEST.md) for the
+current game.
 
 ## Status and evidence boundary
 
@@ -48,9 +54,10 @@ identifiers:
 
 ## 1. Clean Quilt Map and Level 1
 
-Start from cleared app storage.
+Start from cleared app storage, then open Settings → Classic puzzles.
 
-- [ ] Launch reaches `Quilt Journey` / `quilt-map-screen`, not gameplay.
+- [ ] Launch reaches Endless flight. Settings → Classic puzzles reaches
+      `Quilt Journey` / `quilt-map-screen`.
 - [ ] The horizontal chapter pager starts on Bedroom and shows five level
       nodes; swipe left to Attic, then Festival, and confirm each chapter snaps
       fully into place with five nodes and the correct chapter indicator.

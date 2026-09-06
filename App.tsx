@@ -1,4 +1,4 @@
-import 'react-native-gesture-handler';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { Fraunces_600SemiBold } from '@expo-google-fonts/fraunces/600SemiBold';
 import { Fraunces_700Bold } from '@expo-google-fonts/fraunces/700Bold';
@@ -11,7 +11,6 @@ import { useFonts } from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import {
   ReduceMotion,
   ReducedMotionConfig,
@@ -20,14 +19,9 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { RootNavigator } from './src/app/navigation/RootNavigator';
 import {
-  hydrateCampaignProgress,
-  useCampaignProgressStore,
-} from './src/store/useCampaignProgressStore';
-import {
-  hydrateEntitlements,
-  initializeEntitlements,
-  useEntitlementStore,
-} from './src/store/useEntitlementStore';
+  hydrateEndlessProgress,
+  useEndlessProgressStore,
+} from './src/store/useEndlessProgressStore';
 import {
   hydratePreferences,
   usePreferencesStore,
@@ -45,8 +39,7 @@ export default function App() {
   });
   const [storedStateLoaded, setStoredStateLoaded] = useState(
     usePreferencesStore.persist.hasHydrated() &&
-      useCampaignProgressStore.persist.hasHydrated() &&
-      useEntitlementStore.persist.hasHydrated(),
+      useEndlessProgressStore.persist.hasHydrated(),
   );
   const reducedMotionEnabled = usePreferencesStore(
     (state) => state.reducedMotionEnabled,
@@ -57,12 +50,8 @@ export default function App() {
 
     void Promise.allSettled([
       hydratePreferences(),
-      hydrateCampaignProgress(),
-      hydrateEntitlements(),
+      hydrateEndlessProgress(),
     ]).then(() => {
-      // RevenueCat may need the network. Its refresh starts only after the
-      // fail-soft cache is available and never blocks the offline campaign.
-      void initializeEntitlements().catch(() => undefined);
       if (mounted) setStoredStateLoaded(true);
     });
 

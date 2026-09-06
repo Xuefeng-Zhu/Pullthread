@@ -1,4 +1,12 @@
-# Pullthread Build Plan
+# Classic Campaign Build Plan
+
+This archived implementation plan and evidence record describes the removed
+classic stitch-puzzle mode and its backend contracts. Its feature plans,
+configuration steps, and checklists are historical, not current app instructions.
+Pullthread now contains only Endless flight and Settings. Current behavior and
+architecture are in [GAME_DESIGN.md](GAME_DESIGN.md) and
+[ARCHITECTURE.md](ARCHITECTURE.md); current device checks are in
+[ENDLESS_SMOKE_TEST.md](ENDLESS_SMOKE_TEST.md).
 
 ## Goal
 

@@ -1,4 +1,9 @@
-# Physical-Device Test and Evidence Record
+# Classic Physical-Device Test and Evidence Record
+
+Archived device evidence and checklist for the classic builds identified below.
+The old mode is absent from the current app. These historical routes, settings,
+and verification steps do not describe the current binary or establish a pass
+for it. Use [ENDLESS_SMOKE_TEST.md](ENDLESS_SMOKE_TEST.md) for endless play.
 
 ## Gate status
 
@@ -92,8 +97,8 @@ npm start
 
 - [ ] The app installs and launches without a red screen, native crash, or
       missing-bundle error.
-- [ ] A clean launch reaches the Quilt Map; no account, network service,
-      paywall, or credential is required. Open Level 1 before the mechanic
+- [ ] A clean launch reaches Endless flight; Settings → Classic puzzles opens
+      the Quilt Map. No account, network service, paywall, or credential is required. Open Level 1 before the mechanic
       checks below.
 - [ ] The app remains locked to portrait.
 - [ ] The playfield and all controls avoid the notch, Dynamic Island/camera

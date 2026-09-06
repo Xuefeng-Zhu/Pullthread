@@ -1,0 +1,87 @@
+appId: com.xuefengzhu.pullthread
+name: Pullthread endless main-game navigation and pause smoke
+tags:
+  - smoke
+  - endless
+---
+# No debug tools or store configuration are needed. This flow covers controls
+# and routing; manual Skia gestures and a nonzero persisted best are checked in
+# docs/ENDLESS_SMOKE_TEST.md, without device-size-dependent swipe coordinates.
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible:
+      id: "endless-game-screen"
+    timeout: 20000
+- assertVisible:
+    id: "launch-playfield"
+- assertVisible:
+    id: "launch-score"
+    text: "0"
+- assertVisible:
+    id: "launch-best"
+    text: "0"
+- assertNotVisible:
+    id: "paywall-screen"
+- tapOn:
+    id: "launch-pause-button"
+- assertVisible:
+    id: "launch-paused"
+
+# Settings returns to the same already paused run.
+- tapOn:
+    id: "launch-settings-button"
+- assertVisible:
+    id: "settings-screen"
+- assertVisible:
+    id: "sound-switch"
+- assertVisible:
+    id: "haptics-switch"
+- assertVisible:
+    id: "reduced-motion-switch"
+- assertVisible:
+    id: "high-contrast-switch"
+- assertVisible:
+    id: "tutorial-hints-switch"
+- scrollUntilVisible:
+    element:
+      id: "settings-done-button"
+    direction: DOWN
+    timeout: 10000
+- tapOn:
+    id: "settings-done-button"
+- extendedWaitUntil:
+    visible:
+      id: "endless-game-screen"
+    timeout: 20000
+- assertVisible:
+    id: "launch-paused"
+- tapOn:
+    id: "launch-resume-button"
+- assertNotVisible:
+    id: "launch-paused"
+
+- tapOn:
+    id: "launch-pause-button"
+- tapOn:
+    id: "launch-restart-button"
+- assertVisible:
+    id: "launch-playfield"
+- assertVisible:
+    id: "launch-score"
+    text: "0"
+- assertNotVisible:
+    id: "launch-paused"
+
+# A cold launch starts a fresh endless run.
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "endless-game-screen"
+    timeout: 20000
+- assertVisible:
+    id: "launch-playfield"
+- assertVisible:
+    id: "launch-score"
+    text: "0"

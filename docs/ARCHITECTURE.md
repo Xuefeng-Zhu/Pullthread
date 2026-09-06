@@ -1,423 +1,101 @@
-# Pullthread Campaign, Entitlement, and Daily Architecture
+# Pullthread Architecture
 
-## Scope
+## Application boundary
 
-Milestones 3–5 extend the proven physics-puzzle slice into a complete local
-campaign, a fail-soft one-time purchase boundary, and an optional local-first
-daily mode. The app launches at a three-quilt map, runs 15 catalog-authored
-levels, persists separate campaign/Daily progress, keeps every simulation and
-replay deterministic, and gates Levels 7–15 behind Full Atelier without making
-campaign gameplay depend on a network.
+The app has two routes: `EndlessGame` and `Settings`. It starts directly in the
+endless game. Settings exposes five feedback/accessibility preferences and Done,
+which returns to the existing run. There is no alternate game, campaign map,
+replay browser, Daily Scrap, paywall, or purchase setup in the application.
 
-The campaign does not require an account, remote level delivery, Firebase, or a
-network-backed leaderboard. RevenueCat wraps premium access and Firebase wraps
-Daily Scrap sharing, but neither initializes as a prerequisite for campaign
-play or already verified offline access.
-
-## Dependency direction
+`App.tsx` hydrates preferences and the endless best before mounting navigation.
+Gameplay is entirely local. Archived backend contracts and historical replay
+code, where retained for compatibility, are outside the active client graph.
 
 ```text
-App hydration / navigation
-        |
-        +--> Quilt Map <-------- persisted campaign progress
-        |                              ^
-        |                              |
-        +--> access policy <----- cached effective entitlement
-        |                              ^
-        |                              |
-        +--> Paywall / Settings --> entitlement store --> service interface
-        |                                                /              \
-        |                                       development mock     RevenueCat
-        |
-        +--> Daily hub --> Daily store --> local service --> AsyncStorage
-        |                    |                  |
-        |                    |                  +--> lazy Firebase decorator
-        |                    |                         |
-        |                    |                  anonymous Auth / Firestore
-        |                    |                         |
-        |                    +--> Daily session --> verified callable function
-        |
-        +--> gameplay store -------- scoring
-        |          |                   ^
-        |          v                   |
-        |     immutable level ------> pure game core <------ replay parser
-        |          |                       |
-        |          +--> world builder -----+
-        |                                  |
-        +--> input mapping ----------------+
-        |                                  |
-        +--> fixed-step runtime -----------+
-        |          |
-        |          +--> render snapshot --> Skia renderers
-        |          +--> coarse outcome ---> gameplay/progress stores
-        |
-        +--> feedback and accessibility settings
+App hydration
+  ├── preferences store ─────────── Settings / feedback
+  └── endless best store ───────── score display
+
+EndlessGameScreen
+  └── useLaunchSession
+        ├── gesture mapping / lifecycle
+        ├── endless generation / camera / score
+        │     └── pure ballistic simulation
+        └── shared traveler / pull / camera values
+              └── LaunchCanvas / Skia
 ```
 
-Dependencies point inward toward pure TypeScript. Geometry, deformation,
-physics, level validation, replay validation, and scoring do not import React,
-React Native, Skia, Reanimated, Zustand, Expo APIs, storage, or the wall clock.
-Rendering consumes gameplay state and never owns the rules.
+## Simulation and generation
 
-## Module map
+`src/game/launch/simulation.ts` advances downward ballistic gravity at a fixed
+120 Hz and normal playback speed. Pull direction is reversed at release; pull
+length controls power up to a maximum. Taps and cancelled gestures do not launch.
+Swept contacts resolve in earliest-contact order for bumpers, thorns, boundaries,
+and descending pocket captures. Source-pocket immunity prevents instant recapture.
 
-```text
-App.tsx
-src/
-  app/navigation/RootNavigator.tsx
-  screens/
-    QuiltMapScreen/
-    DailyScrapScreen/
-    DailyReplayScreen/
-    SpikeLevelScreen/
-    ResultsScreen/
-    PaywallScreen/
-    SettingsScreen/
-  game/
-    core/
-      types.ts
-      geometry.ts
-      heightField.ts
-      physics.ts
-      scoring.ts
-      simulation.ts
-    daily/
-      dailyChallenge.ts      # UTC pool, replay envelope, ranking contract
-    levels/
-      schema.ts
-      campaignLevels.ts
-      campaignAccess.ts      # pure sequence + entitlement access policy
-      levelLoader.ts
-      spikeLevel.ts          # Level 1 compatibility exports
-    input/stitchGesture.ts
-    runtime/useGameSession.ts
-    replay/
-      levelReplay.ts
-      spikeReplay.ts         # Level 1 compatibility wrapper
-    tutorial/tutorialFlow.ts
-    rendering/
-    feedback/
-  store/
-    useGameStore.ts
-    usePreferencesStore.ts
-    useCampaignProgressStore.ts
-    useDailyChallengeStore.ts
-    useEntitlementStore.ts
-  services/
-    dailyChallenges/
-      DailyChallengeService.ts
-      LocalDailyChallengeService.ts
-      FirebaseDailyChallengeService.ts
-    entitlements/
-      EntitlementService.ts
-      MockEntitlementService.ts
-      RevenueCatEntitlementService.ts
-      createEntitlementService.ts
-  accessibility/
-  components/
-  theme/
-functions/
-  src/                        # trusted replay validation + best transaction
-firestore.rules
-firestore.indexes.json
-```
+`endless.ts` owns the seed, generation window, camera, and score. `challenges.ts`
+selects compatible authored layouts from `flightPatterns.ts` and `bankPatterns.ts`
+using index-addressed randomness. `ChallengePattern` declares its family, band,
+entry/exit ranges, receiver, and owned obstacles. Mirrors are exact reflections;
+there is no random coordinate jitter or runtime trajectory search. The ordering
+grammar keeps adjacent geometry compatible and avoids repeated families.
 
-## Coordinates and level catalog
+The generator considers the full moving-receiver exit range before selecting a
+successor, rather than relocating future geometry after a catch. It generates
+five pockets ahead and retains two recent challenges plus the occupied source.
+Obstacle ownership bounds retention independently of camera movement. Every exit
+range has a wide recovery connector.
 
-Authored and persisted gameplay inputs use canonical fabric coordinates. The
-current portrait fabric spans `(0, 0)` to `(1, 1.5)`: `x` increases right, `y`
-increases down, and positive height rises out of the cloth. Screen pixels,
-density, and safe-area offsets never enter level or replay data.
+`launchInput.ts` shares the exact gesture clamp with the authoring tests.
+Completing inputs, phase searches, tolerance grids, and route-search utilities
+live under `testing/` and `__tests__/`; the application does not import them.
 
-`LevelDefinition` owns every deterministic run input:
+A caught moving receiver becomes stationary at its captured position. Each catch
+that advances beyond the prior highest pocket adds one point. Skipped pockets
+and repeated lower catches do not add points. Falling off or hitting a thorn
+ends the run permanently; restarting creates a new seed and zero score.
 
-- stable level id, version, campaign order, quilt id, and player-facing copy
-- fabric bounds, height-field resolution, and base slope
-- traveler and goal geometry
-- material regions, hazards, bumpers, and optional collectible
-- allowed stitch types, versioned influence radii, stitch limit, thread budget,
-  scoring target, and optional deterministic completion requirements
-- fixed-step physics configuration and canonical reference solution
+## Camera, gestures, and rendering
 
-`validateCampaignCatalog` validates all three quilts and all 15 levels when
-`campaignLevels.ts` loads. It checks stable identities, contiguous ordering,
-quilt references, in-bounds geometry, supported types, object-id uniqueness,
-physics values, canonical thread costs, stitch limits, budgets, and reference
-solutions. See [`LEVEL_FORMAT.md`](LEVEL_FORMAT.md) for the authoring contract.
+The logical viewport is 360 × 600, scaled uniformly. World y can become negative
+as the player climbs. A monotonic camera follows ascent and determines the
+bottom death boundary; it freezes while the player aims.
 
-`levelLoader.ts` is the only runtime construction boundary. It performs strict
-catalog lookup, creates the immutable base height field, reapplies committed
-stitches and an optional preview, and attaches the level's materials, hazards,
-bumpers, collectible, goal, and physics configuration.
+The fabric canvas fills the screen behind a floating score and controls. A
+shared projection scales the world uniformly and anchors its floor above the
+home indicator, revealing more upcoming pockets on tall screens. World entities
+translate by negative camera y. Input subtracts the projection offsets, divides
+by its scale, then adds camera y. Resizing cancels active pulls. Pull clamping
+retains zero and never reverses a gesture at an edge.
 
-## Height field and deformation
+`useLaunchSession` owns mutable physics state and frame accumulation. Shared
+values carry traveler position, pull, tick, impacts, and camera movement to Skia;
+React receives coarse events and geometry changes. Pause, navigation blur, and
+backgrounding cancel active pulls, freeze simulation, and discard elapsed
+background time.
 
-The cloth remains a small deterministic height field rather than a soft-body
-simulation. Every sample has immutable base height plus rebuildable current
-height and planar offsets.
+## Local persistence
 
-- A pinch stitch adds a smooth bounded ridge around its segment and pulls
-  nearby samples toward the segment midpoint.
-- A pocket stitch applies a bounded radial depression and inward pull around
-  its authored stitch geometry.
+`useEndlessProgressStore` stores only `{ bestPockets }` under
+`pullthread.endless-progress.v1`, version 1. Values must be nonnegative safe
+integers. Hydration merges maxima, and serialized writes prevent an older score
+from overwriting a newer one. A failed read does not establish a zero durable
+best: play continues in memory without overwriting the unknown saved record.
+A successfully read corrupt value is sanitized safely.
 
-Every planning edit rebuilds from base plus the ordered committed stitches.
-Undo and Reset never attempt inverse deformation, avoiding accumulated mesh
-drift. Planning preview, visible grid displacement, route prediction, live
-simulation, and replay all consume the same reconstructed surface.
+`usePreferencesStore` retains the existing `pullthread.preferences` key for
+sound, haptics, reduced motion, high contrast, and tutorial hints. The current
+run is not persisted. Starting a new run or cold-launching resets its score,
+while the durable best and preferences remain.
 
-## Fixed-step physics and world mechanics
+## Verification and historical references
 
-The runtime accumulates real frame time but advances the core only in the
-level's fixed timestep, with bounded frame delta and maximum substeps. Traveler
-position, velocity, prior position, elapsed ticks, stuck count, collected patch,
-and terminal outcome are deterministic simulation state.
+Use deterministic simulation/generation tests, lifecycle and store tests,
+production bundle export, browser interaction checks, and a signed-device pass.
+A browser or unsigned native build does not establish physical touch, haptic,
+audio, or lifecycle quality. Dated evidence lives in
+[ENDLESS_SMOKE_TEST.md](ENDLESS_SMOKE_TEST.md).
 
-One fixed step:
-
-1. Bilinearly samples surface height and gradient.
-2. Applies downhill acceleration.
-3. Applies friction from the first material region containing the traveler.
-4. Integrates velocity and position with speed bounds.
-5. Resolves swept circular bumper collisions in stable authored order; elastic
-   fabric strengthens the bounded bounce response.
-6. Uses swept checks for collectible, goal, and hazard intersections so a fast
-   traveler cannot skip a small circle between frames.
-7. Terminates on goal success, hazard contact, out-of-bounds travel, sustained
-   low speed away from the goal, or maximum simulated time.
-
-Felt increases friction, silk reduces it, and elastic retains base friction
-while modifying bumper response. Collecting a patch records its stable id but
-does not itself end the run. Holes and thorns produce the same deterministic
-`hazard` failure class with the authored hazard id retained for diagnosis.
-
-High-frequency traveler coordinates stay in the runtime/Reanimated boundary
-instead of entering React or Zustand on every tick. The gameplay store receives
-only committed input, phase changes, outcomes, and completed-run summaries.
-
-## Session, navigation, and persistence
-
-`useGameStore` owns the active level id, planning/running/terminal phase,
-committed stitches, outcome, and latest successful replay/score snapshot.
-Entering a level calls `startLevel(levelId)` and resets transient state while
-loading that level's durable best metrics.
-
-Control semantics remain explicit:
-
-- **Undo:** remove the latest planning stitch.
-- **Reset:** clear stitches and restore canonical planning state.
-- **Release:** freeze editing and start the fixed-step traveler.
-- **Retry:** return to planning while retaining committed stitches.
-- **Results:** expose only a successful captured run.
-- **Map:** return to the campaign without changing recorded progress.
-
-`usePreferencesStore` persists feedback/accessibility settings and tutorial
-completion. `useCampaignProgressStore` separately persists a versioned
-`progressByLevel` record containing completion and the merged best scored run.
-`useEntitlementStore` persists the last verified Full Atelier result, service
-source, and verification time. All three use fail-soft AsyncStorage adapters:
-gameplay remains available if storage fails, but in-memory state must not be
-reported as durable.
-
-`App.tsx` awaits explicit hydration of all three local stores before rendering
-navigation. This prevents a clean-map or premium-lock flash before saved state
-is known. RevenueCat initialization begins only after local hydration and is
-not awaited by navigation, so a slow or unavailable network cannot hold the
-campaign on its loading screen. Sanitization treats stored data as untrusted,
-drops malformed values, and accepts supported legacy campaign fields through
-the migration path.
-
-The pure `campaignAccess.ts` policy derives one of four states from catalog
-order, durable progress, and the effective entitlement:
-
-- `completed`: recorded completion and, for premium levels, Full Atelier access
-- `current`: Level 1 or the next incomplete level, with any required entitlement
-- `sequence-locked`: the predecessor is incomplete
-- `premium-locked`: Level 7–15 lacks Full Atelier; the node remains
-  paywall-routable but cannot start gameplay
-
-Premium entitlement is required even to replay a completed premium level.
-After purchase, the same pure policy re-evaluates predecessor completion, so a
-purchase cannot skip Levels 1–6 or any later sequence step. No separate mutable
-unlock list is stored, keeping completion, entitlement, and visible access from
-drifting apart.
-
-The Quilt Map, Results `Next Level`, and `SpikeLevelScreen` direct-route guard
-all use this policy. A locked premium route is replaced by Paywall; an entitled
-but out-of-sequence route returns to the map. This makes the access boundary a
-gameplay invariant rather than a cosmetic map state.
-
-## Daily Scrap boundary
-
-Daily Scrap derives `YYYY-MM-DD` from UTC and selects the append-only template
-pool whose finite `effectiveFrom` through `effectiveThrough` range covers that
-day. Ranges are contiguous and immutable. The next pool must ship in both app
-and Functions before its future activation date; a build beyond its last known
-range fails closed with an update-required state instead of extending a
-superseded pool offline. FNV-1a hashes the pool version and date into an unsigned
-seed; the seed indexes an explicit list of the six free catalog templates. The
-challenge identity includes date, pool, template, template version, and level
-version so content changes cannot silently reuse a prior identity.
-
-`DailyReplayV1` wraps `LevelReplayV1` with challenge id/date and seed. Parsing
-treats persisted, remote, and callable input as untrusted. Metrics are not
-accepted from a submitter: both mobile and backend reconstruct the catalog
-world, run the same fixed-step simulation to success, and derive thread,
-stitches, time, and patch state. Daily comparison ignores campaign thimbles and
-orders thread, stitches, then time ascending.
-
-`useGameStore` carries an explicit campaign-or-Daily session. Both sessions
-reuse level input/render/runtime, but successful resolution branches before
-persistence. Campaign calls `recordRun`; Daily calls the lazily hydrated Daily
-store and never mutates campaign progress. Results hides thimbles/Next Level for
-Daily, and Daily replay playback remains presentation-only.
-
-`LocalDailyChallengeService` is authoritative for device availability. It
-persists a generated non-secret guest label, one best per challenge, attempt
-counts, and only the best pending upload. Writes fail soft in process. Firebase
-mode decorates that service: local submission completes first, then the adapter
-lazily initializes the public Firebase client and Anonymous Auth. No Firebase
-operation participates in `App.tsx` hydration or Quilt Map navigation.
-
-Firestore stores public challenge descriptors and one run at
-`daily_challenges/{challengeId}/runs/{uid}`. Security rules permit bounded
-reads, safe owner profile edits, and no direct challenge/run writes. The
-authenticated `submitDailyRun` callable bounds the JSON, reconstructs the
-canonical challenge, validates/re-simulates the compact replay, and uses an
-Admin SDK transaction to retain the incumbent on tied/worse submissions. Admin
-SDK writes add `recordedAt`, which is the trusted fourth ordering key for the
-bounded top-50 query; client `createdAt` never controls the cutoff. Exact
-committed retries return the incumbent without another guard write. Admin
-credentials exist only in the function runtime. The dedicated project, web app,
-Firestore database, rules, and indexes are provisioned; Anonymous Auth and the
-callable remain inactive. [`FIREBASE_DAILY_SCRAP.md`](FIREBASE_DAILY_SCRAP.md)
-records the remaining activation boundary.
-
-## Full Atelier service and offline boundary
-
-`EntitlementService` is the platform-neutral purchase contract. The stable
-identifiers are:
-
-```text
-RevenueCat entitlement: full_atelier
-store product:          pullthread_full_game
-```
-
-The implementations are intentionally small:
-
-- `MockEntitlementService` starts locked and provides deterministic offer,
-  purchase, cancellation/error injection, restore, and debug state for tests
-  and development.
-- `RevenueCatEntitlementService` configures the process-wide SDK once, reads
-  active `CustomerInfo`, selects the product from the current offering,
-  rejects subscription and ambiguous metadata that contradicts the one-time
-  unlock, accepts the native Android bridge's non-subscription INAPP mapping,
-  rejects Apple consumables, normalizes purchase cancellation/errors, restores
-  only after an explicit user action, and subscribes to customer-info updates.
-- The factory selects `auto`, `mock`, or `revenuecat` from public Expo
-  environment configuration. Missing production configuration resolves to an
-  unavailable locked service, and production also rejects explicit mock mode;
-  it never grants access by default.
-
-The entitlement store owns UI-facing status, localized offer data, notices,
-purchase/restore commands, and a development-only override. The override is
-not persisted and is excluded from production UI. Purchase cancellation and
-service errors retain the prior entitlement. A successfully verified purchase
-or restore updates the local cache; an explicit successful restore with no
-purchase records the locked result.
-
-Offline behavior is deliberately asymmetric:
-
-- A previously RevenueCat-verified Full Atelier entitlement is available from
-  the sanitized local cache before SDK refresh finishes.
-- Refresh failure retains that known result and never blocks free gameplay.
-- Development mock state may change access for the current session, but it
-  never replaces a stronger RevenueCat-derived cache record.
-- A new purchase or restore still requires the platform store and RevenueCat
-  transaction path; failure is shown without mutating campaign progress.
-- Offer copy and price are presentation data, not entitlement proof. If no
-  offer is available, purchase is disabled while Restore remains reachable.
-- The development mock and its Maestro flow prove application state handling,
-  not StoreKit, Play Billing, receipt validation, or real offline entitlement.
-
-The custom Paywall communicates a one-time purchase with no subscription,
-lists the nine premium levels and mechanics, and is only reached after player
-intent. Settings exposes Restore Purchases from outside the paywall. Real SDK
-testing requires rebuilding the native development client after adding
-`react-native-purchases`; a JavaScript update inside an older binary is not
-sufficient.
-
-## Scoring and best-run merge
-
-A successful run records integer thread used, stitch count, simulated
-completion milliseconds, and whether its level patch was collected. Scoring
-awards up to three thimbles:
-
-1. reaching the goal
-2. meeting the inclusive target thread usage
-3. collecting the optional patch
-
-Best comparison is deterministic: more thimbles first, then less thread, fewer
-stitches, and shorter simulated time. Exact ties keep the incumbent. Durable
-merge preserves previously earned thread-target and patch achievements even
-when another attempt provides the better comparison metrics.
-
-## Replay boundary
-
-`LevelReplayV1` stores schema version, catalog level id/version, and detached
-canonical stitch inputs. Parsing rejects unknown/stale levels, unsupported or
-disallowed stitch types, non-finite/out-of-bounds points, wrong tension/radius,
-forged thread costs, short drags, duplicate ids, and stitch/thread-limit
-violations.
-
-Planning, live simulation, and Results playback reconstruct the same catalog
-world and run through the same fixed-step transition functions. Results keeps
-playback phase local, so watching a replay cannot call `resolve`, record a
-second score, or alter map progress. `spikeReplay.ts` is a compatibility wrapper
-around the generic replay for existing Level 1 callers and tests; new campaign
-code uses `levelReplay.ts` directly.
-
-## Rendering, feedback, and performance
-
-Skia draws fabric texture and deformed guides, material regions, route, goal,
-hazards, bumpers, collectible, stitches, and traveler from the current level
-and reconstructed world. Pinch and pocket stitches have distinct visual
-language. Text and shapes communicate lock, phase, outcome, material, and patch
-state without relying on color or animation alone.
-
-Performance rules remain:
-
-- rebuild the height field only when level/stitch/preview input changes
-- keep fixed-step traveler updates out of React render cycles
-- reuse bounded buffers and cap visual work before increasing grid density
-- bound frame delta and simulation substeps after stalls
-- keep reduced motion visual-only; it never changes deterministic physics
-- treat browser and simulator performance as diagnostic, not phone evidence
-
-The feedback service applies persisted Sound and Haptics preferences and fails
-silently when an Expo capability is unavailable. High Contrast selects a full
-game palette. OS reduced motion is always honored; the app toggle may add
-reduction but cannot override the OS.
-
-## Remaining service boundaries
-
-Firebase remains outside the campaign dependency graph:
-
-- no Firebase initialization, Auth, Firestore, function, or leaderboard call at
-  app/campaign startup
-- no Firebase dependency for deterministic Daily generation or local bests
-- no account or network requirement for campaign play
-
-The repository contains the Firebase boundary but not a linked/deployed
-Pullthread project. Anonymous Auth, billing, a monitored private-beta deploy,
-native App Check plus callable enforcement, two-user shared standings, and
-offline pending-sync evidence remain external gates. Date, per-guest frequency,
-and function-instance caps reduce preview risk but do not authorize a public
-unenforced callable.
-
-RevenueCat production configuration and real store transactions also remain
-external acceptance gates. The implemented abstraction, mock, UI, persistence,
-and access policy cannot by themselves prove Apple/Google product approval,
-localized offerings, purchase cancellation, restore on a fresh install, or a
-physical-device offline cold launch. Those gates must be recorded separately
-without weakening the working offline catalog.
+Earlier campaign, replay, and backend contracts are retained in
+[the archive](archive/README.md). They describe historical versions and do not
+add routes or service requirements to the current application.
