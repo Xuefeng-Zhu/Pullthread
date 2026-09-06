@@ -11,11 +11,13 @@ import type {
   BumperDefinition,
   CircularHazard,
   CollectibleDefinition,
+  CompletionRequirements,
   FabricRegion,
   FabricType,
   GoalDefinition,
   Point,
   Rect,
+  Stitch,
   TravelerState,
 } from './types';
 
@@ -40,6 +42,8 @@ export interface PhysicsWorld {
   readonly fabricRegions?: readonly FabricRegion[];
   readonly bumpers?: readonly BumperDefinition[];
   readonly collectible?: CollectibleDefinition;
+  readonly stitches?: readonly Stitch[];
+  readonly completionRequirements?: CompletionRequirements;
 }
 
 export const FABRIC_FRICTION_MULTIPLIERS: Readonly<
@@ -211,6 +215,7 @@ export function resolveBumperCollisions(
   traveler: TravelerState,
   bumpers: readonly BumperDefinition[] = [],
   fabricRegions: readonly FabricRegion[] = [],
+  onHit?: (bumper: BumperDefinition) => void,
 ): BumperDefinition | null {
   let firstHit: BumperDefinition | null = null;
 
@@ -230,6 +235,7 @@ export function resolveBumperCollisions(
     }
 
     firstHit ??= bumper;
+    onHit?.(bumper);
     const impactX =
       traveler.previousPosition.x +
       (traveler.position.x - traveler.previousPosition.x) * intersection;

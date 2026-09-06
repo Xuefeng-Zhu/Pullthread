@@ -1,5 +1,8 @@
 import { NavigationContainer } from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import {
+  createNativeStackNavigator,
+  type NativeStackScreenProps,
+} from '@react-navigation/native-stack';
 
 import { useEffectiveReducedMotion } from '../../accessibility/useEffectiveReducedMotion';
 import { PaywallScreen } from '../../screens/PaywallScreen/PaywallScreen';
@@ -26,6 +29,18 @@ export type RootStackParamList = {
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
+type SpikeLevelRouteProps = NativeStackScreenProps<
+  RootStackParamList,
+  'SpikeLevel'
+>;
+
+function SpikeLevelRoute(props: SpikeLevelRouteProps) {
+  const { challengeId, levelId, mode } = props.route.params;
+  const sessionKey = `${mode ?? 'campaign'}:${challengeId ?? ''}:${levelId}`;
+
+  return <SpikeLevelScreen key={sessionKey} {...props} />;
+}
+
 export function RootNavigator() {
   const reducedMotion = useEffectiveReducedMotion();
 
@@ -41,7 +56,7 @@ export function RootNavigator() {
         <Stack.Screen name="QuiltMap" component={QuiltMapScreen} />
         <Stack.Screen name="DailyScrap" component={DailyScrapScreen} />
         <Stack.Screen name="DailyReplay" component={DailyReplayScreen} />
-        <Stack.Screen name="SpikeLevel" component={SpikeLevelScreen} />
+        <Stack.Screen name="SpikeLevel" component={SpikeLevelRoute} />
         <Stack.Screen name="Results" component={ResultsScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="Paywall" component={PaywallScreen} />

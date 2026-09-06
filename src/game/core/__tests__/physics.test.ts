@@ -17,9 +17,10 @@ import {
   createFixedStepClock,
   createSimulation,
   releaseSimulation,
+  resetSimulation,
   stepSimulation,
 } from '../simulation';
-import type { FabricRegion, TravelerState } from '../types';
+import type { FabricRegion, Stitch, TravelerState } from '../types';
 
 const bounds = { x: 0, y: 0, width: 10, height: 10 } as const;
 
@@ -228,6 +229,155 @@ describe('traveler physics', () => {
       reason: 'hazard',
       collectedPatchId: 'hidden-patch',
     });
+  });
+
+  test('gates goal completion on committed stitch requirements without changing legacy worlds', () => {
+    const surface = createHeightField(2, 2, bounds);
+    const pinch: Stitch = {
+      id: 'pinch',
+      type: 'pinch',
+      start: { x: 1, y: 1 },
+      end: { x: 1.5, y: 1 },
+      tension: 1,
+      radius: 0.19,
+      threadCost: 50,
+    };
+    const pocket: Stitch = {
+      ...pinch,
+      id: 'pocket',
+      type: 'pocket',
+      radius: 0.24,
+      threadCost: 20,
+    };
+    const run = (
+      stitches: readonly Stitch[],
+      withRequirements: boolean,
+    ) => {
+      const state = createSimulation({ start: { x: 4, y: 5 }, radius: 0.05 });
+      const world: PhysicsWorld = {
+        surface,
+        bounds,
+        goal: { center: { x: 5, y: 5 }, radius: 0.05, maxEntrySpeed: 2 },
+        hazards: [],
+        stitches,
+        ...(withRequirements
+          ? {
+              completionRequirements: {
+                minimumStitches: 2,
+                minimumThreadUsed: 70,
+                requiredStitchTypes: ['pinch', 'pocket'] as const,
+              },
+            }
+          : {}),
+      };
+      releaseSimulation(state);
+      state.traveler.velocity.x = 1;
+      stepSimulation(
+        state,
+        world,
+        config({ fixedDt: 1, gravityScale: 0, rollingFriction: 0, maxSpeed: 2 }),
+      );
+      return state;
+    };
+
+    expect(run([pinch], true).phase).toBe('running');
+    expect(run([pinch, pocket], true).outcome?.status).toBe('success');
+    expect(run([], false).outcome?.status).toBe('success');
+  });
+
+  test('tracks visited fabrics and bumper hits for route requirements', () => {
+    const surface = createHeightField(2, 2, bounds);
+    const definition = { start: { x: 4, y: 5 }, radius: 0.05 } as const;
+    const run = (includeBumper: boolean) => {
+      const state = createSimulation(definition);
+      const world: PhysicsWorld = {
+        surface,
+        bounds,
+        goal: { center: { x: 4.5, y: 5 }, radius: 0.02, maxEntrySpeed: 1 },
+        hazards: [],
+        fabricRegions: [
+          {
+            id: 'elastic-lane',
+            type: 'elastic',
+            bounds: { x: 4, y: 4, width: 1, height: 2 },
+          },
+        ],
+        bumpers: includeBumper
+          ? [{ id: 'button', center: { x: 4.6, y: 5 }, radius: 0.05 }]
+          : [],
+        completionRequirements: {
+          requiredFabricTypes: ['elastic'],
+          requiredBumperIds: ['button'],
+        },
+      };
+      releaseSimulation(state);
+      state.traveler.velocity.x = 1;
+      stepSimulation(
+        state,
+        world,
+        config({ fixedDt: 0.5, gravityScale: 0, rollingFriction: 0, maxSpeed: 2 }),
+      );
+      return state;
+    };
+
+    const incomplete = run(false);
+    expect(incomplete.phase).toBe('running');
+    expect(incomplete.visitedFabricTypes).toEqual(new Set(['elastic']));
+    expect(incomplete.hitBumperIds).toEqual(new Set());
+
+    const complete = run(true);
+    expect(complete.outcome?.status).toBe('success');
+    expect(complete.visitedFabricTypes).toEqual(new Set(['elastic']));
+    expect(complete.hitBumperIds).toEqual(new Set(['button']));
+
+    resetSimulation(complete, definition);
+    expect(complete.visitedFabricTypes).toEqual(new Set());
+    expect(complete.hitBumperIds).toEqual(new Set());
+    expect(complete.visitedStitchIds).toEqual(new Set());
+  });
+
+  test('does not count an off-course dummy as a visited stitch', () => {
+    const surface = createHeightField(2, 2, bounds);
+    const routeStitch: Stitch = {
+      id: 'route-stitch',
+      type: 'pinch',
+      start: { x: 4.1, y: 5 },
+      end: { x: 4.4, y: 5 },
+      tension: 1,
+      radius: 0.2,
+      threadCost: 30,
+    };
+    const dummyStitch: Stitch = {
+      ...routeStitch,
+      id: 'off-course-dummy',
+      start: { x: 1, y: 1 },
+      end: { x: 1.4, y: 1 },
+      threadCost: 40,
+    };
+    const state = createSimulation({ start: { x: 4, y: 5 }, radius: 0.05 });
+    const world: PhysicsWorld = {
+      surface,
+      bounds,
+      goal: { center: { x: 5, y: 5 }, radius: 0.05, maxEntrySpeed: 2 },
+      hazards: [],
+      stitches: [routeStitch, dummyStitch],
+      completionRequirements: {
+        minimumStitches: 2,
+        minimumThreadUsed: 70,
+        requireEveryStitchVisited: true,
+      },
+    };
+
+    releaseSimulation(state);
+    state.traveler.velocity.x = 1;
+    stepSimulation(
+      state,
+      world,
+      config({ fixedDt: 1, gravityScale: 0, rollingFriction: 0, maxSpeed: 2 }),
+    );
+
+    expect(state.phase).toBe('running');
+    expect(state.visitedStitchIds).toEqual(new Set(['route-stitch']));
   });
 
   test('produces exactly equal state across repeated fixed-step runs', () => {

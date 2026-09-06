@@ -5,6 +5,7 @@ import type {
   BumperDefinition,
   CircularHazard,
   CollectibleDefinition,
+  CompletionRequirements,
   FabricRegion,
   GoalDefinition,
   Rect,
@@ -34,6 +35,11 @@ export interface QuiltDefinition {
   readonly description: string;
 }
 
+export interface StitchInfluenceRadii {
+  readonly pinch: number;
+  readonly pocket: number;
+}
+
 export interface LevelDefinition {
   readonly id: string;
   /** Increment whenever authored geometry or simulation rules change. */
@@ -53,9 +59,11 @@ export interface LevelDefinition {
   readonly bumpers: readonly BumperDefinition[];
   readonly collectible?: CollectibleDefinition;
   readonly allowedStitchTypes: readonly StitchType[];
+  readonly stitchInfluenceRadii: StitchInfluenceRadii;
   readonly maxStitches: number;
   readonly threadBudget: number;
   readonly targetThreadUsage: number;
+  readonly completionRequirements?: CompletionRequirements;
   readonly physicsConfig: PhysicsConfig;
   readonly referenceSolution: readonly Stitch[];
 }
@@ -100,6 +108,19 @@ function assertPositiveInteger(
 ): asserts value is number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
     fail(context, 'must be a positive integer');
+  }
+}
+
+function assertNonNegativeInteger(
+  value: unknown,
+  context: string,
+): asserts value is number {
+  if (
+    typeof value !== 'number' ||
+    !Number.isSafeInteger(value) ||
+    value < 0
+  ) {
+    fail(context, 'must be a non-negative integer');
   }
 }
 
@@ -276,6 +297,141 @@ function assertReferenceSolution(level: LevelDefinition, context: string): void 
   }
 }
 
+function assertUniqueRequirementValues<T extends string>(
+  values: readonly T[] | undefined,
+  context: string,
+): void {
+  if (values === undefined) return;
+  if (!Array.isArray(values)) fail(context, 'must be an array');
+  const unique = new Set(values);
+  if (unique.size !== values.length) fail(context, 'must not contain duplicates');
+}
+
+function assertCompletionRequirements(
+  level: LevelDefinition,
+  context: string,
+): void {
+  const requirements = level.completionRequirements;
+  if (requirements === undefined) return;
+  const requirementsContext = `${context}.completionRequirements`;
+  if (
+    typeof requirements !== 'object' ||
+    requirements === null ||
+    Array.isArray(requirements)
+  ) {
+    fail(requirementsContext, 'must be an object');
+  }
+
+  if (requirements.minimumStitches !== undefined) {
+    assertNonNegativeInteger(
+      requirements.minimumStitches,
+      `${requirementsContext}.minimumStitches`,
+    );
+    if (requirements.minimumStitches > level.maxStitches) {
+      fail(
+        `${requirementsContext}.minimumStitches`,
+        'must not exceed maxStitches',
+      );
+    }
+    if (requirements.minimumStitches > level.referenceSolution.length) {
+      fail(
+        `${requirementsContext}.minimumStitches`,
+        'is not satisfied by the reference solution',
+      );
+    }
+  }
+
+  if (requirements.minimumThreadUsed !== undefined) {
+    assertNonNegativeInteger(
+      requirements.minimumThreadUsed,
+      `${requirementsContext}.minimumThreadUsed`,
+    );
+    if (requirements.minimumThreadUsed > level.threadBudget) {
+      fail(
+        `${requirementsContext}.minimumThreadUsed`,
+        'must not exceed threadBudget',
+      );
+    }
+    if (
+      requirements.minimumThreadUsed >
+      calculateThreadUsed(level.referenceSolution)
+    ) {
+      fail(
+        `${requirementsContext}.minimumThreadUsed`,
+        'is not satisfied by the reference solution',
+      );
+    }
+  }
+
+  if (
+    requirements.requireEveryStitchVisited !== undefined &&
+    typeof requirements.requireEveryStitchVisited !== 'boolean'
+  ) {
+    fail(
+      `${requirementsContext}.requireEveryStitchVisited`,
+      'must be a boolean',
+    );
+  }
+
+  assertUniqueRequirementValues(
+    requirements.requiredStitchTypes,
+    `${requirementsContext}.requiredStitchTypes`,
+  );
+  for (const type of requirements.requiredStitchTypes ?? []) {
+    if (!STITCH_TYPES.includes(type)) {
+      fail(
+        `${requirementsContext}.requiredStitchTypes`,
+        `unsupported stitch type "${String(type)}"`,
+      );
+    }
+    if (!level.allowedStitchTypes.includes(type)) {
+      fail(
+        `${requirementsContext}.requiredStitchTypes`,
+        `stitch type "${type}" is not allowed by the level`,
+      );
+    }
+    if (!level.referenceSolution.some((stitch) => stitch.type === type)) {
+      fail(
+        `${requirementsContext}.requiredStitchTypes`,
+        `stitch type "${type}" is not used by the reference solution`,
+      );
+    }
+  }
+
+  assertUniqueRequirementValues(
+    requirements.requiredFabricTypes,
+    `${requirementsContext}.requiredFabricTypes`,
+  );
+  for (const type of requirements.requiredFabricTypes ?? []) {
+    if (!FABRIC_TYPES.includes(type)) {
+      fail(
+        `${requirementsContext}.requiredFabricTypes`,
+        `unsupported fabric type "${String(type)}"`,
+      );
+    }
+    if (!level.fabricRegions.some((region) => region.type === type)) {
+      fail(
+        `${requirementsContext}.requiredFabricTypes`,
+        `fabric type "${type}" is not authored by the level`,
+      );
+    }
+  }
+
+  assertUniqueRequirementValues(
+    requirements.requiredBumperIds,
+    `${requirementsContext}.requiredBumperIds`,
+  );
+  for (const id of requirements.requiredBumperIds ?? []) {
+    assertStableId(id, `${requirementsContext}.requiredBumperIds`);
+    if (!level.bumpers.some((bumper) => bumper.id === id)) {
+      fail(
+        `${requirementsContext}.requiredBumperIds`,
+        `bumper "${id}" is not authored by the level`,
+      );
+    }
+  }
+}
+
 export function validateQuiltDefinition(
   quilt: QuiltDefinition,
 ): QuiltDefinition {
@@ -365,6 +521,15 @@ export function validateLevelDefinition(level: LevelDefinition): LevelDefinition
     allowed.add(type);
   }
 
+  assertPositive(
+    level.stitchInfluenceRadii.pinch,
+    `${context}.stitchInfluenceRadii.pinch`,
+  );
+  assertPositive(
+    level.stitchInfluenceRadii.pocket,
+    `${context}.stitchInfluenceRadii.pocket`,
+  );
+
   assertPositiveInteger(level.maxStitches, `${context}.maxStitches`);
   assertPositiveInteger(level.threadBudget, `${context}.threadBudget`);
   assertPositiveInteger(level.targetThreadUsage, `${context}.targetThreadUsage`);
@@ -373,6 +538,7 @@ export function validateLevelDefinition(level: LevelDefinition): LevelDefinition
   }
   assertPhysicsConfig(level.physicsConfig, `${context}.physicsConfig`);
   assertReferenceSolution(level, context);
+  assertCompletionRequirements(level, context);
   return level;
 }
 

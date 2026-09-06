@@ -37,6 +37,13 @@ tags:
     id: "quilt-map-screen"
 - scrollUntilVisible:
     element:
+      id: "quilt-chapter-tab-attic-quilt"
+    direction: DOWN
+    timeout: 10000
+- tapOn:
+    id: "quilt-chapter-tab-attic-quilt"
+- scrollUntilVisible:
+    element:
       id: "level-state-attic-07-pocket-catch"
     direction: DOWN
     timeout: 10000
@@ -100,6 +107,13 @@ tags:
 
 - assertVisible:
     id: "quilt-map-screen"
+- scrollUntilVisible:
+    element:
+      id: "quilt-chapter-tab-attic-quilt"
+    direction: UP
+    timeout: 10000
+- tapOn:
+    id: "quilt-chapter-tab-attic-quilt"
 - scrollUntilVisible:
     element:
       id: "level-state-attic-07-pocket-catch"

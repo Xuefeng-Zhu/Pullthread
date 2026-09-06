@@ -16,7 +16,7 @@ playable without an account and its deterministic gameplay remains offline.
 ## Core loop
 
 1. Read the fabric, traveler, goal, hazards, materials, stitch/thread limits,
-   and optional patch.
+   required route conditions, and optional patch.
 2. Drag between two eligible fabric points to place a stitch.
 3. Read the live deformation and predicted route.
 4. Undo, remove, reset, or add another stitch while within the level limits.
@@ -64,6 +64,22 @@ stitches cannot destabilize physics.
 - **Bumpers:** swept circular collisions with authored restitution.
 - **Patches:** optional collectibles retained in the best-run achievement.
 
+### Route requirements and planning limits
+
+Levels require a minimum stitch or thread commitment and can also require
+particular stitch types, travel across named fabric types, or contact with
+authored bumpers before the goal will accept the traveler. Current campaign
+routes also require the traveler to ride every committed stitch, so an
+off-course dummy stitch cannot satisfy a count or thread target. These
+conditions reuse the existing deterministic simulation trace and are shown as
+wrapping `Required` copy in the play screen's Challenge block. They are
+completion rules, not hidden scoring bonuses.
+
+Stitch and thread caps remain planning rules. A rejected drag does not consume
+input: the play screen identifies whether the stitch count or thread budget
+blocked it, shows the full attempted thread total and overage, and announces
+the same feedback to assistive technology.
+
 ## Scoring and replay
 
 A successful level awards:
@@ -89,14 +105,15 @@ The Full Atelier route deliberately changes the direction of travel instead of
 repeating the Bedroom solution. Levels 7–15 send the traveler left, right, up,
 and down; mix horizontal and vertical pinch gestures; reverse the starting
 corner; and turn materials, hazards, pockets, and bumpers into distinct course
-shapes. The named objective is shown on the play screen so each layout's idea
-is legible before the player draws.
+shapes. The named objective and any deterministic route requirements are shown
+as wrapping Challenge copy on the play screen so each layout's idea is legible
+before the player draws.
 
-The tutorial remains Level 1 v1. Campaign Levels 2–15 use redesigned v2
-definitions, while immutable v1 snapshots of Levels 2–6 remain available only
-to the append-only Daily Scrap pool. Version-aware loading therefore keeps
-dated challenge ids, saved Daily replays, and server re-simulation unchanged
-without forcing the campaign to retain its old layouts.
+The tutorial remains attached to Level 1, while the current campaign uses a
+significantly narrower pinch influence radius. Both earlier campaign tunings and
+immutable v1 Daily snapshots remain available for replay. Version-aware loading
+therefore keeps dated challenge ids, saved replays, and server re-simulation
+unchanged without forcing the live campaign to retain its old feel.
 
 Completion unlocks only the next level. Progress is derived from saved
 successful runs; there is no mutable unlock list. Purchasing Full Atelier never

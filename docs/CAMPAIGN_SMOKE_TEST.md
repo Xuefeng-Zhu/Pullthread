@@ -51,13 +51,16 @@ identifiers:
 Start from cleared app storage.
 
 - [ ] Launch reaches `Quilt Journey` / `quilt-map-screen`, not gameplay.
-- [ ] Bedroom, Attic, and Festival sections render in campaign order with five
-      level nodes each.
-- [ ] Level 1 is current/available; Levels 2–15 are visibly locked and cannot
-      be opened.
+- [ ] The horizontal chapter pager starts on Bedroom and shows five level
+      nodes; swipe left to Attic, then Festival, and confirm each chapter snaps
+      fully into place with five nodes and the correct chapter indicator.
+- [ ] Swipe or use the chapter tabs to return to Bedroom. Confirm Level 1 is
+      current/available and Levels 2–5 are locked. Page through Attic and
+      Festival to verify Levels 6–15 are locked and cannot be opened.
 - [ ] The summary starts at zero thimbles and zero patches.
 - [ ] Open `level-node-bedroom-01-first-pull` and confirm the First Pull title,
-      stitch/thread limits, playfield, and controls fit the safe area.
+      wrapping Challenge copy, stitch/thread limits, playfield, and controls
+      fit the safe area without truncation at the largest supported text size.
 - [ ] Complete the three tutorial beats with the authored pinch route and reach
       Results.
 
@@ -111,12 +114,17 @@ AsyncStorage for this gate.
 
 - [ ] Bedroom Levels 1–5 unlock sequentially and teach ridge, boundary redirect,
       felt, hole, and thread-budget behavior.
-- [ ] Completing Level 5 makes Attic Level 6 available.
+- [ ] Completing Level 5 moves the pager directly to Attic and makes Level 6
+      available.
 - [ ] Attic Levels 6–10 unlock sequentially and teach silk, pocket, mixed
       felt/silk, two-stitch planning, and the hidden patch.
-- [ ] Completing Level 10 makes Festival Level 11 available.
+- [ ] Completing Level 10 moves the pager directly to Festival and makes Level
+      11 available.
 - [ ] Festival Levels 11–15 unlock sequentially and exercise thorn, elastic,
       pinch-plus-pocket, a tight stitch limit, and the combined finale.
+- [ ] Every authored `Required` route condition appears in the Challenge block;
+      a direct route that skips one remains incomplete, while the reference
+      route satisfies all of them.
 - [ ] Every level can fail, Retry, return to planning, and succeed without stale
       geometry, route, outcome, or active-level data from the previous level.
 - [ ] Completing Level 15 leaves all 15 nodes completed after a cold relaunch.
@@ -142,8 +150,10 @@ Festival:
       rather than a pinch ridge.
 - [ ] Levels 13 and 15 expose both `stitch-type-pinch` and
       `stitch-type-pocket`; changing the selection affects only new stitches.
-- [ ] Stitch-count and thread-budget limits reject excess input without
-      consuming hidden state.
+- [ ] A stitch-count rejection leaves the plan unchanged, says which limit was
+      reached, and announces the same message to assistive technology.
+- [ ] A thread-budget rejection leaves the plan unchanged and shows the full
+      attempted total and exact overage instead of clamping the HUD to the cap.
 
 Notes:
 

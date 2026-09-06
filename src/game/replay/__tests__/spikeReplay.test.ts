@@ -6,13 +6,18 @@ import {
 } from '../../core/simulation';
 import type { Stitch } from '../../core/types';
 import { createStitch } from '../../input/stitchGesture';
-import { getCampaignLevel } from '../../levels/levelLoader';
+import {
+  createLevelSimulation,
+  createLevelWorld,
+  getCampaignLevel,
+  getLevelVersion,
+} from '../../levels/levelLoader';
+import type { LevelDefinition } from '../../levels/schema';
 import {
   createSpikeSimulation,
   createSpikeWorld,
   REFERENCE_PINCH_STITCH,
   SPIKE_LEVEL,
-  SPIKE_PHYSICS_CONFIG,
 } from '../../levels/spikeLevel';
 import { createLevelReplay, parseLevelReplay } from '../levelReplay';
 import {
@@ -24,14 +29,24 @@ import {
   SPIKE_REPLAY_SCHEMA_VERSION,
 } from '../spikeReplay';
 
-function directRun(stitches: readonly Stitch[], sampleEveryTicks = 8) {
-  const simulation = createSpikeSimulation();
-  const world = createSpikeWorld(stitches);
+function directRun(
+  stitches: readonly Stitch[],
+  sampleEveryTicks = 8,
+  level: LevelDefinition = SPIKE_LEVEL,
+) {
+  const simulation =
+    level === SPIKE_LEVEL
+      ? createSpikeSimulation()
+      : createLevelSimulation(level);
+  const world =
+    level === SPIKE_LEVEL
+      ? createSpikeWorld(stitches)
+      : createLevelWorld(level, stitches);
   const points = [{ ...simulation.traveler.position }];
 
   releaseSimulation(simulation);
   while (simulation.phase === 'running') {
-    stepSimulation(simulation, world, SPIKE_PHYSICS_CONFIG);
+    stepSimulation(simulation, world, level.physicsConfig);
     if (
       simulation.tick % sampleEveryTicks === 0 ||
       simulation.phase !== 'running'
@@ -62,7 +77,7 @@ function legacyReplayObject(
   return {
     schemaVersion: SPIKE_REPLAY_SCHEMA_VERSION,
     levelId: 'technical-spike',
-    levelVersion: SPIKE_LEVEL.version,
+    levelVersion: 1,
     stitches,
   };
 }
@@ -106,8 +121,11 @@ describe('spike replay records', () => {
   test('parses legacy technical-spike records into canonical Level 1 records', () => {
     const legacy = legacyReplayObject();
     const parsed = parseSpikeReplay(legacy);
+    const legacyLevel = getLevelVersion(SPIKE_LEVEL.id, 1);
 
-    expect(parsed).toEqual(createSpikeReplay([REFERENCE_PINCH_STITCH]));
+    expect(parsed).toEqual(
+      createLevelReplay(legacyLevel, [REFERENCE_PINCH_STITCH]),
+    );
     expect(parsed.levelId).toBe(SPIKE_LEVEL.id);
     expect(Object.isFrozen(parsed)).toBe(true);
     expect(legacy.levelId).toBe('technical-spike');
@@ -122,19 +140,22 @@ describe('spike replay records', () => {
     expect(restored.levelId).toBe(SPIKE_LEVEL.id);
     expect(JSON.parse(serializeSpikeReplay(restored))).toMatchObject({
       levelId: SPIKE_LEVEL.id,
-      levelVersion: SPIKE_LEVEL.version,
+      levelVersion: 1,
     });
   });
 
-  test('simulates legacy records through the current deterministic Level 1 world', () => {
-    const canonical = createSpikeReplay([REFERENCE_PINCH_STITCH]);
-    const legacy = { ...canonical, levelId: 'technical-spike' };
+  test('simulates legacy records through the retained deterministic Level 1 world', () => {
+    const legacyLevel = getLevelVersion(SPIKE_LEVEL.id, 1);
+    const canonical = parseSpikeReplay(
+      createLevelReplay(legacyLevel, [REFERENCE_PINCH_STITCH]),
+    );
+    const legacy = { ...canonical, levelId: 'technical-spike' } as const;
 
     expect(simulateSpikeReplay(legacy)).toEqual(
       simulateSpikeReplay(canonical),
     );
     expect(simulateSpikeReplay(legacy)).toEqual(
-      directRun([REFERENCE_PINCH_STITCH]),
+      directRun([REFERENCE_PINCH_STITCH], 8, legacyLevel),
     );
   });
 
@@ -170,7 +191,7 @@ describe('spike replay records', () => {
     ['non-object replay', null],
     ['unknown schema', { ...replayObject(), schemaVersion: 2 }],
     ['unknown level', { ...replayObject(), levelId: 'other-level' }],
-    ['unknown level version', { ...replayObject(), levelVersion: 2 }],
+    ['unknown level version', { ...replayObject(), levelVersion: 999 }],
     ['non-array stitches', { ...replayObject(), stitches: null }],
     [
       'unsupported stitch type',

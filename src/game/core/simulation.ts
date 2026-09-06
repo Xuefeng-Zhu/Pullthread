@@ -1,9 +1,11 @@
 import type { SurfaceSample } from './heightField';
+import { distancePointToSegmentSquared } from './geometry';
 import {
   DEFAULT_PHYSICS_CONFIG,
   detectCollectible,
   detectGoal,
   detectHazard,
+  fabricRegionAtPoint,
   integrateTraveler,
   resolveBumperCollisions,
   travelerInsideBounds,
@@ -11,7 +13,9 @@ import {
   type PhysicsConfig,
   type PhysicsWorld,
 } from './physics';
+import { calculateThreadUsed } from './scoring';
 import type {
+  FabricType,
   SimulationOutcome,
   SimulationPhase,
   TravelerDefinition,
@@ -24,6 +28,9 @@ export interface SimulationState {
   tick: number;
   lowSpeedTicks: number;
   collectedPatchId: string | null;
+  readonly visitedFabricTypes: Set<FabricType>;
+  readonly hitBumperIds: Set<string>;
+  readonly visitedStitchIds: Set<string>;
   outcome: SimulationOutcome | null;
   readonly scratchSurfaceSample: SurfaceSample;
 }
@@ -60,6 +67,9 @@ export function createSimulation(
     tick: 0,
     lowSpeedTicks: 0,
     collectedPatchId: null,
+    visitedFabricTypes: new Set<FabricType>(),
+    hitBumperIds: new Set<string>(),
+    visitedStitchIds: new Set<string>(),
     outcome: null,
     scratchSurfaceSample: { height: 0, gradientX: 0, gradientY: 0 },
   };
@@ -73,6 +83,9 @@ export function releaseSimulation(state: SimulationState): void {
   state.tick = 0;
   state.lowSpeedTicks = 0;
   state.collectedPatchId = null;
+  state.visitedFabricTypes.clear();
+  state.hitBumperIds.clear();
+  state.visitedStitchIds.clear();
   state.outcome = null;
   state.traveler.previousPosition.x = state.traveler.position.x;
   state.traveler.previousPosition.y = state.traveler.position.y;
@@ -91,6 +104,9 @@ export function resetSimulation(
   state.tick = 0;
   state.lowSpeedTicks = 0;
   state.collectedPatchId = null;
+  state.visitedFabricTypes.clear();
+  state.hitBumperIds.clear();
+  state.visitedStitchIds.clear();
   state.outcome = null;
   state.traveler.position.x = definition.start.x;
   state.traveler.position.y = definition.start.y;
@@ -125,6 +141,90 @@ function collectedPatchResult(
     : {};
 }
 
+function recordCurrentFabric(
+  state: SimulationState,
+  world: PhysicsWorld,
+): void {
+  const region = fabricRegionAtPoint(
+    state.traveler.position,
+    world.fabricRegions,
+  );
+  if (region) state.visitedFabricTypes.add(region.type);
+}
+
+function recordVisitedStitches(
+  state: SimulationState,
+  world: PhysicsWorld,
+): void {
+  for (const stitch of world.stitches ?? []) {
+    if (state.visitedStitchIds.has(stitch.id)) continue;
+    const visitRadius = stitch.radius + state.traveler.radius;
+    const distanceSquared = distancePointToSegmentSquared(
+      state.traveler.position.x,
+      state.traveler.position.y,
+      stitch.start.x,
+      stitch.start.y,
+      stitch.end.x,
+      stitch.end.y,
+    );
+    if (distanceSquared <= visitRadius * visitRadius) {
+      state.visitedStitchIds.add(stitch.id);
+    }
+  }
+}
+
+function completionRequirementsMet(
+  state: SimulationState,
+  world: PhysicsWorld,
+): boolean {
+  const requirements = world.completionRequirements;
+  if (!requirements) return true;
+
+  const stitches = world.stitches ?? [];
+  if (
+    requirements.minimumStitches !== undefined &&
+    stitches.length < requirements.minimumStitches
+  ) {
+    return false;
+  }
+  if (
+    requirements.minimumThreadUsed !== undefined &&
+    calculateThreadUsed(stitches) < requirements.minimumThreadUsed
+  ) {
+    return false;
+  }
+  if (
+    requirements.requiredStitchTypes?.some(
+      (requiredType) =>
+        !stitches.some((stitch) => stitch.type === requiredType),
+    )
+  ) {
+    return false;
+  }
+  if (
+    requirements.requiredFabricTypes?.some(
+      (requiredType) => !state.visitedFabricTypes.has(requiredType),
+    )
+  ) {
+    return false;
+  }
+  if (
+    requirements.requiredBumperIds?.some(
+      (requiredId) => !state.hitBumperIds.has(requiredId),
+    )
+  ) {
+    return false;
+  }
+  if (
+    requirements.requireEveryStitchVisited &&
+    stitches.some((stitch) => !state.visitedStitchIds.has(stitch.id))
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 export function stepSimulation(
   state: SimulationState,
   world: PhysicsWorld,
@@ -134,6 +234,8 @@ export function stepSimulation(
     return;
   }
 
+  recordCurrentFabric(state, world);
+  recordVisitedStitches(state, world);
   integrateTraveler(
     state.traveler,
     world.surface,
@@ -145,7 +247,10 @@ export function stepSimulation(
     state.traveler,
     world.bumpers,
     world.fabricRegions,
+    (bumper) => state.hitBumperIds.add(bumper.id),
   );
+  recordCurrentFabric(state, world);
+  recordVisitedStitches(state, world);
   state.tick += 1;
 
   if (!state.collectedPatchId) {
@@ -187,7 +292,10 @@ export function stepSimulation(
     return;
   }
 
-  if (detectGoal(state.traveler, world.goal)) {
+  if (
+    detectGoal(state.traveler, world.goal) &&
+    completionRequirementsMet(state, world)
+  ) {
     finish(state, {
       status: 'success',
       tick: state.tick,

@@ -65,6 +65,13 @@ function completedThrough(order: number): Record<string, CampaignLevelProgress> 
   );
 }
 
+async function showChapter(
+  view: Awaited<ReturnType<typeof render>>,
+  quiltId: string,
+) {
+  await fireEvent.press(view.getByTestId(`quilt-chapter-tab-${quiltId}`));
+}
+
 describe('QuiltMapScreen', () => {
   beforeEach(() => {
     resetGameStoreForTests();
@@ -75,17 +82,33 @@ describe('QuiltMapScreen', () => {
     jest.clearAllMocks();
   });
 
-  test('renders all three quilts and all fifteen campaign levels', async () => {
+  test('renders all three quilts and all fifteen levels one chapter at a time', async () => {
     const nav = navigation();
     const view = await render(<QuiltMapScreen navigation={nav.value} />);
 
     expect(view.getByTestId('quilt-map-screen')).toBeTruthy();
-    for (const quilt of CAMPAIGN_QUILTS) {
+    expect(view.getByTestId('quilt-chapter-pager').props.horizontal).toBe(true);
+    expect(view.getByTestId('quilt-chapter-pager').props.pagingEnabled).toBe(
+      true,
+    );
+    expect(
+      view.getByTestId('quilt-chapter-pager').props.onScrollEndDrag,
+    ).toBeUndefined();
+    for (const [index, quilt] of CAMPAIGN_QUILTS.entries()) {
+      await showChapter(view, quilt.id);
       expect(view.getByTestId(`quilt-section-${quilt.id}`)).toBeTruthy();
-      expect(view.getByText(quilt.name)).toBeTruthy();
-    }
-    for (const level of CAMPAIGN_LEVELS) {
-      expect(view.getByTestId(`level-node-${level.id}`)).toBeTruthy();
+      expect(
+        view.getByTestId(`quilt-chapter-tab-${quilt.id}`).props
+          .accessibilityState,
+      ).toEqual({ selected: true });
+      expect(view.getByTestId('quilt-page-status').props.accessibilityLabel).toBe(
+        `${quilt.name}, chapter ${index + 1} of ${CAMPAIGN_QUILTS.length}`,
+      );
+      for (const level of CAMPAIGN_LEVELS.filter(
+        (candidate) => candidate.quiltId === quilt.id,
+      )) {
+        expect(view.getByTestId(`level-node-${level.id}`)).toBeTruthy();
+      }
     }
     expect(view.getByTestId('quilt-thimble-total').props.children).toEqual([
       0,
@@ -97,6 +120,90 @@ describe('QuiltMapScreen', () => {
       ' / ',
       2,
     ]);
+  });
+
+  test('switches chapters by horizontal swipe and preserves paging on resize', async () => {
+    const nav = navigation();
+    const view = await render(<QuiltMapScreen navigation={nav.value} />);
+    const viewport = view.getByTestId('quilt-pager-viewport');
+
+    await fireEvent(viewport, 'layout', {
+      nativeEvent: { layout: { width: 320, height: 600, x: 0, y: 0 } },
+    });
+
+    expect(view.getByTestId('quilt-chapter-pager').props.snapToInterval).toBe(
+      320,
+    );
+    expect(
+      view.getByTestId('quilt-page-bedroom-quilt').props.style,
+    ).toContainEqual({ width: 320 });
+
+    await fireEvent(
+      view.getByTestId('quilt-chapter-pager'),
+      'momentumScrollEnd',
+      {
+        nativeEvent: {
+          contentOffset: { x: 320, y: 0 },
+          layoutMeasurement: { width: 320, height: 600 },
+        },
+      },
+    );
+
+    expect(view.getByTestId('quilt-page-status').props.accessibilityLabel).toBe(
+      'Attic Quilt, chapter 2 of 3',
+    );
+    expect(view.queryByTestId('quilt-page-bedroom-quilt')).toBeNull();
+    expect(
+      view.getByTestId('quilt-page-attic-quilt').props
+        .accessibilityElementsHidden,
+    ).toBe(false);
+    expect(view.getByTestId('quilt-page-attic-quilt').props['aria-hidden']).toBe(
+      false,
+    );
+
+    await fireEvent(viewport, 'layout', {
+      nativeEvent: { layout: { width: 480, height: 600, x: 0, y: 0 } },
+    });
+    expect(view.getByTestId('quilt-chapter-pager').props.snapToInterval).toBe(
+      480,
+    );
+    expect(
+      view.getByTestId('quilt-page-attic-quilt').props.style,
+    ).toContainEqual({ width: 480 });
+  });
+
+  test('opens the chapter containing the first incomplete level', async () => {
+    useCampaignProgressStore.setState({
+      progressByLevel: completedThrough(4),
+    });
+    const nav = navigation();
+    const view = await render(<QuiltMapScreen navigation={nav.value} />);
+
+    expect(view.getByTestId('quilt-page-status').props.accessibilityLabel).toBe(
+      'Bedroom Quilt, chapter 1 of 3',
+    );
+
+    await showChapter(view, 'festival-quilt');
+    await act(async () => {
+      useCampaignProgressStore.setState({
+        progressByLevel: completedThrough(5),
+      });
+    });
+
+    expect(view.getByTestId('quilt-page-status').props.accessibilityLabel).toBe(
+      'Attic Quilt, chapter 2 of 3',
+    );
+
+    await showChapter(view, 'bedroom-quilt');
+    await act(async () => {
+      useCampaignProgressStore.setState({
+        progressByLevel: completedThrough(10),
+      });
+    });
+
+    expect(view.getByTestId('quilt-page-status').props.accessibilityLabel).toBe(
+      'Festival Quilt, chapter 3 of 3',
+    );
   });
 
   test('unlocks only the first incomplete level and blocks locked nodes', async () => {
@@ -160,6 +267,7 @@ describe('QuiltMapScreen', () => {
       ' / ',
       2,
     ]);
+    await showChapter(view, 'attic-quilt');
     expect(
       view.getByTestId(`level-patch-${collectibleLevel.id}`).props.children,
     ).toBe('PATCH FOUND');
@@ -168,6 +276,7 @@ describe('QuiltMapScreen', () => {
         .accessibilityLabel,
     ).toContain('patch found');
 
+    await showChapter(view, 'bedroom-quilt');
     await fireEvent.press(view.getByTestId(`level-node-${secondLevel.id}`));
     expect(nav.navigate).toHaveBeenCalledWith('SpikeLevel', {
       levelId: secondLevel.id,
@@ -283,6 +392,7 @@ describe('QuiltMapScreen', () => {
     const levelSeven = CAMPAIGN_LEVELS[6];
     const nav = navigation();
     const view = await render(<QuiltMapScreen navigation={nav.value} />);
+    await showChapter(view, 'attic-quilt');
 
     expect(view.getByTestId(`level-state-${levelSeven.id}`).props.children).toBe(
       'ATELIER LOCKED',

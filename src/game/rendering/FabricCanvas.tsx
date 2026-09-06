@@ -128,13 +128,19 @@ export function FabricCanvas({
         start: toCanvasPoint(stitch.start, size, level.fabricBounds),
         end: toCanvasPoint(stitch.end, size, level.fabricBounds),
         radius: worldRadiusToPixels(
-          stitch.radius,
+          level.stitchInfluenceRadii[stitch.type],
           size,
           level.fabricBounds,
         ),
         preview: stitch.id === preview?.id,
       })),
-    [level.fabricBounds, preview, size, stitches],
+    [
+      level.fabricBounds,
+      level.stitchInfluenceRadii,
+      preview,
+      size,
+      stitches,
+    ],
   );
   const goalCenter = toCanvasPoint(
     level.goal.center,

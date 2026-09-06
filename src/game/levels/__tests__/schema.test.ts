@@ -59,6 +59,19 @@ describe('campaign level validation', () => {
     ).toThrow('must be between 0 and 1');
   });
 
+  test('rejects non-positive stitch influence radii', () => {
+    expect(() =>
+      validateLevelDefinition(
+        copyLevel({
+          stitchInfluenceRadii: {
+            ...CAMPAIGN_LEVELS[0].stitchInfluenceRadii,
+            pinch: 0,
+          },
+        }),
+      ),
+    ).toThrow('stitchInfluenceRadii.pinch');
+  });
+
   test('rejects forged reference costs and solutions over the budget', () => {
     const reference = CAMPAIGN_LEVELS[0].referenceSolution[0];
     expect(() =>
@@ -93,6 +106,92 @@ describe('campaign level validation', () => {
         }),
       ),
     ).toThrow('must match the player-authored tension');
+  });
+
+  test('accepts valid completion requirements and rejects impossible ones', () => {
+    const reference = CAMPAIGN_LEVELS[0].referenceSolution[0];
+    const withRouteObjects = copyLevel({
+      fabricRegions: [
+        {
+          id: 'felt-lane',
+          type: 'felt',
+          bounds: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 },
+        },
+      ],
+      bumpers: [
+        {
+          id: 'route-button',
+          center: { x: 0.5, y: 0.5 },
+          radius: 0.05,
+        },
+      ],
+      completionRequirements: {
+        minimumStitches: 1,
+        minimumThreadUsed: reference.threadCost,
+        requireEveryStitchVisited: true,
+        requiredStitchTypes: ['pinch'],
+        requiredFabricTypes: ['felt'],
+        requiredBumperIds: ['route-button'],
+      },
+    });
+    expect(() => validateLevelDefinition(withRouteObjects)).not.toThrow();
+
+    expect(() =>
+      validateLevelDefinition(
+        copyLevel({
+          completionRequirements: {
+            minimumStitches: 2,
+          },
+        }),
+      ),
+    ).toThrow('minimumStitches');
+    expect(() =>
+      validateLevelDefinition(
+        copyLevel({
+          completionRequirements: {
+            minimumThreadUsed: reference.threadCost + 1,
+          },
+        }),
+      ),
+    ).toThrow('minimumThreadUsed');
+    expect(() =>
+      validateLevelDefinition(
+        copyLevel({
+          completionRequirements: {
+            requiredStitchTypes: ['pocket'],
+          },
+        }),
+      ),
+    ).toThrow('is not allowed by the level');
+    expect(() =>
+      validateLevelDefinition(
+        copyLevel({
+          completionRequirements: {
+            requiredFabricTypes: ['felt'],
+          },
+        }),
+      ),
+    ).toThrow('is not authored by the level');
+    expect(() =>
+      validateLevelDefinition(
+        copyLevel({
+          completionRequirements: {
+            requiredBumperIds: ['missing-button'],
+          },
+        }),
+      ),
+    ).toThrow('is not authored by the level');
+    expect(() =>
+      validateLevelDefinition(
+        copyLevel({
+          completionRequirements: {
+            requireEveryStitchVisited: 'yes',
+          } as unknown as NonNullable<
+            LevelDefinition['completionRequirements']
+          >,
+        }),
+      ),
+    ).toThrow('requireEveryStitchVisited');
   });
 
   test('rejects duplicate ids, ordering, and unknown quilt references', () => {

@@ -1,8 +1,19 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useEffectiveReducedMotion } from '../../accessibility/useEffectiveReducedMotion';
 import type { RootStackParamList } from '../../app/navigation/RootNavigator';
 import {
   getCampaignLevelAccess,
@@ -69,6 +80,8 @@ const QUILT_TONES: readonly QuiltTone[] = [
   },
 ] as const;
 
+const MAX_CONTENT_WIDTH = 760;
+
 function isLocked(state: CampaignLevelAccessState): boolean {
   return state === 'sequence-locked' || state === 'premium-locked';
 }
@@ -77,6 +90,20 @@ function levelStateLabel(state: CampaignLevelAccessState): string {
   if (state === 'premium-locked') return 'ATELIER LOCKED';
   if (state === 'sequence-locked') return 'LOCKED';
   return state.toUpperCase();
+}
+
+function recommendedQuiltIndex(
+  progressByLevel: Readonly<Record<string, CampaignLevelProgress>>,
+): number {
+  const firstIncompleteLevel = CAMPAIGN_LEVELS.find(
+    (level) => !progressByLevel[level.id],
+  );
+  const targetLevel =
+    firstIncompleteLevel ?? CAMPAIGN_LEVELS[CAMPAIGN_LEVELS.length - 1];
+  const index = CAMPAIGN_QUILTS.findIndex(
+    (quilt) => quilt.id === targetLevel.quiltId,
+  );
+  return Math.max(0, index);
 }
 
 function patchLabel(
@@ -117,6 +144,7 @@ interface LevelNodeProps {
   readonly progress?: CampaignLevelProgress;
   readonly tone: QuiltTone;
   readonly alignRight: boolean;
+  readonly chapterActive: boolean;
   readonly onPress: () => void;
 }
 
@@ -126,6 +154,7 @@ function LevelNode({
   progress,
   tone,
   alignRight,
+  chapterActive,
   onPress,
 }: LevelNodeProps) {
   const { state } = access;
@@ -148,6 +177,7 @@ function LevelNode({
             : 'Opens this level.'
       }
       accessibilityState={{ disabled, selected: state === 'current' }}
+      tabIndex={chapterActive ? 0 : -1}
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
@@ -238,6 +268,7 @@ interface QuiltSectionProps {
   readonly quiltIndex: number;
   readonly progressByLevel: Readonly<Record<string, CampaignLevelProgress>>;
   readonly hasFullGame: boolean;
+  readonly active: boolean;
   readonly onOpenLevel: (
     levelId: string,
     access: CampaignLevelAccess,
@@ -249,6 +280,7 @@ function QuiltSection({
   quiltIndex,
   progressByLevel,
   hasFullGame,
+  active,
   onOpenLevel,
 }: QuiltSectionProps) {
   const tone = QUILT_TONES[quiltIndex % QUILT_TONES.length];
@@ -299,6 +331,7 @@ function QuiltSection({
                 progress={progressByLevel[level.id]}
                 tone={tone}
                 alignRight={sectionIndex % 2 === 1}
+                chapterActive={active}
                 onPress={() => onOpenLevel(level.id, access)}
               />
             </View>
@@ -311,10 +344,23 @@ function QuiltSection({
 
 export function QuiltMapScreen({ navigation }: QuiltMapScreenProps) {
   const startLevel = useGameStore((state) => state.startLevel);
+  const reducedMotion = useEffectiveReducedMotion();
   const hasFullGame = useEntitlementStore(selectHasFullGame);
   const progressByLevel = useCampaignProgressStore(
     (state) => state.progressByLevel,
   );
+  const chapterPagerRef = useRef<ScrollView>(null);
+  const animateNextChapterScrollRef = useRef(false);
+  const suggestedQuiltIndex = recommendedQuiltIndex(progressByLevel);
+  const [chapterSelection, setChapterSelection] = useState<{
+    readonly index: number;
+    readonly suggestedIndex: number;
+  } | null>(null);
+  const activeQuiltIndex =
+    chapterSelection?.suggestedIndex === suggestedQuiltIndex
+      ? chapterSelection.index
+      : suggestedQuiltIndex;
+  const [chapterPageWidth, setChapterPageWidth] = useState(0);
   const collectibleLevels = CAMPAIGN_LEVELS.filter(
     (level) => level.collectible,
   );
@@ -328,6 +374,69 @@ export function QuiltMapScreen({ navigation }: QuiltMapScreenProps) {
     (level) =>
       progressByLevel[level.id]?.bestRun.metrics.collectedPatch === true,
   ).length;
+  const activeQuilt = CAMPAIGN_QUILTS[activeQuiltIndex];
+
+  useEffect(() => {
+    if (chapterPageWidth <= 0) return;
+    const animated = animateNextChapterScrollRef.current && !reducedMotion;
+    animateNextChapterScrollRef.current = false;
+    chapterPagerRef.current?.scrollTo({
+      x: activeQuiltIndex * chapterPageWidth,
+      animated,
+    });
+  }, [activeQuiltIndex, chapterPageWidth, reducedMotion]);
+
+  const showQuilt = (index: number) => {
+    const nextIndex = Math.max(
+      0,
+      Math.min(CAMPAIGN_QUILTS.length - 1, index),
+    );
+    if (nextIndex === activeQuiltIndex) return;
+    animateNextChapterScrollRef.current = true;
+    setChapterSelection({
+      index: nextIndex,
+      suggestedIndex: suggestedQuiltIndex,
+    });
+  };
+
+  const handleChapterLayout = (event: LayoutChangeEvent) => {
+    const nextWidth = Math.round(event.nativeEvent.layout.width);
+    if (nextWidth <= 0) return;
+    setChapterPageWidth((currentWidth) =>
+      currentWidth === nextWidth ? currentWidth : nextWidth,
+    );
+  };
+
+  const handleChapterScrollEnd = (
+    event: NativeSyntheticEvent<NativeScrollEvent>,
+  ) => {
+    const measuredWidth =
+      chapterPageWidth || event.nativeEvent.layoutMeasurement.width;
+    if (measuredWidth <= 0) return;
+    const nextIndex = Math.max(
+      0,
+      Math.min(
+        CAMPAIGN_QUILTS.length - 1,
+        Math.round(event.nativeEvent.contentOffset.x / measuredWidth),
+      ),
+    );
+    if (nextIndex === activeQuiltIndex) return;
+    animateNextChapterScrollRef.current = false;
+    setChapterSelection({
+      index: nextIndex,
+      suggestedIndex: suggestedQuiltIndex,
+    });
+  };
+
+  const openLevel = (levelId: string, access: CampaignLevelAccess) => {
+    if (access.openPaywall) {
+      navigation.navigate('Paywall', { levelId });
+      return;
+    }
+    if (!access.canPlay) return;
+    startLevel(levelId);
+    navigation.navigate('SpikeLevel', { levelId });
+  };
 
   return (
     <SafeAreaView
@@ -416,24 +525,127 @@ export function QuiltMapScreen({ navigation }: QuiltMapScreenProps) {
           </View>
         </View>
 
-        {CAMPAIGN_QUILTS.map((quilt, index) => (
-          <QuiltSection
-            key={quilt.id}
-            quilt={quilt}
-            quiltIndex={index}
-            progressByLevel={progressByLevel}
-            hasFullGame={hasFullGame}
-            onOpenLevel={(levelId, access) => {
-              if (access.openPaywall) {
-                navigation.navigate('Paywall', { levelId });
-                return;
-              }
-              if (!access.canPlay) return;
-              startLevel(levelId);
-              navigation.navigate('SpikeLevel', { levelId });
-            }}
-          />
-        ))}
+        <View style={styles.chapterCarousel}>
+          <View style={styles.chapterSwitcher}>
+            <View style={styles.chapterSwitcherCopy}>
+              <Text style={styles.chapterEyebrow}>QUILT CHAPTERS</Text>
+              <Text
+                testID="quilt-page-status"
+                accessibilityLiveRegion="polite"
+                accessibilityLabel={`${activeQuilt.name}, chapter ${activeQuiltIndex + 1} of ${CAMPAIGN_QUILTS.length}`}
+                style={styles.chapterStatus}
+              >
+                {activeQuiltIndex + 1} / {CAMPAIGN_QUILTS.length} ·{' '}
+                {activeQuilt.name}
+              </Text>
+            </View>
+            <View
+              accessibilityRole="tablist"
+              accessibilityLabel="Quilt chapters"
+              style={styles.chapterTabs}
+            >
+              {CAMPAIGN_QUILTS.map((quilt, index) => {
+                const selected = index === activeQuiltIndex;
+                const tone = QUILT_TONES[index % QUILT_TONES.length];
+                return (
+                  <Pressable
+                    key={quilt.id}
+                    testID={`quilt-chapter-tab-${quilt.id}`}
+                    accessibilityRole="tab"
+                    accessibilityLabel={`Show ${quilt.name}`}
+                    accessibilityHint={`Shows chapter ${index + 1} of ${CAMPAIGN_QUILTS.length}. You can also swipe left or right.`}
+                    accessibilityState={{ selected }}
+                    aria-selected={selected}
+                    onPress={() => showQuilt(index)}
+                    style={({ pressed }) => [
+                      styles.chapterTab,
+                      selected && {
+                        backgroundColor: tone.accent,
+                        borderColor: tone.accent,
+                      },
+                      pressed && styles.chapterTabPressed,
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.chapterTabDot,
+                        { backgroundColor: selected ? '#FFF9EA' : tone.accent },
+                      ]}
+                    />
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        styles.chapterTabLabel,
+                        selected && styles.chapterTabLabelSelected,
+                      ]}
+                    >
+                      {quilt.name.replace(' Quilt', '')}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={styles.swipeHint}>
+              <Ionicons name="arrow-back" size={14} color="#705B5D" />
+              <Text style={styles.swipeHintText}>
+                Swipe left or right to switch chapters
+              </Text>
+              <Ionicons name="arrow-forward" size={14} color="#705B5D" />
+            </View>
+          </View>
+
+          <View
+            testID="quilt-pager-viewport"
+            onLayout={handleChapterLayout}
+            style={styles.quiltPagerViewport}
+          >
+            <ScrollView
+              ref={chapterPagerRef}
+              testID="quilt-chapter-pager"
+              horizontal
+              pagingEnabled
+              nestedScrollEnabled
+              directionalLockEnabled
+              bounces={false}
+              alwaysBounceHorizontal={false}
+              showsHorizontalScrollIndicator={false}
+              disableIntervalMomentum
+              decelerationRate="fast"
+              snapToInterval={chapterPageWidth || undefined}
+              onMomentumScrollEnd={handleChapterScrollEnd}
+              style={styles.quiltPager}
+              contentContainerStyle={styles.quiltPagerContent}
+            >
+              {CAMPAIGN_QUILTS.map((quilt, index) => {
+                const active = index === activeQuiltIndex;
+                return (
+                  <View
+                    key={quilt.id}
+                    testID={`quilt-page-${quilt.id}`}
+                    aria-hidden={!active}
+                    accessibilityElementsHidden={!active}
+                    importantForAccessibility={
+                      active ? 'auto' : 'no-hide-descendants'
+                    }
+                    style={[
+                      styles.quiltPage,
+                      chapterPageWidth > 0 && { width: chapterPageWidth },
+                    ]}
+                  >
+                    <QuiltSection
+                      quilt={quilt}
+                      quiltIndex={index}
+                      progressByLevel={progressByLevel}
+                      hasFullGame={hasFullGame}
+                      active={active}
+                      onOpenLevel={openLevel}
+                    />
+                  </View>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -446,7 +658,7 @@ const styles = StyleSheet.create({
   },
   content: {
     width: '100%',
-    maxWidth: 760,
+    maxWidth: MAX_CONTENT_WIDTH,
     alignSelf: 'center',
     gap: spacing.lg,
     paddingHorizontal: spacing.md,
@@ -581,6 +793,101 @@ const styles = StyleSheet.create({
     fontSize: 18,
     lineHeight: 22,
     fontVariant: ['tabular-nums'],
+  },
+  chapterCarousel: {
+    width: '100%',
+    gap: spacing.sm,
+  },
+  chapterSwitcher: {
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radii.lg,
+    borderWidth: 2,
+    borderColor: '#496574',
+    backgroundColor: '#F8EDDA',
+    ...shadows.soft,
+  },
+  chapterSwitcherCopy: {
+    alignItems: 'center',
+  },
+  chapterEyebrow: {
+    color: '#705B5D',
+    fontFamily: 'NunitoSans_800ExtraBold',
+    fontSize: 10,
+    lineHeight: 13,
+    letterSpacing: 0.9,
+  },
+  chapterStatus: {
+    marginTop: spacing.xxs,
+    color: '#173746',
+    fontFamily: 'Fraunces_700Bold',
+    fontSize: 18,
+    lineHeight: 23,
+  },
+  chapterTabs: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  chapterTab: {
+    minWidth: 0,
+    minHeight: touchTargets.minimum,
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.pill,
+    borderWidth: 2,
+    borderColor: '#BCA98C',
+    backgroundColor: '#FFF9EA',
+  },
+  chapterTabPressed: {
+    opacity: 0.78,
+  },
+  chapterTabDot: {
+    width: 8,
+    height: 8,
+    flexShrink: 0,
+    borderRadius: radii.pill,
+  },
+  chapterTabLabel: {
+    minWidth: 0,
+    color: '#4F3B24',
+    fontFamily: 'NunitoSans_800ExtraBold',
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  chapterTabLabelSelected: {
+    color: '#FFF9EA',
+  },
+  swipeHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
+  swipeHintText: {
+    color: '#705B5D',
+    fontFamily: 'NunitoSans_700Bold',
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  quiltPagerViewport: {
+    width: '100%',
+    overflow: 'hidden',
+  },
+  quiltPager: {
+    width: '100%',
+    userSelect: 'none',
+  },
+  quiltPagerContent: {
+    alignItems: 'flex-start',
+  },
+  quiltPage: {
+    flexShrink: 0,
+    paddingHorizontal: spacing.xxs,
+    paddingBottom: spacing.sm,
   },
   quiltSection: {
     overflow: 'hidden',

@@ -135,7 +135,8 @@ density, and safe-area offsets never enter level or replay data.
 - fabric bounds, height-field resolution, and base slope
 - traveler and goal geometry
 - material regions, hazards, bumpers, and optional collectible
-- allowed stitch types, stitch limit, thread budget, and scoring target
+- allowed stitch types, versioned influence radii, stitch limit, thread budget,
+  scoring target, and optional deterministic completion requirements
 - fixed-step physics configuration and canonical reference solution
 
 `validateCampaignCatalog` validates all three quilts and all 15 levels when

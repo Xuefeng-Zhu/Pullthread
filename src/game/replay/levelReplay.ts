@@ -177,7 +177,7 @@ function cloneStitch(
   });
 }
 
-/** Validates unknown data against the current catalog and deeply freezes it. */
+/** Validates unknown data against a retained catalog version and deeply freezes it. */
 export function parseLevelReplay(value: unknown): LevelReplayV1 {
   if (!isRecord(value)) {
     throw new TypeError('Replay must be an object.');

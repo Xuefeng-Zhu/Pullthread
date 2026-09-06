@@ -45,6 +45,16 @@ export interface CircularHazard {
 
 export type FabricType = 'felt' | 'silk' | 'elastic';
 
+/** Optional route conditions that must be satisfied before entering the goal. */
+export interface CompletionRequirements {
+  readonly minimumStitches?: number;
+  readonly minimumThreadUsed?: number;
+  readonly requiredStitchTypes?: readonly StitchType[];
+  readonly requiredFabricTypes?: readonly FabricType[];
+  readonly requiredBumperIds?: readonly string[];
+  readonly requireEveryStitchVisited?: boolean;
+}
+
 /** A rectangular material region. The first authored matching region wins. */
 export interface FabricRegion {
   readonly id: string;

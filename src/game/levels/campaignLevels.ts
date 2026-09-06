@@ -3,6 +3,7 @@ import type {
   BumperDefinition,
   CircularHazard,
   CollectibleDefinition,
+  CompletionRequirements,
   FabricRegion,
   GoalDefinition,
   Point,
@@ -11,13 +12,18 @@ import type {
   StitchType,
   TravelerDefinition,
 } from '../core/types';
-import { createStitch } from '../input/stitchGesture';
+import {
+  createStitch,
+  POCKET_STITCH_RADIUS,
+  SPIKE_STITCH_RADIUS,
+} from '../input/stitchGesture';
 import {
   validateCampaignCatalog,
   validateLevelDefinition,
   type BaseSlopeDefinition,
   type LevelDefinition,
   type QuiltDefinition,
+  type StitchInfluenceRadii,
 } from './schema';
 
 const FABRIC_BOUNDS: Rect = Object.freeze({
@@ -52,9 +58,26 @@ export const CAMPAIGN_PHYSICS_CONFIG: PhysicsConfig = Object.freeze({
   stuckSpeed: 0.012,
   stuckTicks: 180,
   maxRunTicks: 2400,
-  maxSubsteps: 8,
+  maxSubsteps: 12,
   maxFrameDelta: 0.1,
 });
+
+const LEGACY_STITCH_INFLUENCE_RADII: StitchInfluenceRadii = Object.freeze({
+  pinch: SPIKE_STITCH_RADIUS,
+  pocket: POCKET_STITCH_RADIUS,
+});
+
+export const FIRST_NARROWING_STITCH_INFLUENCE_RADII: StitchInfluenceRadii =
+  Object.freeze({
+    pinch: 0.185,
+    pocket: 0.225,
+  });
+
+export const CAMPAIGN_STITCH_INFLUENCE_RADII: StitchInfluenceRadii =
+  Object.freeze({
+    pinch: 0.17,
+    pocket: 0.225,
+  });
 
 function point(x: number, y: number): Point {
   return Object.freeze({ x, y });
@@ -150,6 +173,7 @@ interface LevelOptions {
   readonly bumpers?: readonly BumperDefinition[];
   readonly collectible?: CollectibleDefinition;
   readonly allowedStitchTypes?: readonly StitchType[];
+  readonly stitchInfluenceRadii?: StitchInfluenceRadii;
   readonly maxStitches?: number;
   readonly threadBudget?: number;
   readonly targetThreadUsage?: number;
@@ -181,6 +205,8 @@ function level(options: LevelOptions): LevelDefinition {
     allowedStitchTypes: Object.freeze([
       ...(options.allowedStitchTypes ?? ['pinch']),
     ]),
+    stitchInfluenceRadii:
+      options.stitchInfluenceRadii ?? LEGACY_STITCH_INFLUENCE_RADII,
     maxStitches: options.maxStitches ?? options.referenceSolution.length,
     threadBudget: options.threadBudget ?? Math.max(120, referenceThread),
     targetThreadUsage:
@@ -253,6 +279,12 @@ const mixedPull = crossStitch(
   0.08,
   1,
 );
+const narrowMixedPull = crossStitch(
+  'mixed-pull-reference',
+  0.235,
+  0.08,
+  1,
+);
 const combinationTop = pinch(
   'combination-top-reference',
   0.23,
@@ -269,6 +301,12 @@ const patchPull = pinch('patch-pull-reference', 0.77, 1.42, 0.48);
 const thornPull = crossStitch(
   'thorn-pull-reference',
   1.29,
+  0.08,
+  1,
+);
+const narrowThornPull = crossStitch(
+  'thorn-pull-reference',
+  1.285,
   0.08,
   1,
 );
@@ -302,8 +340,13 @@ const finalePocket = pocket(
   point(0.34, 0.44),
   point(0.24, 0.54),
 );
+const narrowFinalePocket = pocket(
+  'finale-pocket-reference',
+  point(0.3525, 0.44),
+  point(0.2525, 0.54),
+);
 
-export const CAMPAIGN_LEVELS: readonly LevelDefinition[] = Object.freeze([
+export const LEGACY_CAMPAIGN_LEVELS_PRE_TUNING: readonly LevelDefinition[] = Object.freeze([
   level({
     id: 'bedroom-01-first-pull',
     order: 1,
@@ -704,6 +747,235 @@ export const CAMPAIGN_LEVELS: readonly LevelDefinition[] = Object.freeze([
       finaleTop.threadCost + finaleBottom.threadCost + finalePocket.threadCost,
   }),
 ]);
+
+export const LEGACY_CAMPAIGN_LEVELS_FIRST_NARROWING: readonly LevelDefinition[] = Object.freeze(
+  LEGACY_CAMPAIGN_LEVELS_PRE_TUNING.map((legacyLevel) =>
+    Object.freeze({
+      ...legacyLevel,
+      version: legacyLevel.version + 1,
+      stitchInfluenceRadii: FIRST_NARROWING_STITCH_INFLUENCE_RADII,
+    }),
+  ),
+);
+
+const CURRENT_REFERENCE_SOLUTIONS: Readonly<
+  Record<string, readonly Stitch[] | undefined>
+> = Object.freeze({
+  'attic-08-felt-and-silk': Object.freeze([narrowMixedPull]),
+  'festival-11-thorn-turn': Object.freeze([narrowThornPull]),
+  'festival-15-finale': Object.freeze([
+    finaleTop,
+    finaleBottom,
+    narrowFinalePocket,
+  ]),
+});
+
+export const LEGACY_CAMPAIGN_LEVELS_SECOND_NARROWING: readonly LevelDefinition[] = Object.freeze(
+  LEGACY_CAMPAIGN_LEVELS_FIRST_NARROWING.map((legacyLevel) =>
+    Object.freeze({
+      ...legacyLevel,
+      version: legacyLevel.version + 1,
+      stitchInfluenceRadii: CAMPAIGN_STITCH_INFLUENCE_RADII,
+      referenceSolution:
+        CURRENT_REFERENCE_SOLUTIONS[legacyLevel.id] ??
+        legacyLevel.referenceSolution,
+    }),
+  ),
+);
+
+interface DifficultyTuning {
+  readonly mechanic: string;
+  readonly goal: Pick<GoalDefinition, 'radius' | 'maxEntrySpeed'>;
+  readonly completionRequirements?: CompletionRequirements;
+  readonly extraHazards?: readonly CircularHazard[];
+}
+
+const DIFFICULTY_TUNINGS: Readonly<Record<string, DifficultyTuning>> =
+  Object.freeze({
+    'bedroom-01-first-pull': Object.freeze({
+      mechanic: 'Guide the button home with one clear ridge',
+      goal: Object.freeze({ radius: 0.065, maxEntrySpeed: 0.6 }),
+      completionRequirements: Object.freeze({
+        minimumThreadUsed: 70,
+        requireEveryStitchVisited: true,
+      }),
+    }),
+    'bedroom-02-edge-redirect': Object.freeze({
+      mechanic: 'Turn sideways through a two-hole gate',
+      goal: Object.freeze({ radius: 0.065, maxEntrySpeed: 0.6 }),
+      completionRequirements: Object.freeze({
+        minimumThreadUsed: 70,
+        requireEveryStitchVisited: true,
+      }),
+      extraHazards: Object.freeze([
+        hazard('edge-gate-upper', 'hole', point(0.14, 0.589), 0.025),
+        hazard('edge-gate-lower', 'hole', point(0.264, 0.489), 0.025),
+      ]),
+    }),
+    'bedroom-03-felt-landing': Object.freeze({
+      mechanic: 'Curve left and let the felt slow your landing',
+      goal: Object.freeze({ radius: 0.075, maxEntrySpeed: 0.42 }),
+      completionRequirements: Object.freeze({
+        minimumThreadUsed: 70,
+        requireEveryStitchVisited: true,
+        requiredFabricTypes: Object.freeze(['felt'] as const),
+      }),
+    }),
+    'bedroom-04-hole-crossing': Object.freeze({
+      mechanic: 'Sweep uphill through a staggered hole gate',
+      goal: Object.freeze({ radius: 0.07, maxEntrySpeed: 0.6 }),
+      completionRequirements: Object.freeze({
+        minimumThreadUsed: 70,
+        requireEveryStitchVisited: true,
+      }),
+      extraHazards: Object.freeze([
+        hazard('crossing-gate-right', 'hole', point(0.275, 1.046), 0.022),
+        hazard('crossing-gate-left', 'hole', point(0.163, 0.93), 0.022),
+      ]),
+    }),
+    'bedroom-05-thread-budget': Object.freeze({
+      mechanic: 'Use 65–86 thread in one measured seam',
+      goal: Object.freeze({ radius: 0.07, maxEntrySpeed: 0.6 }),
+      completionRequirements: Object.freeze({
+        minimumThreadUsed: 65,
+        requireEveryStitchVisited: true,
+      }),
+    }),
+    'attic-06-silk-slide': Object.freeze({
+      mechanic: 'Surf silk through a narrow hole gate',
+      goal: Object.freeze({ radius: 0.07, maxEntrySpeed: 0.65 }),
+      completionRequirements: Object.freeze({
+        minimumThreadUsed: 70,
+        requireEveryStitchVisited: true,
+        requiredFabricTypes: Object.freeze(['silk'] as const),
+      }),
+      extraHazards: Object.freeze([
+        hazard('silk-gate-left', 'hole', point(0.727, 0.461), 0.022),
+        hazard('silk-gate-right', 'hole', point(0.831, 0.569), 0.022),
+      ]),
+    }),
+    'attic-07-pocket-catch': Object.freeze({
+      mechanic: 'Shape one pocket for a soft catch',
+      goal: Object.freeze({ radius: 0.06, maxEntrySpeed: 0.5 }),
+      completionRequirements: Object.freeze({
+        minimumThreadUsed: 15,
+        requireEveryStitchVisited: true,
+      }),
+    }),
+    'attic-08-felt-and-silk': Object.freeze({
+      mechanic: 'Cross silk, then brake on felt',
+      goal: Object.freeze({ radius: 0.07, maxEntrySpeed: 0.4 }),
+      completionRequirements: Object.freeze({
+        minimumThreadUsed: 70,
+        requireEveryStitchVisited: true,
+        requiredFabricTypes: Object.freeze(['silk', 'felt'] as const),
+      }),
+    }),
+    'attic-09-two-stitches': Object.freeze({
+      mechanic: 'Use two ridges and at least 90 thread to switch back uphill',
+      goal: Object.freeze({ radius: 0.07, maxEntrySpeed: 0.9 }),
+      completionRequirements: Object.freeze({
+        minimumStitches: 2,
+        minimumThreadUsed: 90,
+        requireEveryStitchVisited: true,
+      }),
+    }),
+    'attic-10-hidden-patch': Object.freeze({
+      mechanic: 'Reverse through the gate; snag the hidden patch for a bonus',
+      goal: Object.freeze({ radius: 0.06, maxEntrySpeed: 0.6 }),
+      completionRequirements: Object.freeze({
+        minimumThreadUsed: 70,
+        requireEveryStitchVisited: true,
+      }),
+      extraHazards: Object.freeze([
+        hazard('patch-gate-right', 'hole', point(0.53, 1.241), 0.018),
+        hazard('patch-gate-left', 'hole', point(0.43, 1.339), 0.018),
+      ]),
+    }),
+    'festival-11-thorn-turn': Object.freeze({
+      mechanic: 'Slalom between three thorns',
+      goal: Object.freeze({ radius: 0.08, maxEntrySpeed: 0.65 }),
+      completionRequirements: Object.freeze({
+        minimumThreadUsed: 70,
+        requireEveryStitchVisited: true,
+      }),
+      extraHazards: Object.freeze([
+        hazard('slalom-thorn-upper', 'thorn', point(0.272, 1.055), 0.018),
+        hazard('slalom-thorn-lower', 'thorn', point(0.174, 0.941), 0.018),
+      ]),
+    }),
+    'festival-12-elastic-bounce': Object.freeze({
+      mechanic: 'Bank off the festival button inside elastic',
+      goal: Object.freeze({ radius: 0.07, maxEntrySpeed: 0.7 }),
+      completionRequirements: Object.freeze({
+        minimumThreadUsed: 70,
+        requireEveryStitchVisited: true,
+        requiredFabricTypes: Object.freeze(['elastic'] as const),
+        requiredBumperIds: Object.freeze(['festival-button'] as const),
+      }),
+    }),
+    'festival-13-pinch-pocket': Object.freeze({
+      mechanic: 'Use a pinch and pocket totaling at least 75 thread',
+      goal: Object.freeze({ radius: 0.08, maxEntrySpeed: 1.2 }),
+      completionRequirements: Object.freeze({
+        minimumStitches: 2,
+        minimumThreadUsed: 75,
+        requireEveryStitchVisited: true,
+        requiredStitchTypes: Object.freeze(['pinch', 'pocket'] as const),
+      }),
+    }),
+    'festival-14-tight-limit': Object.freeze({
+      mechanic: 'Use at least 70 thread through the twin-hole corridor',
+      goal: Object.freeze({ radius: 0.06, maxEntrySpeed: 0.6 }),
+      completionRequirements: Object.freeze({
+        minimumThreadUsed: 70,
+        requireEveryStitchVisited: true,
+      }),
+      extraHazards: Object.freeze([
+        hazard('corridor-hole-right', 'hole', point(0.849, 0.934), 0.018),
+        hazard('corridor-hole-left', 'hole', point(0.741, 1.04), 0.018),
+      ]),
+    }),
+    'festival-15-finale': Object.freeze({
+      mechanic: 'Chain three stitches across every material and the button',
+      goal: Object.freeze({ radius: 0.06, maxEntrySpeed: 0.55 }),
+      completionRequirements: Object.freeze({
+        minimumStitches: 3,
+        minimumThreadUsed: 85,
+        requireEveryStitchVisited: true,
+        requiredStitchTypes: Object.freeze(['pinch', 'pocket'] as const),
+        requiredFabricTypes: Object.freeze(
+          ['silk', 'felt', 'elastic'] as const,
+        ),
+        requiredBumperIds: Object.freeze(['finale-button'] as const),
+      }),
+    }),
+  });
+
+export const CAMPAIGN_LEVELS: readonly LevelDefinition[] = Object.freeze(
+  LEGACY_CAMPAIGN_LEVELS_SECOND_NARROWING.map((legacyLevel) => {
+    const tuning = DIFFICULTY_TUNINGS[legacyLevel.id];
+    if (!tuning) {
+      throw new Error(`Missing difficulty tuning for "${legacyLevel.id}".`);
+    }
+    return Object.freeze({
+      ...legacyLevel,
+      version: legacyLevel.version + 1,
+      mechanic: tuning.mechanic,
+      goal: Object.freeze({
+        ...legacyLevel.goal,
+        ...tuning.goal,
+      }),
+      hazards: Object.freeze([
+        ...legacyLevel.hazards,
+        ...(tuning.extraHazards ?? []),
+      ]),
+      ...(tuning.completionRequirements
+        ? { completionRequirements: tuning.completionRequirements }
+        : {}),
+    });
+  }),
+);
 
 validateCampaignCatalog(CAMPAIGN_QUILTS, CAMPAIGN_LEVELS);
 

@@ -10,6 +10,9 @@ import type { Stitch } from '../core/types';
 import {
   CAMPAIGN_LEVELS,
   CAMPAIGN_QUILTS,
+  LEGACY_CAMPAIGN_LEVELS_FIRST_NARROWING,
+  LEGACY_CAMPAIGN_LEVELS_PRE_TUNING,
+  LEGACY_CAMPAIGN_LEVELS_SECOND_NARROWING,
   LEGACY_DAILY_LEVELS_V1,
 } from './campaignLevels';
 import type { LevelDefinition, QuiltDefinition } from './schema';
@@ -21,7 +24,13 @@ const quiltsById = new Map(
   CAMPAIGN_QUILTS.map((quilt) => [quilt.id, quilt] as const),
 );
 const levelsByVersion = new Map<string, LevelDefinition>();
-for (const level of [...CAMPAIGN_LEVELS, ...LEGACY_DAILY_LEVELS_V1]) {
+for (const level of [
+  ...CAMPAIGN_LEVELS,
+  ...LEGACY_CAMPAIGN_LEVELS_SECOND_NARROWING,
+  ...LEGACY_CAMPAIGN_LEVELS_FIRST_NARROWING,
+  ...LEGACY_CAMPAIGN_LEVELS_PRE_TUNING,
+  ...LEGACY_DAILY_LEVELS_V1,
+]) {
   const key = `${level.id}@${level.version}`;
   if (levelsByVersion.has(key)) {
     throw new Error(`Duplicate level version "${key}".`);
@@ -35,7 +44,7 @@ export function getCampaignLevel(levelId: string): LevelDefinition {
   return level;
 }
 
-/** Resolves current campaign content or an immutable historical Daily version. */
+/** Resolves current campaign content or an immutable retained level version. */
 export function getLevelVersion(
   levelId: string,
   version: number,
@@ -88,13 +97,22 @@ export function createLevelWorld(
       baseSlope.x * (x - fabricBounds.x) +
       baseSlope.y * (y - fabricBounds.y),
   );
+  const withInfluenceRadius = (stitch: Stitch): Stitch => ({
+    ...stitch,
+    radius: level.stitchInfluenceRadii[stitch.type],
+  });
+  const effectiveStitches = stitches.map(withInfluenceRadius);
+  const effectivePreview = preview ? withInfluenceRadius(preview) : undefined;
   rebuildHeightField(
     surface,
-    stitches,
+    effectiveStitches,
     DEFAULT_PINCH_PARAMETERS,
-    preview,
+    effectivePreview,
     DEFAULT_POCKET_PARAMETERS,
   );
+  const completionStitches = effectivePreview
+    ? [...effectiveStitches, effectivePreview]
+    : effectiveStitches;
 
   return {
     surface,
@@ -104,6 +122,8 @@ export function createLevelWorld(
     fabricRegions: level.fabricRegions,
     bumpers: level.bumpers,
     collectible: level.collectible,
+    stitches: completionStitches,
+    completionRequirements: level.completionRequirements,
   };
 }
 

@@ -67,7 +67,7 @@ describe('Daily Scrap deterministic domain', () => {
       expect(level.order).toBeLessThanOrEqual(6);
       expect(level.version).toBe(template.levelVersion);
       if (level.order > 1) {
-        expect(getCampaignLevel(level.id).version).toBe(2);
+        expect(getCampaignLevel(level.id).version).toBe(5);
       }
       expect(
         simulateLevelReplay(createLevelReplay(level, level.referenceSolution)).outcome

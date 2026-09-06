@@ -1,7 +1,9 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useIsFocused } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
 import {
+  AccessibilityInfo,
   LayoutChangeEvent,
   Pressable,
   StyleSheet,
@@ -21,6 +23,7 @@ import { OutcomeBanner } from '../../components/OutcomeBanner';
 import { TutorialCoachmark } from '../../components/TutorialCoachmark';
 import type { RootStackParamList } from '../../app/navigation/RootNavigator';
 import type {
+  CompletionRequirements,
   SimulationOutcome,
   Stitch,
   StitchType,
@@ -92,6 +95,123 @@ const TUTORIAL_STITCH_ANCHOR_STYLE = {
   }%` as const,
 };
 
+interface PlacementIssue {
+  readonly kind: 'stitch-limit' | 'thread-budget';
+  readonly message: string;
+}
+
+function naturalList(values: readonly string[]): string {
+  if (values.length === 1) return values[0];
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(', ')}, and ${values.at(-1)}`;
+}
+
+export function challengeRequirementsCopy(
+  requirements: CompletionRequirements | undefined,
+): string | null {
+  const parts: string[] = [];
+
+  if (requirements?.minimumStitches) {
+    parts.push(
+      `${requirements.minimumStitches}+ ${
+        requirements.minimumStitches === 1 ? 'stitch' : 'stitches'
+      }`,
+    );
+  }
+  if (requirements?.minimumThreadUsed) {
+    parts.push(`${requirements.minimumThreadUsed}+ thread`);
+  }
+  if (requirements?.requiredStitchTypes?.length) {
+    parts.push(
+      requirements.requiredStitchTypes.length === 1
+        ? `${requirements.requiredStitchTypes[0]} stitch`
+        : requirements.requiredStitchTypes.join(' + '),
+    );
+  }
+  if (requirements?.requireEveryStitchVisited) {
+    parts.push('ride every stitch');
+  }
+  if (requirements?.requiredFabricTypes?.length) {
+    parts.push(`cross ${requirements.requiredFabricTypes.join(' + ')}`);
+  }
+  if (requirements?.requiredBumperIds?.length) {
+    parts.push(
+      requirements.requiredBumperIds.length === 1
+        ? 'hit bumper'
+        : `hit ${requirements.requiredBumperIds.length} bumpers`,
+    );
+  }
+
+  return parts.length > 0 ? `Required: ${parts.join(' · ')}` : null;
+}
+
+function spokenChallengeRequirementsCopy(
+  requirements: CompletionRequirements | undefined,
+): string | null {
+  const parts: string[] = [];
+
+  if (requirements?.minimumStitches) {
+    parts.push(
+      `use at least ${requirements.minimumStitches} ${
+        requirements.minimumStitches === 1 ? 'stitch' : 'stitches'
+      }`,
+    );
+  }
+  if (requirements?.minimumThreadUsed) {
+    parts.push(`use at least ${requirements.minimumThreadUsed} thread`);
+  }
+  if (requirements?.requiredStitchTypes?.length) {
+    const stitchTypes = naturalList(requirements.requiredStitchTypes);
+    parts.push(
+      requirements.requiredStitchTypes.length === 1
+        ? `use a ${stitchTypes} stitch`
+        : `use ${stitchTypes} stitches`,
+    );
+  }
+  if (requirements?.requireEveryStitchVisited) {
+    parts.push('make the traveler ride every stitch');
+  }
+  if (requirements?.requiredFabricTypes?.length) {
+    parts.push(`travel over ${naturalList(requirements.requiredFabricTypes)}`);
+  }
+  if (requirements?.requiredBumperIds?.length) {
+    parts.push(
+      requirements.requiredBumperIds.length === 1
+        ? 'hit the required bumper'
+        : `hit all ${requirements.requiredBumperIds.length} required bumpers`,
+    );
+  }
+
+  return parts.length > 0 ? `Required. ${parts.join('. ')}` : null;
+}
+
+function placementIssue(
+  stitchCount: number,
+  maxStitches: number,
+  threadUsed: number,
+  stitchThread: number,
+  threadBudget: number,
+): PlacementIssue | null {
+  if (stitchCount >= maxStitches) {
+    return {
+      kind: 'stitch-limit',
+      message: `Stitch limit reached: ${stitchCount} of ${maxStitches}. Undo or reset before adding another.`,
+    };
+  }
+
+  const attemptedThread = threadUsed + stitchThread;
+  if (attemptedThread > threadBudget) {
+    return {
+      kind: 'thread-budget',
+      message: `Thread budget exceeded by ${
+        attemptedThread - threadBudget
+      }: attempted ${attemptedThread} of ${threadBudget}. Shorten the stitch or undo one.`,
+    };
+  }
+
+  return null;
+}
+
 function statusCopy(
   phase: ReturnType<typeof useGameStore.getState>['phase'],
   stitchCount: number,
@@ -119,6 +239,7 @@ export function SpikeLevelScreen({
   navigation,
   route: screenRoute,
 }: SpikeLevelScreenProps) {
+  const isFocused = useIsFocused();
   const campaignLevel = useMemo(
     () => getCampaignLevel(screenRoute.params.levelId),
     [screenRoute.params.levelId],
@@ -198,6 +319,19 @@ export function SpikeLevelScreen({
   );
   const [canvasSize, setCanvasSize] = useState<CanvasSize>(EMPTY_SIZE);
   const [preview, setPreview] = useState<Stitch | null>(null);
+  const [placementNotice, setPlacementNotice] = useState<{
+    readonly levelId: string;
+    readonly message: string;
+  } | null>(null);
+  const placementMessage =
+    placementNotice?.levelId === level.id ? placementNotice.message : null;
+  const reportPlacementIssue = useCallback(
+    (message: string) => {
+      setPlacementNotice({ levelId: level.id, message });
+      AccessibilityInfo.announceForAccessibility(message);
+    },
+    [level.id],
+  );
   const [stitchSelection, setStitchSelection] = useState<{
     readonly levelId: string;
     readonly type: StitchType;
@@ -260,7 +394,11 @@ export function SpikeLevelScreen({
       ? activeSession.kind === 'daily' &&
         activeSession.challenge.id === validDailyChallenge?.id
       : activeSession.kind === 'campaign';
-    if (levelAccess.canPlay && (activeLevelId !== level.id || !sessionMatches)) {
+    if (
+      isFocused &&
+      levelAccess.canPlay &&
+      (activeLevelId !== level.id || !sessionMatches)
+    ) {
       if (validDailyChallenge) {
         startLevel(level.id, { kind: 'daily', challenge: validDailyChallenge });
       } else {
@@ -270,6 +408,7 @@ export function SpikeLevelScreen({
   }, [
     activeLevelId,
     activeSession,
+    isFocused,
     isDaily,
     level.id,
     levelAccess.canPlay,
@@ -317,8 +456,11 @@ export function SpikeLevelScreen({
     (nextOutcome: SimulationOutcome) => {
       resolve(nextOutcome);
       void feedback.play(nextOutcome.status === 'success' ? 'success' : 'failure');
+      if (nextOutcome.status === 'success') {
+        navigation.navigate('Results');
+      }
     },
-    [feedback, resolve],
+    [feedback, navigation, resolve],
   );
   const session = useGameSession({
     level,
@@ -343,6 +485,7 @@ export function SpikeLevelScreen({
   const beginDrag = useCallback(
     (startX: number, startY: number) => {
       const start = { x: startX, y: startY };
+      setPlacementNotice(null);
       setDraft(createStitch('preview', activeStitchType, start, start));
       void feedback.play('fabricTouch');
       void feedback.play('threadDraw');
@@ -377,15 +520,39 @@ export function SpikeLevelScreen({
         end,
       );
       if (!stitch) return;
+      const issue = placementIssue(
+        stitches.length,
+        level.maxStitches,
+        threadUsed,
+        stitch.threadCost,
+        level.threadBudget,
+      );
+      if (issue) {
+        reportPlacementIssue(issue.message);
+        return;
+      }
       const committed = commitStitch(stitch, {
         maxStitches: level.maxStitches,
         threadBudget: level.threadBudget,
       });
       if (committed) {
+        setPlacementNotice(null);
         void feedback.play('stitchComplete');
+      } else {
+        const message = 'Stitch could not be placed. Try again.';
+        reportPlacementIssue(message);
       }
     },
-    [activeStitchType, commitStitch, feedback, level, setDraft, stitches],
+    [
+      activeStitchType,
+      commitStitch,
+      feedback,
+      level,
+      reportPlacementIssue,
+      setDraft,
+      stitches,
+      threadUsed,
+    ],
   );
 
   const cancelDrag = useCallback(() => {
@@ -407,6 +574,7 @@ export function SpikeLevelScreen({
       const stitch = findStitchNearPoint(stitches, point);
       if (stitch) {
         removeStitch(stitch.id);
+        setPlacementNotice(null);
         void feedback.play('buttonClick');
       }
     },
@@ -416,6 +584,7 @@ export function SpikeLevelScreen({
   /* eslint-disable react-hooks/immutability -- Gesture worklets intentionally mutate Reanimated SharedValues on the UI thread. */
   const stitchGesture = useMemo(() => {
     const pan = Gesture.Pan()
+      .withTestId('stitch-draw-gesture')
       .enabled(phase === 'planning')
       .minDistance(8)
       .onBegin((event) => {
@@ -527,11 +696,13 @@ export function SpikeLevelScreen({
 
   const handleUndo = useCallback(() => {
     undo();
+    setPlacementNotice(null);
     void feedback.play('buttonClick');
   }, [feedback, undo]);
 
   const handleReset = useCallback(() => {
     setDraft(null);
+    setPlacementNotice(null);
     if (phase === 'planning') clearStitches();
     else resetSession();
     void feedback.play('buttonClick');
@@ -539,6 +710,7 @@ export function SpikeLevelScreen({
 
   const handleRetry = useCallback(() => {
     retry();
+    setPlacementNotice(null);
     void feedback.play('buttonClick');
   }, [feedback, retry]);
 
@@ -571,15 +743,31 @@ export function SpikeLevelScreen({
   }, [feedback, navigation]);
 
   const previewThread = preview?.threadCost ?? 0;
-  const displayedThread = Math.min(
-    level.threadBudget,
-    threadUsed + previewThread,
+  const displayedThread = threadUsed + previewThread;
+  const previewIssue = preview
+    ? placementIssue(
+        stitches.length,
+        level.maxStitches,
+        threadUsed,
+        preview.threadCost,
+        level.threadBudget,
+      )
+    : null;
+  const threadOverage = Math.max(0, displayedThread - level.threadBudget);
+  const status =
+    phase === 'planning' && (previewIssue || placementMessage)
+      ? previewIssue?.message ?? placementMessage ?? ''
+      : statusCopy(
+          phase,
+          stitches.length,
+          route.outcome.status === 'success',
+          activeStitchType,
+        );
+  const challengeRequirements = challengeRequirementsCopy(
+    level.completionRequirements,
   );
-  const status = statusCopy(
-    phase,
-    stitches.length,
-    route.outcome.status === 'success',
-    activeStitchType,
+  const spokenChallengeRequirements = spokenChallengeRequirementsCopy(
+    level.completionRequirements,
   );
   const showTutorial =
     !isDaily &&
@@ -646,16 +834,42 @@ export function SpikeLevelScreen({
           >
             {validDailyChallenge?.title ?? level.name}
           </Text>
-          <Text
-            testID="level-mechanic"
-            numberOfLines={1}
-            style={[
-              styles.levelMechanic,
-              compactViewport && styles.levelMechanicCompact,
-            ]}
+          <View
+            testID="route-objective"
+            accessible
+            accessibilityLabel={`Challenge. ${level.mechanic}${
+              spokenChallengeRequirements
+                ? `. ${spokenChallengeRequirements}`
+                : ''
+            }`}
+            style={styles.routeObjective}
           >
-            {level.mechanic}
-          </Text>
+            <Text accessible={false} style={styles.challengeLabel}>
+              CHALLENGE
+            </Text>
+            <Text
+              testID="level-mechanic"
+              accessible={false}
+              style={[
+                styles.levelMechanic,
+                compactViewport && styles.levelMechanicCompact,
+              ]}
+            >
+              {level.mechanic}
+            </Text>
+            {challengeRequirements ? (
+              <Text
+                testID="level-requirements"
+                accessible={false}
+                style={[
+                  styles.levelRequirements,
+                  compactViewport && styles.levelRequirementsCompact,
+                ]}
+              >
+                {challengeRequirements}
+              </Text>
+            ) : null}
+          </View>
         </View>
         <Pressable
           testID="game-settings-button"
@@ -696,6 +910,7 @@ export function SpikeLevelScreen({
                 disabled={phase !== 'planning'}
                 onPress={() => {
                   setPreview(null);
+                  setPlacementNotice(null);
                   setStitchSelection({ levelId: level.id, type: stitchType });
                   void feedback.play('buttonClick');
                 }}
@@ -741,7 +956,17 @@ export function SpikeLevelScreen({
         <View
           style={[styles.hudPill, highContrast && styles.outlineHighContrast]}
         >
-          <Text style={styles.hudValue}>
+          <Text
+            testID="thread-count"
+            accessibilityLabel={`Thread ${displayedThread} of ${
+              level.threadBudget
+            }${threadOverage > 0 ? `, over by ${threadOverage}` : ''}`}
+            accessibilityLiveRegion="polite"
+            style={[
+              styles.hudValue,
+              threadOverage > 0 && styles.hudValueOverLimit,
+            ]}
+          >
             {displayedThread} / {level.threadBudget}
           </Text>
           <Text style={styles.hudLabel}>THREAD</Text>
@@ -755,7 +980,12 @@ export function SpikeLevelScreen({
         <Text
           testID={phase === 'planning' ? 'planning-status' : 'run-status'}
           accessibilityLiveRegion="polite"
-          style={styles.statusText}
+          style={[
+            styles.statusText,
+            phase === 'planning' &&
+              (previewIssue || placementMessage) &&
+              styles.statusError,
+          ]}
         >
           {status}
         </Text>
@@ -913,17 +1143,40 @@ const styles = StyleSheet.create({
   titleCompact: {
     fontSize: 20,
   },
+  routeObjective: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  challengeLabel: {
+    color: '#8d3f48',
+    fontFamily: 'NunitoSans_800ExtraBold',
+    fontSize: 9,
+    letterSpacing: 0.8,
+    lineHeight: 12,
+    textAlign: 'center',
+  },
   levelMechanic: {
     color: '#6f5142',
     fontFamily: 'NunitoSans_700Bold',
-    fontSize: 10,
+    fontSize: 11,
     letterSpacing: 0.25,
-    lineHeight: 13,
+    lineHeight: 14,
     textAlign: 'center',
   },
   levelMechanicCompact: {
+    fontSize: 10,
+    lineHeight: 13,
+  },
+  levelRequirements: {
+    color: '#634b40',
+    fontFamily: 'NunitoSans_600SemiBold',
+    fontSize: 10,
+    lineHeight: 13,
+    textAlign: 'center',
+  },
+  levelRequirementsCompact: {
     fontSize: 9,
-    lineHeight: 11,
+    lineHeight: 12,
   },
   hudRow: {
     flexDirection: 'row',
@@ -952,6 +1205,9 @@ const styles = StyleSheet.create({
     color: '#173746',
     fontFamily: 'NunitoSans_800ExtraBold',
     fontSize: 16,
+  },
+  hudValueOverLimit: {
+    color: '#8d2930',
   },
   hudLabel: {
     color: '#634b40',
@@ -984,6 +1240,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     textAlign: 'center',
+  },
+  statusError: {
+    color: '#ffd7a3',
+    fontFamily: 'NunitoSans_700Bold',
   },
   stitchTypeRow: {
     flexDirection: 'row',

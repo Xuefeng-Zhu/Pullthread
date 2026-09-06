@@ -23,6 +23,7 @@ import {
   createLevelWorld,
 } from '../levels/levelLoader';
 import type { LevelDefinition } from '../levels/schema';
+import { scaleGameplayElapsed } from './gameplayTiming';
 
 export interface GameSessionView {
   readonly travelerX: SharedValue<number>;
@@ -120,7 +121,7 @@ export function useGameSession({
       lastTimestamp = timestamp;
       advanceSimulation(
         clock,
-        elapsed,
+        scaleGameplayElapsed(elapsed),
         simulation,
         world,
         level.physicsConfig,

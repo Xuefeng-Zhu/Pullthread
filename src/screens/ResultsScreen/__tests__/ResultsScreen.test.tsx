@@ -25,6 +25,7 @@ import {
   SPIKE_LEVEL,
 } from '../../../game/levels/spikeLevel';
 import { CAMPAIGN_LEVELS } from '../../../game/levels/campaignLevels';
+import { getLevelVersion } from '../../../game/levels/levelLoader';
 import {
   createLevelReplay,
   createSpikeReplay,
@@ -151,10 +152,10 @@ function seedCompletedRunForLevel(levelIndex: number) {
 
 function seedDailyCompletedRun() {
   const challenge = getDailyChallengeForDate('2026-08-27');
-  const level = CAMPAIGN_LEVELS.find(
-    (candidate) => candidate.id === challenge.levelId,
+  const level = getLevelVersion(
+    challenge.levelId,
+    challenge.levelVersion,
   );
-  if (!level) throw new Error('Daily challenge level must be in the catalog.');
   const replay = createLevelReplay(level, level.referenceSolution);
   const outcome = simulateLevelReplay(replay).outcome;
   if (outcome.status !== 'success') {
