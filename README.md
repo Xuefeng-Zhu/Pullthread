@@ -2,40 +2,29 @@
 
 **Stitch the world. Pull it into shape. Let gravity solve the rest.**
 
+<p align="center">
+  <img src="docs/design/pullthread-web-phone-success.png" alt="Pullthread gameplay showing a completed stitch and the button traveler reaching its goal" width="320" />
+</p>
+
 Pullthread is a portrait mobile physics-puzzle game built with Expo and React
-Native. The player draws pinch and pocket stitches across a quilt, the stitches
-deform a shared height field, and a button-shaped traveler rolls over that
-changed surface toward an embroidered goal.
+Native. Draw pinch and pocket stitches across a quilt, deform the fabric's
+height field, and guide a button-shaped traveler over the changed surface to an
+embroidered goal.
 
-The repository now contains the Milestone 5 Daily Scrap slice on top of the
-campaign and monetization work: a deterministic UTC challenge, explicit
-handcrafted template pool, unlimited local attempts, persisted personal best,
-compact stitch replay, ranking by thread/stitches/time, a local-first hub, and a
-Firebase adapter/backend with anonymous guest Auth and server-verified scores.
-Full remote Firebase activation and production proof remain external gates.
+The game combines a handcrafted campaign with tactile gestures, haptics, audio,
+replayable results, optional Full Atelier access, and a local-first Daily Scrap
+challenge. The campaign and local Daily Scrap mode work without a backend;
+Firebase standings and RevenueCat purchases are optional integrations.
 
-> **Physical-device gate: limited Milestone 3 iOS smoke passed; full checklist
-> pending.** A locally signed Release build with an embedded Hermes bundle for
-> the final Milestone 3 change set installed and launched successfully on an
-> iPhone 17e. The project owner reported manual verification on 2026-08-26. The
-> detailed
-> campaign, touch, haptic/audio, lifecycle, performance, repetition, recording,
-> and native Maestro checks remain open.
+## Highlights
 
-> **Milestone 4 transaction gate: implementation complete; real store proof
-> pending.** Automated and development-mock coverage does not prove an Apple or
-> Google transaction. A new native build, configured RevenueCat project, store
-> sandbox product, purchase/cancellation pass, restore pass, and verified
-> offline cold launch are still required on physical hardware.
-
-> **Milestone 5 cloud gate: free infrastructure is provisioned; remote mode is
-> still blocked.** The dedicated `pullthread-xuefeng-zhu` project is on the
-> no-cost Spark plan. Its web app and `us-west1` Firestore database exist, and
-> the reviewed rules/indexes were deployed on 2026-08-27. Anonymous Auth and the
-> callable function are not active. Cloud Functions deployment requires Blaze,
-> so Firebase Daily Scrap mode remains disabled unless billing is explicitly
-> approved. Two-user remote proof, native App Check enforcement, and physical
-> offline/reconnect evidence also remain open.
+- Draw stitches that reshape the playfield and change the traveler's route.
+- Progress through authored levels with tutorials, retries, undo, and replay.
+- Play a deterministic Daily Scrap challenge with unlimited local attempts and
+  a persisted personal best.
+- Use the same gameplay rules in the renderer, fixed-step simulation, scoring,
+  and replay validator.
+- Run locally on iOS, Android, or the web diagnostic build.
 
 ## Technology
 
@@ -132,17 +121,12 @@ the first native binary.
    Scan/open the development-client link with the phone.
 
 Rebuild the native development client after changing native dependencies,
-native configuration, or the Expo SDK. The campaign implementation itself is
-JavaScript/TypeScript, but this integrated change set also aligns Expo,
-Expo Asset, Expo Dev Client, and Metro Runtime to the SDK 57 patch matrix.
-The recorded 2026-08-26 Milestone 3 Release build predates this Milestone 4
-dependency set. Rebuild before relying on later device evidence.
+native configuration, or the Expo SDK. The campaign implementation is mostly
+JavaScript/TypeScript, but native dependencies still require a fresh client.
 
-Milestone 4 adds the native `react-native-purchases` SDK. An older Pullthread
-binary cannot exercise RevenueCat even if Metro serves the new JavaScript.
-Re-run `npx expo run:ios --device` or `npx expo run:android --device` after
-installing this change before testing a real native purchase flow. Use that
-same rebuilt client when recording the mock flow as device evidence.
+RevenueCat support uses the native `react-native-purchases` SDK. Re-run
+`npx expo run:ios --device` or `npx expo run:android --device` after changing
+native purchase dependencies before testing purchase or restore flows.
 
 ## RevenueCat and Full Atelier
 
@@ -244,9 +228,8 @@ committed retries are idempotent, and leaderboard cutoff ties use the
 server-authored recording time rather than a client timestamp. Direct
 client writes to challenge and run documents are denied by Firestore rules.
 The backend also accepts only today or yesterday, rate-limits each guest, and
-caps function scaling. Those controls do not replace App Check: public Firebase
-mode is blocked until native attestation is wired and callable enforcement is
-enabled.
+caps function scaling. Production deployments should additionally enable
+native App Check and callable enforcement before exposing shared standings.
 
 The Firebase web-app values are public identifiers, but environment-specific
 values still belong in `.env`, never source control:
@@ -263,7 +246,7 @@ Never put a service-account key, private key, or Admin SDK credential in an
 `EXPO_PUBLIC_*` variable. The campaign does not initialize Firebase at launch
 and remains playable if Firebase is absent or unreachable. See
 [`docs/FIREBASE_DAILY_SCRAP.md`](docs/FIREBASE_DAILY_SCRAP.md) for project
-creation, emulator verification, deployment, and the remaining cloud proof.
+creation, emulator verification, and deployment.
 
 ### Simulator, emulator, and web diagnostics
 
@@ -285,7 +268,7 @@ development build contains this project's native dependencies.
 
 ## Quality checks
 
-Run the same gates used by CI:
+Run the same checks used by CI:
 
 ```sh
 npm run lint
@@ -369,10 +352,10 @@ itself.
 the development tool completes the free path, Level 7 opens the Full Atelier
 paywall, restore-not-found is handled, mock purchase makes the reached level
 current/playable, and the mock cache survives a cold relaunch. Separate access
-tests prove that entitlement alone cannot bypass sequence. This flow does
-**not** prove StoreKit, Google Play Billing, RevenueCat receipt validation, a
-real localized offer, or a real restore. Record those as separate
-physical-device transaction evidence.
+tests prove that entitlement alone cannot bypass sequence. This flow
+intentionally uses the development mock; it does not exercise StoreKit, Google
+Play Billing, RevenueCat receipt validation, localized offers, or real restore
+behavior.
 
 `daily-scrap-local.yaml` is a date-agnostic installed-app route smoke for the
 local/offline mode: Quilt Map entry, prepared challenge, truthful local board,
@@ -381,7 +364,7 @@ persistence are exercised in Jest because the selected handcrafted template
 rotates at the UTC day boundary. The flow does not prove Firebase deployment or
 shared standings.
 
-## Architecture and proof standard
+## Architecture
 
 The campaign keeps geometry, deformation, physics, level validation, replay
 validation, scoring, and tutorial state transitions in pure TypeScript. The
@@ -393,34 +376,24 @@ authors should also read [`docs/LEVEL_FORMAT.md`](docs/LEVEL_FORMAT.md).
 
 The implementation plan and current tradeoffs live in
 [`docs/BUILD_PLAN.md`](docs/BUILD_PLAN.md), and the campaign access and
-monetization rules live in [`docs/GAME_DESIGN.md`](docs/GAME_DESIGN.md). The
-limited physical campaign pass and remaining checklist are recorded in
+monetization rules live in [`docs/GAME_DESIGN.md`](docs/GAME_DESIGN.md).
+Device smoke coverage and the extended campaign checklist are documented in
 [`docs/CAMPAIGN_SMOKE_TEST.md`](docs/CAMPAIGN_SMOKE_TEST.md).
 
-## Remaining work and explicit boundaries
+## Optional integrations
 
-The following remain external acceptance work and should not be inferred from
-the implemented local/client/backend slices:
+The default local mode is self-contained: it does not require Firebase,
+RevenueCat, or store configuration. To enable the optional services:
 
-- Anonymous Auth enablement, an explicit Blaze billing decision, a monitored
-  private-beta callable deploy, native App Check integration, and enforced App
-  Check before Firebase mode is publicly activated. The dedicated Spark project,
-  web app, Firestore database, rules, and indexes are already provisioned.
-- Two-user shared leaderboard, forged-score rejection, pending-upload retry,
-  and offline/reconnect proof against the deployed project
-- Remote content delivery and broader social systems
-- Production audio, final art, store builds, and release signing
-- RevenueCat dashboard/store product configuration and real iOS/Android
-  sandbox purchase, cancellation, restore, and offline-device evidence
-- A completed Milestone 3 physical-device checklist, recording, performance
-  capture, or native Maestro report
+- Firebase mode needs a project, Anonymous Auth, Firestore rules and indexes,
+  callable backend deployment, and native App Check configuration.
+- Real Full Atelier purchases need matching App Store or Google Play products,
+  RevenueCat configuration, public platform SDK keys, and a rebuilt native
+  client.
+- Physical-device validation should use a development build rather than Expo
+  Go, so the app's native dependencies are included.
 
-The 2026-08-26 limited phone smoke proves the signed Milestone 3 Release build,
-install/launch path, startup stability, and owner-reported manual verification.
-It does not prove every detailed campaign flow or the remaining evidence gates;
-complete the campaign checklist before calling Milestone 3 device-complete.
-
-## Current primary references
+## References
 
 - [Expo SDK 57 reference](https://docs.expo.dev/versions/v57.0.0/)
 - [Expo development builds](https://docs.expo.dev/develop/development-builds/introduction/)
