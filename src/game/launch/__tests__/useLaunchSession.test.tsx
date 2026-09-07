@@ -6,6 +6,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { NoopFeedbackService } from '../../feedback/FeedbackService';
 import * as endless from '../endless';
 import { useLaunchSession } from '../useLaunchSession';
+import { deserializeEndlessRun, serializeEndlessRun } from '../snapshots';
 
 const { createEndlessRun } = endless;
 const seed = 14;
@@ -238,6 +239,135 @@ describe('launch session lifecycle', () => {
       expect(view.result.current.state.position).toEqual(position);
       expect(view.result.current.state.launches).toBe(launches);
     }
+    await view.unmount();
+  });
+
+  test('suspending and resuming without an intervening RAF cancels the pull and discards the entire modal interval', async () => {
+    const view = await renderHook(() => useLaunchSession(seed, true, feedback));
+    await frame();
+    await frame();
+    const tick = view.result.current.motion.tick.value;
+    await act(() => {
+      view.result.current.beginAim(start);
+      view.result.current.updateAim({ x: -20, y: 70 });
+      view.result.current.suspend();
+    });
+    expect(view.result.current.motion.pullY.value).toBe(0);
+    await act(() => {
+      expect(view.result.current.beginAim(start)).toBe(false);
+      view.result.current.resume();
+      view.result.current.releaseAim();
+    });
+    await frame(30_000);
+    expect(view.result.current.motion.tick.value).toBe(tick);
+    expect(view.result.current.state.launches).toBe(0);
+    await frame();
+    expect(view.result.current.motion.tick.value).toBe(tick + 2);
+    await view.unmount();
+  });
+
+  test('an armed Preview survives cancellation and backgrounding while fresh predictions follow moving-target time', async () => {
+    const prepared = createEndlessRun(0);
+    prepared.inventory.preview = 2;
+    prepared.room = { ...prepared.room, pockets: prepared.room.pockets.map((pocket) => pocket.id === 'endless-1'
+      ? { ...pocket, motion: { amplitude: 35, periodTicks: 360, phaseTicks: 0 } } : pocket) };
+    const view = await renderHook(() => useLaunchSession(0, true, feedback));
+    await act(() => {
+      expect(view.result.current.restoreSnapshot(serializeEndlessRun(prepared))).toBe(true);
+      expect(view.result.current.useFreeTool('preview')).toBe(true);
+      view.result.current.beginAim(start);
+      view.result.current.updateAim({ x: -24, y: 72 });
+    });
+    const prediction = view.result.current.prediction;
+    expect(prediction?.outcome).toBe('catch');
+    for (let count = 0; count < 6; count += 1) await frame();
+    expect(view.result.current.prediction).not.toEqual(prediction);
+    await act(() => view.result.current.cancelAim());
+    expect(view.result.current.prediction).toBeNull();
+    expect(view.result.current.tools).toMatchObject({ previewActive: true, inventory: { preview: 1 } });
+    await act(() => {
+      view.result.current.beginAim(start);
+      view.result.current.updateAim({ x: -24, y: 72 });
+    });
+    await changeAppState('background');
+    expect(view.result.current.prediction).toBeNull();
+    expect(view.result.current.tools.previewActive).toBe(true);
+    await changeAppState('active');
+    await act(() => {
+      view.result.current.releaseAim();
+      view.result.current.beginAim(start);
+      view.result.current.updateAim({ x: 1, y: 2 });
+      view.result.current.releaseAim();
+    });
+    expect(view.result.current.tools.previewActive).toBe(true);
+    expect(view.result.current.state.launches).toBe(0);
+    await act(() => {
+      view.result.current.beginAim(start);
+      view.result.current.updateAim({ x: -24, y: 72 });
+      view.result.current.releaseAim();
+    });
+    expect(view.result.current.tools.previewActive).toBe(false);
+    expect(view.result.current.tools.inventory.preview).toBe(1);
+    expect(view.result.current.prediction).toBeNull();
+    await view.unmount();
+  });
+
+  test('free Teleport publishes the arrival and revive restores its checkpoint with a fresh render clock', async () => {
+    const prepared = createEndlessRun(0);
+    prepared.inventory = { preview: 0, teleport: 1, revive: 1 };
+    const view = await renderHook(() => useLaunchSession(0, true, feedback));
+    await act(() => { view.result.current.restoreSnapshot(serializeEndlessRun(prepared)); });
+    await frame();
+    await frame();
+    await act(() => { expect(view.result.current.useFreeTool('teleport', 'endless-1')).toBe(true); });
+    const checkpointTick = view.result.current.state.tick;
+    expect(view.result.current.state.pocketId).toBe('endless-1');
+    expect(view.result.current.score.pockets).toBe(1);
+    expect(view.result.current.tools.inventory.teleport).toBe(0);
+    expect(view.result.current.motion.travelerX.value).toBe(240);
+    await frame(1000);
+    expect(view.result.current.motion.tick.value).toBe(checkpointTick);
+    await act(() => {
+      view.result.current.beginAim(view.result.current.state.position);
+      view.result.current.updateAim({ x: -100, y: 0 });
+      view.result.current.releaseAim();
+    });
+    for (let count = 0; count < 160 && view.result.current.state.phase === 'flying'; count += 1) await frame();
+    expect(view.result.current.state.phase).toBe('failed');
+    await act(() => { expect(view.result.current.useFreeTool('revive')).toBe(true); });
+    expect(view.result.current.state.phase).toBe('held');
+    expect(view.result.current.state.pocketId).toBe('endless-1');
+    expect(view.result.current.state.tick).toBe(checkpointTick);
+    expect(view.result.current.tools).toMatchObject({ reviveUsed: true, inventory: { revive: 0 } });
+    expect(view.result.current.score.pockets).toBe(1);
+    await frame(1000);
+    expect(view.result.current.motion.tick.value).toBe(checkpointTick);
+    await view.unmount();
+  });
+
+  test('preparing a paid result is isolated and restoring the same journal result is idempotent', async () => {
+    const prepared = createEndlessRun(0);
+    prepared.inventory.teleport = 1;
+    const view = await renderHook(() => useLaunchSession(0, true, feedback));
+    await act(() => { view.result.current.restoreSnapshot(serializeEndlessRun(prepared)); });
+    await frame();
+    await frame();
+    const before = view.result.current.getSnapshot();
+    const paid = view.result.current.preparePaidTool('teleport', 'endless-1');
+    expect(view.result.current.getSnapshot()).toBe(before);
+    expect(deserializeEndlessRun(paid)!.inventory.teleport).toBe(1);
+    for (let retry = 0; retry < 2; retry += 1) {
+      await act(() => { expect(view.result.current.restoreSnapshot(paid)).toBe(true); });
+      expect(view.result.current.state.pocketId).toBe('endless-1');
+      expect(view.result.current.score.pockets).toBe(1);
+      expect(view.result.current.tools.inventory.teleport).toBe(1);
+    }
+    const restoredTick = view.result.current.motion.tick.value;
+    await frame(1000);
+    expect(view.result.current.motion.tick.value).toBe(restoredTick);
+    const valid = view.result.current.getSnapshot();
+    await act(() => { expect(view.result.current.restoreSnapshot('{')).toBe(false); });
+    expect(view.result.current.getSnapshot()).toBe(valid);
     await view.unmount();
   });
 });

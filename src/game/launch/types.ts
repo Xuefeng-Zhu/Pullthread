@@ -1,4 +1,6 @@
-/** All geometry is in the prototype's fixed portrait world, with positive y downward. */
+import type { ToolKind } from '../../commerce/contracts';
+
+/** All geometry is in the fixed portrait world, with positive y downward. */
 export interface LaunchPoint {
   x: number;
   y: number;
@@ -30,6 +32,13 @@ export interface LaunchHazard {
   readonly radius: number;
 }
 
+export interface LaunchPickup {
+  readonly id: string;
+  readonly kind: ToolKind;
+  readonly center: LaunchPoint;
+  readonly radius: number;
+}
+
 export interface LaunchRoom {
   readonly id: string;
   readonly name: string;
@@ -49,6 +58,7 @@ export interface LaunchRoom {
   readonly pockets: readonly LaunchPocket[];
   readonly bumpers: readonly LaunchBumper[];
   readonly hazards: readonly LaunchHazard[];
+  readonly pickups?: readonly LaunchPickup[];
   readonly patch?: { readonly center: LaunchPoint; readonly radius: number };
 }
 
@@ -60,6 +70,8 @@ export type LaunchEvent =
   | { readonly type: 'catch'; readonly tick: number; readonly id: string }
   | { readonly type: 'complete'; readonly tick: number; readonly id: string }
   | { readonly type: 'patch'; readonly tick: number }
+  | { readonly type: 'pickup'; readonly tick: number; readonly id: string; readonly kind: ToolKind; readonly convertedFrom?: 'revive' }
+  | { readonly type: 'tool'; readonly tick: number; readonly id: string; readonly kind: ToolKind }
   | { readonly type: 'fail'; readonly tick: number; readonly reason: LaunchFailure };
 
 export interface LaunchCheckpoint {
@@ -78,6 +90,8 @@ export interface LaunchState {
   pocketId: string;
   checkpoint: LaunchCheckpoint;
   patchCollected: boolean;
+  /** Collected IDs within the retained room; endless owns the bounded award ledger. */
+  pickupIds: string[];
   flightTicks: number;
   launches: number;
   /** The source opening is ignored until the button has left its receiver. */

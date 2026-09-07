@@ -70,6 +70,12 @@ service cloud.firestore {
       }
     }
 
+    // Commerce is callable-only. Even an authenticated owner cannot mint points,
+    // forge tool receipts, change customer bindings, or inspect another wallet.
+    match /commerce_wallets/{document=**} { allow read, write: if false; }
+    match /commerce_transactions/{document=**} { allow read, write: if false; }
+    match /commerce_customers/{document=**} { allow read, write: if false; }
+
     match /{document=**} {
       allow read, write: if false;
     }

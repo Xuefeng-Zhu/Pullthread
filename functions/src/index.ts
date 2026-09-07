@@ -90,3 +90,11 @@ export const submitDailyRun = onCall<unknown>(
     }
   },
 );
+
+export {
+  commerceSyncWallet,
+  commerceRedeemTool,
+  commerceGetRedemption,
+  commerceResolveTool,
+  commerceRevenueCatWebhook,
+} from './commerce/endpoints';

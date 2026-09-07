@@ -4,13 +4,12 @@ import { clampEndlessPull } from '../launchInput';
 import { LAUNCH_HZ, LAUNCH_POWER, pocketPosition } from '../simulation';
 import type { LaunchEvent, LaunchPoint } from '../types';
 import { bankWitness } from './bankPatternVerification';
+import { cloneEndlessRun } from '../snapshots';
 
 export interface RouteInput { readonly waitTicks: number; readonly pull: LaunchPoint }
 
 export function cloneRun(run: EndlessRun): EndlessRun {
-  return { ...run, room: { ...run.room, bounds: { ...run.room.bounds } },
-    state: { ...run.state, position: { ...run.state.position }, previousPosition: { ...run.state.previousPosition },
-      velocity: { ...run.state.velocity }, checkpoint: { ...run.state.checkpoint } } };
+  return cloneEndlessRun(run);
 }
 
 export function replayNext(run: EndlessRun, input: RouteInput): LaunchEvent[] {

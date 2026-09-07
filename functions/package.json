@@ -10,8 +10,8 @@
     "build": "npm run typecheck && esbuild src/index.ts --bundle --packages=external --platform=node --target=node22 --format=cjs --sourcemap --outfile=lib/index.js",
     "build:test": "esbuild test/*.unit.ts --bundle --packages=external --platform=node --target=node22 --format=cjs --sourcemap --outdir=lib-test",
     "typecheck": "tsc --noEmit",
-    "test:unit": "npm run build:test && node --test --test-concurrency=1 lib-test/domain.unit.js",
-    "test:emulator": "npm run build:test && firebase --config ../firebase.json --project pullthread-rules-test emulators:exec --only firestore \"node --test --test-concurrency=1 lib-test/firestoreRules.unit.js lib-test/persistence.unit.js\"",
+    "test:unit": "npm run build:test && node --test --test-concurrency=1 lib-test/domain.unit.js lib-test/commerce.unit.js",
+    "test:emulator": "npm run build:test && firebase --config ../firebase.json --project pullthread-rules-test emulators:exec --only firestore \"node --test --test-concurrency=1 lib-test/firestoreRules.unit.js lib-test/persistence.unit.js lib-test/commercePersistence.unit.js\"",
     "test": "npm run typecheck && npm run test:unit && npm run test:emulator"
   },
   "dependencies": {

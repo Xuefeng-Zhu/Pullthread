@@ -68,7 +68,7 @@ describe('endless fabric climb', () => {
           const events = replayNext(attempt, { waitTicks: 0, pull: varied });
           expect({ seed, target: expected, pull: varied, phase: attempt.state.phase, pocket: attempt.state.pocketId })
             .toEqual({ seed, target: expected, pull: varied, phase: 'held', pocket: expected });
-          expect(events.map((event) => event.type)).toEqual(['catch']);
+          expect(events.filter((event) => event.type !== 'pickup').map((event) => event.type)).toEqual(['catch']);
         }
       }
       replayNext(run, { waitTicks: 0, pull });
@@ -101,6 +101,9 @@ describe('endless fabric climb', () => {
       expect(run.challenges.length).toBeLessThanOrEqual(8);
       expect(run.room.bumpers.length).toBeLessThanOrEqual(8);
       expect(run.room.hazards.length).toBeLessThanOrEqual(16);
+      expect(run.room.pickups!.length).toBeLessThanOrEqual(4);
+      expect(run.collectedPickupIds.length).toBeLessThanOrEqual(4);
+      expect(run.lastCatchSnapshot).not.toHaveProperty('lastCatchSnapshot');
       expect(run.room.pockets.some((pocket) => pocket.id === run.state.pocketId)).toBe(true);
       expect(run.room.pockets.some((pocket) => pocket.id === run.nextPocketId)).toBe(true);
       for (const pocket of run.room.pockets) {

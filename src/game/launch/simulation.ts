@@ -64,6 +64,7 @@ export function createLaunchState(room: LaunchRoom): LaunchState {
     pocketId: room.startPocketId,
     checkpoint: { pocketId: room.startPocketId, tick: 0, patchCollected: false },
     patchCollected: false,
+    pickupIds: [],
     flightTicks: 0,
     launches: 0,
     sourcePocketImmune: true,
@@ -129,11 +130,12 @@ type Contact =
   | { time: number; kind: 'pocket'; index: number; key: string }
   | { time: number; kind: 'hazard'; index: number; key: string }
   | { time: number; kind: 'patch'; key: string }
+  | { time: number; kind: 'pickup'; index: number; key: string }
   | { time: number; kind: 'bounds'; key: string };
 
 /** Stable tie breaking makes authoring order irrelevant at exactly simultaneous contacts. */
 function contactPriority(contact: Contact): number {
-  return { hazard: 0, bounds: 1, pocket: 2, bumper: 3, patch: 4 }[contact.kind];
+  return { hazard: 0, bounds: 1, pocket: 2, bumper: 3, patch: 4, pickup: 5 }[contact.kind];
 }
 
 function findContact(room: LaunchRoom, state: LaunchState, start: LaunchPoint, end: LaunchPoint, tickStart: number, tickEnd: number): Contact | undefined {
@@ -176,6 +178,11 @@ function findContact(room: LaunchRoom, state: LaunchState, start: LaunchPoint, e
     const time = circleContact(start, end, room.patch.center, room.patch.radius + BUTTON_RADIUS);
     if (time !== undefined) consider({ kind: 'patch', time, key: '' });
   }
+  room.pickups?.forEach((pickup, index) => {
+    if (state.pickupIds.includes(pickup.id)) return;
+    const time = circleContact(start, end, pickup.center, pickup.radius + BUTTON_RADIUS);
+    if (time !== undefined) consider({ kind: 'pickup', index, time, key: pickup.id });
+  });
   const bounds = [
     { from: start.x, to: end.x, min: -BUTTON_RADIUS, max: room.bounds.width + BUTTON_RADIUS },
     {
@@ -227,7 +234,15 @@ export function stepLaunch(room: LaunchRoom, state: LaunchState): LaunchEvent[] 
       x: start.x + state.velocity.x * remaining,
       y: start.y + state.velocity.y * remaining + (room.gravity * remaining * remaining) / 2,
     };
-    const contact = findContact(room, state, start, end, previousTick + elapsed * LAUNCH_HZ, state.tick);
+    let contact = findContact(room, state, start, end, previousTick + elapsed * LAUNCH_HZ, state.tick);
+    // Collect in swept order up to the next physical contact, without splitting
+    // the ballistic segment: optional tools must not nudge an otherwise identical shot.
+    while (contact?.kind === 'pickup') {
+      const pickup = room.pickups![contact.index];
+      state.pickupIds.push(pickup.id);
+      events.push({ type: 'pickup', tick: state.tick, id: pickup.id, kind: pickup.kind });
+      contact = findContact(room, state, start, end, previousTick + elapsed * LAUNCH_HZ, state.tick);
+    }
     const fraction = contact?.time ?? 1;
     const duration = remaining * fraction;
     state.position = {

@@ -10,6 +10,7 @@ import { fireGestureHandler, getByGestureTestId } from 'react-native-gesture-han
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ExpoFeedbackService } from '../../../game/feedback';
+import * as endless from '../../../game/launch/endless';
 import type { ActiveChallenge } from '../../../game/launch/challengeTypes';
 import { LaunchCanvas } from '../../../game/launch/LaunchCanvas';
 import type { LaunchPoint } from '../../../game/launch/types';
@@ -457,7 +458,7 @@ describe('endless Pull & Launch screen', () => {
       gesture.handlers.onEnd?.({ ...stale, state: State.END }, true);
     });
     const cue = view.getByTestId('launch-challenge-cue');
-    expect(StyleSheet.flatten(cue.props.style)).toMatchObject({ position: 'absolute', top: 193, left: 27, right: 29 });
+    expect(StyleSheet.flatten(cue.props.style)).toMatchObject({ position: 'absolute', top: 243, left: 27, right: 29 });
     expect(within(cue).getByText(bankChallenge.cue!).props.numberOfLines).toBe(3);
     expect(cue.props.pointerEvents).toBe('none');
     expect(latestCanvas().size).toEqual({ width: 320, height: 568 });
@@ -477,6 +478,87 @@ describe('endless Pull & Launch screen', () => {
     await fireEvent.press(view.getByTestId('launch-restart-button'));
     expect(view.getByTestId('launch-challenge-cue')).toBeTruthy();
     expect(view.getByTestId('launch-score').props.children).toBe(0);
+    await view.unmount();
+  });
+
+  test('free Preview stays armed after a cancelled pull without opening checkout', async () => {
+    const run = endless.createEndlessRun(0);
+    run.inventory.preview = 1;
+    jest.spyOn(endless, 'createEndlessRun').mockReturnValueOnce(run);
+    const view = await render(<EndlessGameScreen {...harness()} />);
+    await measure(view);
+    await fireEvent.press(view.getByTestId('tool-preview'));
+    expect(latestCanvas().previewActive).toBe(true);
+    expect(view.queryByTestId('tool-confirmation')).toBeNull();
+    expect(view.queryByTestId('points-shop')).toBeNull();
+    await drag({ x: -24, y: 72 }, { quick: false, cancelled: true });
+    expect(latestCanvas().previewActive).toBe(true);
+    expect(latestCanvas().state.launches).toBe(0);
+    await drag({ x: -24, y: 72 });
+    expect(latestCanvas().previewActive).toBe(false);
+    expect(latestCanvas().state.phase).toBe('flying');
+    await view.unmount();
+  });
+
+  test('landing selection freezes the run, cancellation is free, and a chosen pocket scores once', async () => {
+    const run = endless.createEndlessRun(0);
+    run.inventory.teleport = 1;
+    jest.spyOn(endless, 'createEndlessRun').mockReturnValueOnce(run);
+    const view = await render(<EndlessGameScreen {...harness()} />);
+    await measure(view);
+    await runFrames(3);
+    await fireEvent.press(view.getByTestId('tool-teleport'));
+    expect(view.getByTestId('teleport-selection')).toBeTruthy();
+    const tick = latestCanvas().motion.tick.value;
+    await runFrames(100);
+    expect(latestCanvas().motion.tick.value).toBe(tick);
+    await fireEvent.press(view.getByTestId('teleport-cancel'));
+    expect(run.inventory.teleport).toBe(1);
+    await fireEvent.press(view.getByTestId('tool-teleport'));
+    await fireEvent.press(view.getByTestId('teleport-endless-2'));
+    expect(run.inventory.teleport).toBe(0);
+    expect(latestCanvas().state.pocketId).toBe('endless-2');
+    expect(view.getByTestId('launch-score').props.children).toBe(1);
+    expect(view.queryByTestId('teleport-selection')).toBeNull();
+    await view.unmount();
+  });
+
+  test('one free Revive returns from death and Play again clears earned tools', async () => {
+    const run = endless.createEndlessRun(0);
+    run.inventory.revive = 1;
+    jest.spyOn(endless, 'createEndlessRun').mockReturnValueOnce(run);
+    const view = await render(<EndlessGameScreen {...harness()} />);
+    await measure(view);
+    await drag({ x: 70, y: 0 });
+    await runFrames(180);
+    await fireEvent.press(view.getByTestId('launch-revive-button'));
+    expect(latestCanvas().state.phase).toBe('held');
+    expect(run.reviveUsed).toBe(true);
+    await drag({ x: 70, y: 0 });
+    await runFrames(180);
+    expect(view.queryByTestId('launch-revive-button')).toBeNull();
+    await fireEvent.press(view.getByTestId('launch-restart-button'));
+    await measure(view);
+    expect(latestCanvas().state.phase).toBe('held');
+    expect(view.getByTestId('tool-revive').props.accessibilityLabel).toContain('0 free');
+    await view.unmount();
+  });
+
+  test('an unavailable points shop pauses a flight and closes without spending or activating a tool', async () => {
+    const view = await render(<EndlessGameScreen {...harness()} />);
+    await measure(view);
+    await drag({ x: -24, y: 72 });
+    await runFrames(3);
+    await fireEvent.press(view.getByTestId('launch-points-button'));
+    expect(view.getByTestId('points-shop')).toBeTruthy();
+    expect(view.getByText('Points shop unavailable')).toBeTruthy();
+    const tick = latestCanvas().motion.tick.value;
+    await runFrames(100);
+    expect(latestCanvas().motion.tick.value).toBe(tick);
+    await fireEvent.press(view.getByTestId('points-shop-close'));
+    await runFrames(3);
+    expect(latestCanvas().motion.tick.value).toBe(tick + 4);
+    expect(latestCanvas().previewActive).toBe(false);
     await view.unmount();
   });
 });

@@ -279,3 +279,26 @@ describe('Pullthread Firestore rules', () => {
     assert.equal(stored.data()?.displayName, 'Quilter 5678');
   });
 });
+
+for (const path of [
+  `commerce_wallets/${OWNER_ID}/environments/sandbox`,
+  `commerce_wallets/${OWNER_ID}/environments/production`,
+  `commerce_wallets/${OWNER_ID}/environments/sandbox/lots/transaction_1`,
+  `commerce_wallets/${OWNER_ID}/environments/sandbox/redemptions/operation_1`,
+  `commerce_wallets/${OWNER_ID}/environments/sandbox/runs/run_12345`,
+  `commerce_customers/${OWNER_ID}`,
+  'commerce_transactions/store_transaction_1',
+]) {
+  test(`commerce is callable-only and denies client reads and writes: ${path}`, async () => {
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), path), { uid: OWNER_ID, points: 100, revision: 1 });
+    });
+    for (const context of [environment.unauthenticatedContext(), environment.authenticatedContext(OWNER_ID), environment.authenticatedContext(OTHER_ID)]) {
+      const ref = doc(context.firestore(), path);
+      await assertFails(getDoc(ref));
+      await assertFails(setDoc(ref, { uid: OWNER_ID, points: 999 }));
+      await assertFails(updateDoc(ref, { points: 999 }));
+      await assertFails(deleteDoc(ref));
+    }
+  });
+}

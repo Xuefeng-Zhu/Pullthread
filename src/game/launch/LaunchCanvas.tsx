@@ -7,6 +7,8 @@ import {
   Path,
   RoundedRect,
   Skia,
+  Text as SkiaText,
+  useFont,
   vec,
 } from '@shopify/react-native-skia';
 import { useMemo } from 'react';
@@ -27,10 +29,13 @@ import type {
   LaunchBumper,
   LaunchHazard,
   LaunchPocket,
+  LaunchPickup,
   LaunchRoom,
   LaunchState,
 } from './types';
 import { getLaunchViewport } from './viewport';
+import { TOOL_LABELS } from '../../commerce/toolCatalog';
+import type { predictEndlessLaunch } from './prediction';
 
 /** The simulation publishes these values without rerendering React every tick. */
 export interface LaunchCanvasMotion {
@@ -58,6 +63,8 @@ interface LaunchCanvasProps {
   readonly nextPocketId?: string;
   /** Screen space reserved below the visible physical floor. */
   readonly bottomInset?: number;
+  readonly prediction?: ReturnType<typeof predictEndlessLaunch> | null;
+  readonly previewActive?: boolean;
 }
 
 interface VisualPreferences {
@@ -265,10 +272,11 @@ function ThornVisual({ hazard, highContrast }: {
   );
 }
 
-function AimVisual({ room, motion, highContrast }: {
+function AimVisual({ room, motion, highContrast, extended = false }: {
   readonly room: LaunchRoom;
   readonly motion: LaunchCanvasMotion;
   readonly highContrast: boolean;
+  readonly extended?: boolean;
 }) {
   const opacity = useDerivedValue(() => Math.hypot(motion.pullX.value, motion.pullY.value) >= MIN_PULL ? 1 : 0);
   const trajectory = useDerivedValue(() => {
@@ -308,9 +316,9 @@ function AimVisual({ room, motion, highContrast }: {
   const color = highContrast ? '#193D49' : '#315D65';
   return (
     <Group opacity={opacity}>
-      <Path path={trajectory} style="stroke" strokeWidth={2} color={color} strokeCap="round">
+      {!extended && <Path path={trajectory} style="stroke" strokeWidth={2} color={color} strokeCap="round">
         <DashPathEffect intervals={[2, 7]} />
-      </Path>
+      </Path>}
       <Path path={arrow} style="stroke" strokeWidth={2} color={color} strokeCap="round" strokeJoin="round" />
       <Group transform={powerTransform}>
         <RoundedRect x={0} y={0} width={38} height={7} r={3.5} color="#FFF2D8" />
@@ -319,6 +327,48 @@ function AimVisual({ room, motion, highContrast }: {
       </Group>
     </Group>
   );
+}
+
+function PickupVisual({ pickup, highContrast }: { pickup: LaunchPickup; highContrast: boolean }) {
+  const font = useFont(require('@expo-google-fonts/nunito-sans/800ExtraBold/NunitoSans_800ExtraBold.ttf'), 8);
+  const label = TOOL_LABELS[pickup.kind];
+  const width = font ? font.getGlyphWidths(font.getGlyphIDs(label)).reduce((sum, value) => sum + value, 0) : 30;
+  const ink = highContrast ? '#183f36' : '#28594b';
+  const glyph = pickup.kind === 'preview' ? 'M -7 6 Q -7 -9 4 -6 M 0 -10 L 5 -6 L 0 -2 M -7 6 L 6 6'
+    : pickup.kind === 'revive' ? 'M 0 8 C -18 -3 -5 -14 0 -5 C 5 -14 18 -3 0 8 Z'
+      : 'M -8 -3 L -8 6 Q 0 12 8 6 L 8 -3 M 0 -9 L 0 3 M -4 -1 L 0 3 L 4 -1';
+  return <Group transform={[{ translateX: pickup.center.x }, { translateY: pickup.center.y }]}>
+    <Circle cx={1} cy={3} r={pickup.radius + 1} color="rgba(46,67,47,0.19)" />
+    <Circle cx={0} cy={0} r={pickup.radius} color={pickup.kind === 'revive' ? '#f5cfca' : pickup.kind === 'preview' ? '#e0e9bc' : '#c3e3df'} />
+    <Circle cx={0} cy={0} r={pickup.radius} color={ink} strokeWidth={1.2} style="stroke"><DashPathEffect intervals={[2, 2]} /></Circle>
+    <Path path={glyph} color={ink} style="stroke" strokeWidth={1.7} strokeCap="round" strokeJoin="round" />
+    {font && <Group>
+      <RoundedRect x={-width / 2 - 5} y={pickup.radius + 3} width={width + 10} height={13} r={4} color="#fff8e7" />
+      <SkiaText x={-width / 2} y={pickup.radius + 12} text={label} font={font} color={ink} />
+    </Group>}
+  </Group>;
+}
+
+function PredictionVisual({ prediction }: { prediction: NonNullable<LaunchCanvasProps['prediction']> }) {
+  const path = useMemo(() => {
+    const result = Skia.PathBuilder.Make();
+    prediction.points.forEach((point, index) => { if (index === 0) result.moveTo(point.x, point.y); else result.lineTo(point.x, point.y); });
+    return result.detach();
+  }, [prediction.points]);
+  const last = prediction.points.at(-1);
+  const ink = prediction.outcome === 'fail' ? '#8f344c' : '#28594b';
+  return <Group>
+    <Path path={path} color="#fff8e7" strokeWidth={5} style="stroke" strokeCap="round" opacity={0.8} />
+    <Path path={path} color={ink} strokeWidth={2} style="stroke" strokeCap="round"><DashPathEffect intervals={[3, 4]} /></Path>
+    {prediction.bounces.map((bounce, index) => <Circle key={index} cx={bounce.x} cy={bounce.y} r={10} color={ink} style="stroke" strokeWidth={2} />)}
+    {last && <Group transform={[{ translateX: last.x }, { translateY: last.y }]}>
+      <Circle cx={0} cy={0} r={11} color="#fff8e7" />
+      <Circle cx={0} cy={0} r={11} color={ink} style="stroke" strokeWidth={1.5} />
+      {prediction.outcome === 'catch' ? <Path path="M -5 0 L -1 4 L 6 -4" color={ink} style="stroke" strokeWidth={2} strokeCap="round" />
+        : prediction.outcome === 'fail' ? <Path path="M -4 -4 L 4 4 M 4 -4 L -4 4" color={ink} style="stroke" strokeWidth={2} />
+          : [-5, 0, 5].map((x) => <Circle key={x} cx={x} cy={0} r={1.3} color={ink} />)}
+    </Group>}
+  </Group>;
 }
 
 function TutorialGesture({ pocket, motion, reducedMotion }: {
@@ -369,6 +419,8 @@ export function LaunchCanvas({
   showTutorial = false,
   nextPocketId,
   bottomInset = 0,
+  prediction,
+  previewActive = false,
 }: LaunchCanvasProps) {
   const palette = getGamePalette(highContrast);
   const width = room.bounds.width;
@@ -427,6 +479,7 @@ export function LaunchCanvas({
             ))}
             {room.hazards.map((hazard) => <ThornVisual key={hazard.id} hazard={hazard} highContrast={highContrast} />)}
             {room.bumpers.map((bumper) => <BumperVisual key={bumper.id} bumper={bumper} motion={motion} highContrast={highContrast} reducedMotion={reducedMotion} />)}
+            {room.pickups?.filter((pickup) => !state.pickupIds.includes(pickup.id)).map((pickup) => <PickupVisual key={pickup.id} pickup={pickup} highContrast={highContrast} />)}
             {room.patch && !state.patchCollected ? (
               <Group transform={[{ translateX: room.patch.center.x }, { translateY: room.patch.center.y }]}>
                 <Circle cx={0} cy={0} r={room.patch.radius + 7} color="rgba(255,246,219,0.8)" />
@@ -436,7 +489,8 @@ export function LaunchCanvas({
               </Group>
             ) : null}
             {room.pockets.map((pocket) => <PocketVisual key={pocket.id} pocket={pocket} state={state} motion={motion} highContrast={highContrast} reducedMotion={reducedMotion} highlighted={pocket.id === nextPocketId} />)}
-            {state.phase === 'held' ? <AimVisual room={room} motion={motion} highContrast={highContrast} /> : null}
+            {state.phase === 'held' ? <AimVisual room={room} motion={motion} highContrast={highContrast} extended={previewActive && !!prediction} /> : null}
+            {state.phase === 'held' && previewActive && prediction && <PredictionVisual prediction={prediction} />}
             <Group opacity={impactOpacity}>
               <Circle cx={motion.impactX} cy={motion.impactY} r={impactRadius} color={palette.frame} style="stroke" strokeWidth={1.5}>
                 <DashPathEffect intervals={[2, 5]} />
