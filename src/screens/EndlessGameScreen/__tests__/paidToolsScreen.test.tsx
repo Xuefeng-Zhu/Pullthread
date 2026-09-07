@@ -26,6 +26,9 @@ jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({
 jest.mock('../../../game/launch/LaunchCanvas', () => ({
   LaunchCanvas: jest.fn(() => MockReact.createElement(MockView, { testID: 'mock-launch-canvas' })),
 }));
+jest.mock('../../../components/ToolIcon', () => ({
+  ToolIcon: () => MockReact.createElement(MockView),
+}));
 jest.mock('../../../game/feedback', () => ({
   ExpoFeedbackService: jest.fn(() => ({ setPreferences: jest.fn(), play: jest.fn(async () => undefined), dispose: jest.fn() })),
 }));

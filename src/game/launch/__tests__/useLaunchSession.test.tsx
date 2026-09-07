@@ -7,6 +7,7 @@ import { NoopFeedbackService } from '../../feedback/FeedbackService';
 import * as endless from '../endless';
 import { useLaunchSession } from '../useLaunchSession';
 import { deserializeEndlessRun, serializeEndlessRun } from '../snapshots';
+import { pocketPosition } from '../simulation';
 
 const { createEndlessRun } = endless;
 const seed = 14;
@@ -85,6 +86,61 @@ describe('launch session lifecycle', () => {
     await view.unmount();
     expect(frames.size).toBe(0);
     expect(removeListener).toHaveBeenCalledTimes(1);
+  });
+
+  test('aim updates return the applied clamp and the motion container survives event rerenders', async () => {
+    const view = await renderHook(() => useLaunchSession(seed, true, feedback));
+    const motion = view.result.current.motion;
+    await act(() => {
+      expect(view.result.current.updateAim({ x: -24, y: 72 })).toBeNull();
+      expect(view.result.current.beginAim(start)).toBe(true);
+      expect(view.result.current.updateAim({ x: -100, y: 0 })).toEqual({ x: -68, y: 0 });
+    });
+    expect(view.result.current.motion).toBe(motion);
+    expect(motion.travelerX.value).toBe(12);
+    await act(() => {
+      expect(view.result.current.updateAim({ x: 0, y: 500 })).toEqual({ x: 0, y: 98 });
+      expect(view.result.current.updateAim({ x: -24, y: 72 })).toEqual({ x: -24, y: 72 });
+      view.result.current.releaseAim();
+      expect(view.result.current.updateAim({ x: 90, y: -90 })).toBeNull();
+    });
+    expect(view.result.current.motion).toBe(motion);
+    await frame();
+    for (let count = 0; count < 160 && view.result.current.state.phase === 'flying'; count += 1) await frame();
+    expect(view.result.current.score.pockets).toBe(1);
+    expect(view.result.current.motion).toBe(motion);
+    expect(view.result.current.getCameraY()).toBe(motion.cameraY.value);
+    await view.unmount();
+  });
+
+  test('Land targets use the live simulation clock and stay coherent while suspended', async () => {
+    const prepared = createEndlessRun(0);
+    prepared.inventory.teleport = 1;
+    prepared.room = { ...prepared.room, pockets: prepared.room.pockets.map((pocket) => pocket.id === 'endless-1'
+      ? { ...pocket, motion: { amplitude: 35, periodTicks: 360, phaseTicks: 0 } } : pocket) };
+    const receiver = prepared.room.pockets.find((pocket) => pocket.id === 'endless-1')!;
+    const view = await renderHook(() => useLaunchSession(0, true, feedback));
+    await act(() => { view.result.current.restoreSnapshot(serializeEndlessRun(prepared)); });
+    for (let count = 0; count < 22; count += 1) await frame();
+    expect(view.result.current.motion.tick.value).toBeGreaterThan(view.result.current.state.tick);
+    await act(() => view.result.current.suspend());
+    const tick = view.result.current.motion.tick.value;
+    const targets = view.result.current.getTeleportTargets();
+    const target = targets.pockets.find((pocket) => pocket.id === receiver.id)!;
+    expect(target).toEqual({ id: receiver.id, width: receiver.width, ...pocketPosition(receiver, tick) });
+    expect(target.x).not.toBe(receiver.center.x);
+    expect(targets.cameraY).toBe(view.result.current.getCameraY());
+    await changeAppState('background');
+    await frame(30_000);
+    await changeAppState('active');
+    await frame(30_000);
+    expect(view.result.current.getTeleportTargets()).toEqual(targets);
+    await act(() => {
+      expect(view.result.current.useFreeTool('teleport', target.id)).toBe(true);
+    });
+    expect(view.result.current.state.position).toEqual({ x: target.x, y: target.y });
+    expect(view.result.current.room.pockets.find((pocket) => pocket.id === target.id)?.motion).toBeUndefined();
+    await view.unmount();
   });
 
   test('blur cancels aiming and freezes a flight until focus resumes', async () => {

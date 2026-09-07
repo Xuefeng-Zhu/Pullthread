@@ -9,7 +9,7 @@ import type { LaunchCanvasMotion } from './LaunchCanvas';
 import { activatePreview, advanceEndless, createEndlessRun, eligibleTeleportPockets, launchEndless, nextEndlessChallenge, reviveEndless, teleportEndless, type EndlessRun } from './endless';
 import { cloneEndlessRun, deserializeEndlessRun, serializeEndlessRun } from './snapshots';
 import { predictEndlessLaunch } from './prediction';
-import { clampPull, createLaunchClock, MIN_PULL, resetLaunchClock } from './simulation';
+import { clampPull, createLaunchClock, MIN_PULL, pocketPosition, resetLaunchClock } from './simulation';
 import { clampEndlessPull } from './launchInput';
 import type { LaunchEvent, LaunchPoint, LaunchState } from './types';
 
@@ -53,9 +53,9 @@ export function useLaunchSession(seed: number, active: boolean, feedback: Feedba
   const impactTick = useSharedValue(-1000);
   const impactX = useSharedValue(0);
   const impactY = useSharedValue(0);
-  const motion: LaunchCanvasMotion & { cameraY: typeof cameraY } = {
+  const motion = useMemo<LaunchCanvasMotion & { cameraY: typeof cameraY }>(() => ({
     travelerX, travelerY, tick, pullX, pullY, cameraY, impactTick, impactX, impactY,
-  };
+  }), [travelerX, travelerY, tick, pullX, pullY, cameraY, impactTick, impactX, impactY]);
 
   const publish = useCallback(() => {
     const run = runRef.current;
@@ -160,8 +160,8 @@ export function useLaunchSession(seed: number, active: boolean, feedback: Feedba
     void feedback.play('fabricTouch');
     return true;
   }, [feedback]);
-  const updateAim = useCallback((translation: LaunchPoint) => {
-    if (!activeRef.current || suspendedRef.current || aimRef.current === null) return;
+  const updateAim = useCallback((translation: LaunchPoint): LaunchPoint | null => {
+    if (!activeRef.current || suspendedRef.current || aimRef.current === null) return null;
     const run = runRef.current;
     const current = run.state;
     const pull = clampPull(translation);
@@ -169,6 +169,9 @@ export function useLaunchSession(seed: number, active: boolean, feedback: Feedba
     aimRef.current = clampEndlessPull(pull, current.position, run.cameraY, run.room.bounds);
     publish();
     updatePrediction();
+    // The gesture already runs on JS. Return its authoritative clamp instead of
+    // synchronously reading the same values back from the UI runtime.
+    return aimRef.current;
   }, [publish, updatePrediction]);
   const releaseAim = useCallback(() => {
     const pull = aimRef.current;
@@ -226,7 +229,18 @@ export function useLaunchSession(seed: number, active: boolean, feedback: Feedba
     return true;
   }, [cancelAim, feedback, publishState]);
   const getTeleportPockets = useCallback(() => eligibleTeleportPockets(runRef.current), []);
+  const getCameraY = useCallback(() => runRef.current.cameraY, []);
+  const getTeleportTargets = useCallback(() => {
+    const run = runRef.current;
+    return {
+      cameraY: run.cameraY,
+      pockets: eligibleTeleportPockets(run).map((pocket) => ({
+        id: pocket.id, ...pocketPosition(pocket, run.state.tick), width: pocket.width,
+      })),
+    };
+  }, []);
 
   return { state, room, motion, score, tools, prediction, nextPocketId, challenge, hasAimed, message,
-    beginAim, updateAim, releaseAim, cancelAim, suspend, resume, getSnapshot, restoreSnapshot, preparePaidTool, useFreeTool, getTeleportPockets };
+    beginAim, updateAim, releaseAim, cancelAim, suspend, resume, getSnapshot, restoreSnapshot, preparePaidTool, useFreeTool,
+    getTeleportPockets, getCameraY, getTeleportTargets };
 }

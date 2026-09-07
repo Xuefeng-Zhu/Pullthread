@@ -35,6 +35,9 @@ jest.mock('react-native-safe-area-context', () => ({
 jest.mock('../../../game/launch/LaunchCanvas', () => ({
   LaunchCanvas: jest.fn(() => MockReact.createElement(MockView, { testID: 'mock-launch-canvas' })),
 }));
+jest.mock('../../../components/ToolIcon', () => ({
+  ToolIcon: () => MockReact.createElement(MockView),
+}));
 jest.mock('../../../game/launch/useLaunchSession', () => ({
   useLaunchSession: jest.fn(jest.requireActual<typeof import('../../../game/launch/useLaunchSession')>(
     '../../../game/launch/useLaunchSession',
@@ -68,6 +71,22 @@ function overrideChallenge(read: () => ActiveChallenge | undefined) {
     hasAimed: true,
     challenge: read(),
   }));
+}
+
+function rejectMotionReadbacks() {
+  const implementation = jest.mocked(useLaunchSession).getMockImplementation()!;
+  const readback = jest.fn(() => { throw new Error('Gesture handlers must not synchronously read UI shared values.'); });
+  jest.mocked(useLaunchSession).mockImplementation((...args) => {
+    const session = implementation(...args);
+    // Wrap the public motion values only. The actual simulation still publishes
+    // normally, and test assertions can inspect .value without exercising .get().
+    const motion = Object.fromEntries(Object.entries(session.motion).map(([key, value]) => [key,
+      new Proxy({} as typeof value, { get: (_target, property) => property === 'get'
+        ? readback : Reflect.get(value, property, value) }),
+    ])) as typeof session.motion;
+    return { ...session, motion };
+  });
+  return readback;
 }
 
 function harness() {
@@ -199,6 +218,53 @@ describe('endless Pull & Launch screen', () => {
     expect(latestCanvas().state.velocity).toEqual({ x: 180, y: -540 });
     expect(latestCanvas().showTutorial).toBe(false);
     expect(view.queryByTestId('launch-cue')).toBeNull();
+    await view.unmount();
+  });
+
+  test('repeated drag updates and a scrolled catch avoid synchronous shared-value readbacks', async () => {
+    const readback = rejectMotionReadbacks();
+    const view = await render(<EndlessGameScreen {...harness()} />);
+    await measure(view);
+    const gesture = getByGestureTestId('launch-pull-gesture') as ReturnType<typeof Gesture.Pan>;
+    type PanEvent = Parameters<NonNullable<typeof gesture.handlers.onBegin>>[0];
+    const event = { x: 80, y: 490, translationX: 0, translationY: 0, state: State.BEGAN } as PanEvent;
+    await act(() => {
+      gesture.handlers.onBegin?.(event);
+      for (let count = 1; count <= 50; count += 1) {
+        gesture.handlers.onUpdate?.({ ...event, state: State.ACTIVE,
+          translationX: -24 * count / 50, translationY: 72 * count / 50 });
+      }
+      gesture.handlers.onEnd?.({ ...event, state: State.END, translationX: -24, translationY: 72 }, true);
+      gesture.handlers.onFinalize?.({ ...event, state: State.END }, true);
+    });
+    expect(latestCanvas().state.position).toEqual({ x: 56, y: 562 });
+    await runFrames(180);
+    expect(latestCanvas().state.phase).toBe('held');
+    expect(cameraOffset()).toBeLessThan(0);
+    await drag({ x: 0, y: 60 });
+    expect(latestCanvas().state.launches).toBe(2);
+    expect(readback).not.toHaveBeenCalled();
+    await view.unmount();
+  });
+
+  test('a floor-clamped pull keeps its challenge hint until an effective stretch without shared-value reads', async () => {
+    const run = endless.createEndlessRun(0);
+    run.state.position = { x: 80, y: 589 };
+    run.state.previousPosition = { ...run.state.position };
+    run.room = { ...run.room, pockets: run.room.pockets.map((pocket) => pocket.id === run.state.pocketId
+      ? { ...pocket, center: { ...run.state.position } } : pocket) };
+    jest.spyOn(endless, 'createEndlessRun').mockReturnValueOnce(run);
+    overrideChallenge(() => bankChallenge);
+    const readback = rejectMotionReadbacks();
+    const view = await render(<EndlessGameScreen {...harness()} />);
+    await measure(view);
+    await drag({ x: 0, y: 50 });
+    expect(view.getByTestId('launch-challenge-cue')).toBeTruthy();
+    expect(latestCanvas().state.launches).toBe(0);
+    await drag({ x: -24, y: 50 }, { quick: false, cancelled: true });
+    expect(view.queryByTestId('launch-challenge-cue')).toBeNull();
+    expect(latestCanvas().state.launches).toBe(0);
+    expect(readback).not.toHaveBeenCalled();
     await view.unmount();
   });
 
@@ -501,6 +567,7 @@ describe('endless Pull & Launch screen', () => {
   });
 
   test('landing selection freezes the run, cancellation is free, and a chosen pocket scores once', async () => {
+    const readback = rejectMotionReadbacks();
     const run = endless.createEndlessRun(0);
     run.inventory.teleport = 1;
     jest.spyOn(endless, 'createEndlessRun').mockReturnValueOnce(run);
@@ -520,6 +587,7 @@ describe('endless Pull & Launch screen', () => {
     expect(latestCanvas().state.pocketId).toBe('endless-2');
     expect(view.getByTestId('launch-score').props.children).toBe(1);
     expect(view.queryByTestId('teleport-selection')).toBeNull();
+    expect(readback).not.toHaveBeenCalled();
     await view.unmount();
   });
 

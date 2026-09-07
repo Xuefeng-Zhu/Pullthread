@@ -20,9 +20,9 @@ import { usePreferencesStore } from '../../store/usePreferencesStore';
 import { useChallengeCue } from './useChallengeCue';
 import { TOOL_COSTS, type ToolKind } from '../../commerce/contracts';
 import { PaidToolJournal } from '../../commerce/paidToolJournal';
-import { TOOL_DESCRIPTIONS, TOOL_ICONS, TOOL_LABELS } from '../../commerce/toolCatalog';
+import { TOOL_DESCRIPTIONS, TOOL_LABELS } from '../../commerce/toolCatalog';
+import { ToolIcon } from '../../components/ToolIcon';
 import { deserializeEndlessRun } from '../../game/launch/snapshots';
-import { pocketPosition } from '../../game/launch/simulation';
 import { getCommerceService } from '../../services/commerce';
 import { isInsufficientPointsError } from '../../services/commerce/errors';
 import { useCommerceStore } from '../../store/useCommerceStore';
@@ -87,7 +87,8 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
   const { state, room, motion, score, beginAim, updateAim, releaseAim, cancelAim } = session;
   const { cue: challengeCue, beginCuePull, updateCuePull, cancelCuePull } = useChallengeCue(session.challenge, state.pocketId, hints);
   const { scale, offsetX, offsetY } = getLaunchViewport(area, room.bounds, insets.bottom);
-  const { suspend, resume, getSnapshot, restoreSnapshot, preparePaidTool, useFreeTool: consumeFreeTool, getTeleportPockets } = session;
+  const { suspend, resume, getSnapshot, restoreSnapshot, preparePaidTool, useFreeTool: consumeFreeTool,
+    getCameraY, getTeleportTargets } = session;
   const failedTool = useCallback((error: unknown) => {
     suspend();
     setToolError(error instanceof Error ? error.message : 'Your tool could not be checked. Try again.');
@@ -152,17 +153,14 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
     if (toolBusy) return;
     suspend(); setToolError(''); setToolNotice('');
     if (kind === 'teleport') {
-      const tick = motion.tick.get();
-      setToolLayer({ type: 'land', cameraY: motion.cameraY.get(), pockets: getTeleportPockets().map((pocket) => ({
-        id: pocket.id, ...pocketPosition(pocket, tick), width: pocket.width,
-      })) });
+      setToolLayer({ type: 'land', ...getTeleportTargets() });
       return;
     }
     if (session.tools.inventory[kind] > 0) {
       if (consumeFreeTool(kind)) { setPaused(false); resume(); return; }
     }
     setToolLayer({ type: 'tool', kind });
-  }, [resume, session.tools.inventory, suspend, toolBusy, consumeFreeTool, getTeleportPockets, motion.cameraY, motion.tick]);
+  }, [resume, session.tools.inventory, suspend, toolBusy, consumeFreeTool, getTeleportTargets]);
   const landAt = useCallback((pocketId: string) => {
     if (toolBusy) return;
     if (session.tools.inventory.teleport > 0 && consumeFreeTool('teleport', pocketId)) {
@@ -216,9 +214,9 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
     cancelAim();
   }, [cancelAim, cancelCuePull]);
   const updatePull = useCallback((pull: LaunchPoint) => {
-    updateAim(pull);
-    updateCuePull({ x: motion.pullX.get(), y: motion.pullY.get() });
-  }, [motion.pullX, motion.pullY, updateAim, updateCuePull]);
+    const clamped = updateAim(pull);
+    if (clamped) updateCuePull(clamped);
+  }, [updateAim, updateCuePull]);
 
   // Resizing changes the finger-to-world mapping. Discard a pull instead of
   // releasing it through a different projection; the flight itself is preserved.
@@ -227,7 +225,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
   const gesture = useMemo(() => Gesture.Pan().withTestId('launch-pull-gesture').runOnJS(true).minDistance(0).maxPointers(1)
     .enabled(focused && !paused && !toolLayer && !toolBusy && state.phase === 'held')
     .onBegin((event) => {
-      const accepted = beginAim({ x: (event.x - offsetX) / scale, y: (event.y - offsetY) / scale + motion.cameraY.get() }, Math.max(52, 24 / scale));
+      const accepted = beginAim({ x: (event.x - offsetX) / scale, y: (event.y - offsetY) / scale + getCameraY() }, Math.max(52, 24 / scale));
       beginCuePull(accepted);
     })
     .onUpdate((event) => updatePull({ x: event.translationX / scale, y: event.translationY / scale }))
@@ -239,7 +237,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
     })
     .onFinalize(() => cancelGesture()),
   [beginAim, beginCuePull, cancelGesture, focused,
-    motion.cameraY, offsetX, offsetY, paused, releaseAim, scale, state.phase, toolBusy, toolLayer, updatePull]);
+    getCameraY, offsetX, offsetY, paused, releaseAim, scale, state.phase, toolBusy, toolLayer, updatePull]);
   useEffect(() => { onScore(score.pockets); }, [onScore, score.pockets]);
   const measure = (event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;
@@ -331,7 +329,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
         {dead && <Text style={styles.result}>{score.pockets} {score.pockets === 1 ? 'pocket' : 'pockets'} reached · best {best}</Text>}
         {dead && !session.tools.reviveUsed && <Pressable testID="launch-revive-button" accessibilityRole="button"
           disabled={toolBusy} onPress={() => chooseTool('revive')} style={styles.reviveButton}>
-          <Ionicons name="heart-outline" size={20} color="#28594b" />
+          <ToolIcon kind="revive" size={20} color="#28594b" />
           <Text style={styles.actionText}>{session.tools.inventory.revive > 0 ? 'Use free Revive' : `Revive · ${TOOL_COSTS.revive} points`}</Text>
         </Pressable>}
         {dead && session.tools.reviveUsed && <Text style={styles.overlayCopy}>Revive used this run.</Text>}
@@ -360,7 +358,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
       {toolLayer.type === 'shop' ? <PointsShop onClose={closeTools} /> : <ScrollView contentContainerStyle={styles.dialogScroll} style={styles.dialogScroller}>
         <View testID={toolLayer.type === 'recovery' ? 'tool-recovery' : 'tool-confirmation'} style={styles.overlay} accessibilityViewIsModal>
           {toolLayer.type === 'tool' ? <>
-            <Ionicons name={TOOL_ICONS[toolLayer.kind]} size={36} color="#28594b" />
+            <ToolIcon kind={toolLayer.kind} size={36} color="#28594b" />
             <Text accessibilityRole="header" style={styles.overlayTitle}>{TOOL_LABELS[toolLayer.kind]}</Text>
             <Text style={styles.overlayCopy}>{TOOL_DESCRIPTIONS[toolLayer.kind]}</Text>
             <Text style={styles.result}>{TOOL_COSTS[toolLayer.kind]} points · {commerce.wallet?.points ?? 0} available</Text>

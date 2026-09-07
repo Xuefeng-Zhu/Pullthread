@@ -34,7 +34,7 @@ import type {
   LaunchState,
 } from './types';
 import { getLaunchViewport } from './viewport';
-import { TOOL_LABELS } from '../../commerce/toolCatalog';
+import { TOOL_ICON_PATHS, TOOL_ICON_SIZE, TOOL_ICON_STROKE_WIDTH, TOOL_LABELS } from '../../commerce/toolCatalog';
 import type { predictEndlessLaunch } from './prediction';
 
 /** The simulation publishes these values without rerendering React every tick. */
@@ -109,21 +109,28 @@ function PocketVisual({
   const event = state.event;
   const pocketEventTick = event && 'id' in event && event.id === pocket.id
     && (event.type === 'launch' || event.type === 'catch') ? event.tick : -1000;
-  const transform = useDerivedValue(() => {
-    const center = pocketPosition(pocket, motion.tick.value);
-    return [{ translateX: center.x }, { translateY: center.y }];
-  });
-  const deformation = useDerivedValue(() => {
-    const age = motion.tick.value - pocketEventTick;
+  // Capture only the inputs a worklet uses. Capturing the motion object makes
+  // Reanimated subscribe it to every shared value, including unrelated flight updates.
+  const { tick, pullX, pullY } = motion;
+  const stationaryTransform = useMemo(() => [
+    { translateX: pocket.center.x }, { translateY: pocket.center.y },
+  ], [pocket.center.x, pocket.center.y]);
+  const movingX = useDerivedValue(() => pocket.motion
+    ? pocketPosition(pocket, tick.value).x : pocket.center.x);
+  const movingTransform = useDerivedValue(() => [
+    { translateX: movingX.value }, { translateY: pocket.center.y },
+  ]);
+  // Primitive values stop propagation when an idle pocket's shape is unchanged.
+  const deformationX = useDerivedValue(() => occupied ? pullX.value : 0);
+  const deformationY = useDerivedValue(() => {
+    const age = tick.value - pocketEventTick;
     const snap = !reducedMotion && age >= 0 && age < 55
       ? Math.sin(age * 0.37) * Math.exp(-age / 15) * 10 : 0;
-    return {
-      x: occupied ? motion.pullX.value : 0,
-      y: (occupied ? motion.pullY.value : 0) + snap,
-    };
+    return (occupied ? pullY.value : 0) + snap;
   });
   const cup = useDerivedValue(() => {
-    const { x, y } = deformation.value;
+    const x = deformationX.value;
+    const y = deformationY.value;
     return Skia.PathBuilder.Make()
       .moveTo(-half, 0)
       .quadTo(0, 5, half, 0)
@@ -132,7 +139,8 @@ function PocketVisual({
       .close().detach();
   });
   const hem = useDerivedValue(() => {
-    const { x, y } = deformation.value;
+    const x = deformationX.value;
+    const y = deformationY.value;
     return Skia.PathBuilder.Make()
       .moveTo(-half + 6, 7)
       .cubicTo(-half + 2, 23, x - half * 0.56, y + 28, x, y + 29)
@@ -140,13 +148,13 @@ function PocketVisual({
       .detach();
   });
   const emblemTransform = useDerivedValue(() => [
-    { translateX: deformation.value.x * 0.55 },
-    { translateY: 19 + deformation.value.y * 0.6 },
+    { translateX: deformationX.value * 0.55 },
+    { translateY: 19 + deformationY.value * 0.6 },
   ]);
   const diamond = useMemo(() => starPath(6, 4, 0.65), []);
 
   return (
-    <Group transform={transform}>
+    <Group transform={pocket.motion ? movingTransform : stationaryTransform}>
       {isTarget ? (
         <>
           <Line p1={vec(-half + 7, -26)} p2={vec(-half + 7, -5)} color={outline} strokeWidth={2} />
@@ -203,17 +211,18 @@ function BumperVisual({ bumper, motion, highContrast, reducedMotion }: {
   readonly motion: LaunchCanvasMotion;
 } & VisualPreferences) {
   const { radius } = bumper;
-  const transform = useDerivedValue(() => {
-    const age = motion.tick.value - motion.impactTick.value;
-    const nearby = Math.hypot(motion.impactX.value - bumper.center.x, motion.impactY.value - bumper.center.y)
+  const { tick, impactTick, impactX, impactY } = motion;
+  const compression = useDerivedValue(() => {
+    const age = tick.value - impactTick.value;
+    const nearby = Math.hypot(impactX.value - bumper.center.x, impactY.value - bumper.center.y)
       < radius + BUTTON_RADIUS + 8;
-    const compression = !reducedMotion && nearby && age >= 0 && age < 35
+    return !reducedMotion && nearby && age >= 0 && age < 35
       ? Math.sin(age * 0.36) * Math.exp(-age / 10) * 0.16 : 0;
-    return [
-      { translateX: bumper.center.x }, { translateY: bumper.center.y },
-      { scaleX: 1 + compression }, { scaleY: 1 - compression },
-    ];
   });
+  const transform = useDerivedValue(() => [
+    { translateX: bumper.center.x }, { translateY: bumper.center.y },
+    { scaleX: 1 + compression.value }, { scaleY: 1 - compression.value },
+  ]);
   const petals = useMemo(() => Array.from({ length: 14 }, (_, index) => {
     const angle = (index / 14) * Math.PI * 2;
     return { x: Math.cos(angle) * radius * 0.8, y: Math.sin(angle) * radius * 0.8 };
@@ -278,13 +287,14 @@ function AimVisual({ room, motion, highContrast, extended = false }: {
   readonly highContrast: boolean;
   readonly extended?: boolean;
 }) {
-  const opacity = useDerivedValue(() => Math.hypot(motion.pullX.value, motion.pullY.value) >= MIN_PULL ? 1 : 0);
+  const { travelerX, travelerY, pullX, pullY } = motion;
+  const opacity = useDerivedValue(() => Math.hypot(pullX.value, pullY.value) >= MIN_PULL ? 1 : 0);
   const trajectory = useDerivedValue(() => {
     const path = Skia.PathBuilder.Make();
-    const x = motion.travelerX.value;
-    const y = motion.travelerY.value;
-    const vx = -motion.pullX.value * LAUNCH_POWER;
-    const vy = -motion.pullY.value * LAUNCH_POWER;
+    const x = travelerX.value;
+    const y = travelerY.value;
+    const vx = -pullX.value * LAUNCH_POWER;
+    const vy = -pullY.value * LAUNCH_POWER;
     path.moveTo(x, y);
     // Only the first 0.28 seconds: the player still discovers the route.
     for (let index = 1; index <= 14; index += 1) {
@@ -294,24 +304,24 @@ function AimVisual({ room, motion, highContrast, extended = false }: {
     return path.detach();
   });
   const arrow = useDerivedValue(() => {
-    const dx = -motion.pullX.value;
-    const dy = -motion.pullY.value;
+    const dx = -pullX.value;
+    const dy = -pullY.value;
     const length = Math.max(1, Math.hypot(dx, dy));
     const ux = dx / length;
     const uy = dy / length;
-    const tipX = motion.travelerX.value + ux * 25;
-    const tipY = motion.travelerY.value + uy * 25;
+    const tipX = travelerX.value + ux * 25;
+    const tipY = travelerY.value + uy * 25;
     return Skia.PathBuilder.Make()
       .moveTo(tipX - ux * 7 - uy * 4, tipY - uy * 7 + ux * 4)
       .lineTo(tipX, tipY)
       .lineTo(tipX - ux * 7 + uy * 4, tipY - uy * 7 - ux * 4)
       .detach();
   });
-  const power = useDerivedValue(() => Math.min(1, Math.hypot(motion.pullX.value, motion.pullY.value) / MAX_PULL));
+  const power = useDerivedValue(() => Math.min(1, Math.hypot(pullX.value, pullY.value) / MAX_PULL));
   const powerWidth = useDerivedValue(() => Math.max(0.1, power.value * 34));
   const powerTransform = useDerivedValue(() => [
-    { translateX: motion.travelerX.value - 19 },
-    { translateY: motion.travelerY.value + 20 },
+    { translateX: travelerX.value - 19 },
+    { translateY: travelerY.value + 20 },
   ]);
   const color = highContrast ? '#193D49' : '#315D65';
   return (
@@ -334,14 +344,14 @@ function PickupVisual({ pickup, highContrast }: { pickup: LaunchPickup; highCont
   const label = TOOL_LABELS[pickup.kind];
   const width = font ? font.getGlyphWidths(font.getGlyphIDs(label)).reduce((sum, value) => sum + value, 0) : 30;
   const ink = highContrast ? '#183f36' : '#28594b';
-  const glyph = pickup.kind === 'preview' ? 'M -7 6 Q -7 -9 4 -6 M 0 -10 L 5 -6 L 0 -2 M -7 6 L 6 6'
-    : pickup.kind === 'revive' ? 'M 0 8 C -18 -3 -5 -14 0 -5 C 5 -14 18 -3 0 8 Z'
-      : 'M -8 -3 L -8 6 Q 0 12 8 6 L 8 -3 M 0 -9 L 0 3 M -4 -1 L 0 3 L 4 -1';
   return <Group transform={[{ translateX: pickup.center.x }, { translateY: pickup.center.y }]}>
     <Circle cx={1} cy={3} r={pickup.radius + 1} color="rgba(46,67,47,0.19)" />
     <Circle cx={0} cy={0} r={pickup.radius} color={pickup.kind === 'revive' ? '#f5cfca' : pickup.kind === 'preview' ? '#e0e9bc' : '#c3e3df'} />
     <Circle cx={0} cy={0} r={pickup.radius} color={ink} strokeWidth={1.2} style="stroke"><DashPathEffect intervals={[2, 2]} /></Circle>
-    <Path path={glyph} color={ink} style="stroke" strokeWidth={1.7} strokeCap="round" strokeJoin="round" />
+    <Group transform={[{ translateX: -TOOL_ICON_SIZE / 2 }, { translateY: -TOOL_ICON_SIZE / 2 }]}>
+      <Path path={TOOL_ICON_PATHS[pickup.kind]} color={ink} style="stroke" strokeWidth={TOOL_ICON_STROKE_WIDTH}
+        strokeCap="round" strokeJoin="round" />
+    </Group>
     {font && <Group>
       <RoundedRect x={-width / 2 - 5} y={pickup.radius + 3} width={width + 10} height={13} r={4} color="#fff8e7" />
       <SkiaText x={-width / 2} y={pickup.radius + 12} text={label} font={font} color={ink} />
@@ -376,18 +386,19 @@ function TutorialGesture({ pocket, motion, reducedMotion }: {
   readonly motion: LaunchCanvasMotion;
   readonly reducedMotion: boolean;
 }) {
-  const transform = useDerivedValue(() => {
-    const cycle = (motion.tick.value / LAUNCH_HZ) % 2.6;
-    const pull = reducedMotion ? 0.72 : Math.min(1, Math.max(0, (cycle - 0.3) / 1.2));
-    return [
-      { translateX: pocket.center.x - pull * 24 },
-      { translateY: pocket.center.y + pull * 72 },
-    ];
+  const { tick, pullX, pullY } = motion;
+  const gesturePull = useDerivedValue(() => {
+    const cycle = (tick.value / LAUNCH_HZ) % 2.6;
+    return reducedMotion ? 0.72 : Math.min(1, Math.max(0, (cycle - 0.3) / 1.2));
   });
+  const transform = useDerivedValue(() => [
+    { translateX: pocket.center.x - gesturePull.value * 24 },
+    { translateY: pocket.center.y + gesturePull.value * 72 },
+  ]);
   const opacity = useDerivedValue(() => {
-    if (Math.hypot(motion.pullX.value, motion.pullY.value) > 3) return 0;
+    if (Math.hypot(pullX.value, pullY.value) > 3) return 0;
     if (reducedMotion) return 0.6;
-    const cycle = (motion.tick.value / LAUNCH_HZ) % 2.6;
+    const cycle = (tick.value / LAUNCH_HZ) % 2.6;
     return cycle > 2.1 ? Math.max(0, (2.6 - cycle) * 1.5) : 0.75;
   });
   return (
@@ -426,15 +437,19 @@ export function LaunchCanvas({
   const width = room.bounds.width;
   const { scale, offsetX, offsetY } = getLaunchViewport(size, room.bounds, bottomInset);
   const floorY = size.height - bottomInset;
+  const { cameraY, tick, impactTick } = motion;
   const cameraTransform = useDerivedValue(() => [
-    { translateY: -(motion.cameraY?.value ?? 0) },
+    { translateY: -(cameraY?.value ?? 0) },
   ]);
   const speed = useDerivedValue<number>(() => state.phase === 'flying' && !reducedMotion ? 0.6 : 0);
   const impactOpacity = useDerivedValue(() => {
-    const age = motion.tick.value - motion.impactTick.value;
-    return reducedMotion || motion.impactTick.value < 0 || age < 0 || age > 32 ? 0 : (1 - age / 32) * 0.65;
+    const age = tick.value - impactTick.value;
+    return reducedMotion || impactTick.value < 0 || age < 0 || age > 32 ? 0 : (1 - age / 32) * 0.65;
   });
-  const impactRadius = useDerivedValue(() => 12 + Math.max(0, motion.tick.value - motion.impactTick.value) * 0.85);
+  const impactRadius = useDerivedValue(() => {
+    if (reducedMotion || impactTick.value < 0) return 12;
+    return 12 + Math.min(32, Math.max(0, tick.value - impactTick.value)) * 0.85;
+  });
   const travelerOpacity = state.phase === 'failed' ? 0.3 : 1;
   const patch = useMemo(() => starPath((room.patch?.radius ?? 14) + 2, 5, 0.5), [room.patch?.radius]);
   const heldPocket = room.pockets.find((pocket) => pocket.id === state.pocketId);
