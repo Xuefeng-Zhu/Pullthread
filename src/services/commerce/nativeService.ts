@@ -26,7 +26,6 @@ export function createNativeCommerceService(config: CommerceConfig, load: Native
         runtime = await load();
         const accountId = await runtime.authenticate();
         if (!accountId) throw new CommerceError('Your guest account is unavailable. Please try again.', 'account');
-        await runtime.configure(accountId, config.revenueCatKey!);
         return accountId;
       })().catch((error) => { initialization = undefined; throw error; });
     }
@@ -60,6 +59,7 @@ export function createNativeCommerceService(config: CommerceConfig, load: Native
     getWallet: async () => (await sync()).wallet,
     getOffers: async () => {
       await sync(); // Bind this authenticated customer before displaying a purchase sheet.
+      await runtime.configure(await initialize(), config.revenueCatKey!);
       const products = await runtime.getProducts();
       const offers = new Map<string, PointOffer>();
       for (const product of products) {

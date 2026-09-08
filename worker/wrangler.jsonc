@@ -1,0 +1,35 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pullthread-commerce",
+  "account_id": "62694a02d05e9f529bba1664135adc2f",
+  "main": "src/entry.ts",
+  "compatibility_date": "2026-09-07",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": true,
+  "preview_urls": false,
+  "vars": {
+    "FIREBASE_PROJECT_ID": "pullthread-xuefeng-zhu",
+    "REVENUECAT_PROJECT_ID": "f8ab5b69",
+    "REVENUECAT_APP_IDS": "",
+    "COMMERCE_ENABLED_ENVIRONMENTS": "",
+    "LEADERBOARD_ENABLED_ENVIRONMENTS": "sandbox",
+    "COSMETICS_ENABLED_ENVIRONMENTS": "sandbox",
+    "LEADERBOARD_PRIZES_ENABLED": ""
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "pullthread-commerce",
+      "database_id": "d1d6331e-e9a8-4aec-b20b-f79637758489",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "*/5 * * * *"
+    ]
+  },
+  "minify": true
+}

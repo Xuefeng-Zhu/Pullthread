@@ -1,6 +1,6 @@
 /** @jest-environment node */
 import { describe, expect, test } from '@jest/globals';
-import { createEndlessRun, launchEndless, nextEndlessChallenge, stepEndless } from '../endless';
+import { createLegacyEndlessRun as createEndlessRun, launchEndless, nextEndlessChallenge, stepEndless } from '../endless';
 import { predictEndlessLaunch } from '../prediction';
 import { clampEndlessPull } from '../launchInput';
 import { cloneEndlessRun, serializeEndlessRun } from '../snapshots';

@@ -102,4 +102,19 @@ describe('rendered points shop', () => {
     expect(view.getByText('125 points')).toBeTruthy();
     expect(view.getByText('1,29 €')).toBeTruthy();
   });
+
+  test('keeps customization and the weekly leaderboard inside Points & tools', async () => {
+    const customize = jest.fn();
+    const leaderboard = jest.fn();
+    mockStore = createCommerceStore(provider());
+    await mockStore.getState().initialize();
+    const view = await render(<PointsShop onClose={jest.fn()} onCustomize={customize} onLeaderboard={leaderboard} />);
+
+    expect(view.getByText('PLAY & PERSONALIZE')).toBeTruthy();
+    await fireEvent.press(view.getByTestId('points-button-studio'));
+    await fireEvent.press(view.getByTestId('points-weekly-leaderboard'));
+
+    expect(customize).toHaveBeenCalledTimes(1);
+    expect(leaderboard).toHaveBeenCalledTimes(1);
+  });
 });

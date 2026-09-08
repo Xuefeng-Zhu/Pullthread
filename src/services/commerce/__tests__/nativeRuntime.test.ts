@@ -1,10 +1,11 @@
 /** @jest-environment node */
-import { beforeEach, describe, expect, jest, test } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { CommerceConfig } from '../config';
 import type { NativeCommerceRuntime } from '../nativeService';
 
-const mockAuth: { currentUser: { uid: string } | null; authStateReady: jest.Mock<() => Promise<void>> } = {
+const mockToken = jest.fn(async () => 'firebase-id-token');
+const mockAuth: { currentUser: { uid: string; getIdToken?: typeof mockToken } | null; authStateReady: jest.Mock<() => Promise<void>> } = {
   currentUser: null, authStateReady: jest.fn<() => Promise<void>>(),
 };
 const mockPersistence = jest.fn(() => ({ type: 'LOCAL' }));
@@ -38,20 +39,21 @@ const product = (identifier = 'pullthread_points_100', productCategory = 'NON_SU
   identifier: 'package', product: { identifier, productCategory, priceString: '€1,29' },
 });
 
-async function runtime(): Promise<NativeCommerceRuntime> {
+async function runtime(overrides: Partial<CommerceConfig> = {}): Promise<NativeCommerceRuntime> {
   let result!: NativeCommerceRuntime;
   await jest.isolateModulesAsync(async () => {
     // Jest's CJS runner needs require to reload native module state per case.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const nativeModule = require('../nativeRuntime.native') as typeof import('../nativeRuntime.native');
-    result = await nativeModule.loadNativeRuntime(config);
+    result = await nativeModule.loadNativeRuntime({ ...config, ...overrides });
   });
   return result;
 }
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockAuth.currentUser = { uid: 'restored-guest' };
+  mockAuth.currentUser = { uid: 'restored-guest', getIdToken: mockToken };
+  mockToken.mockResolvedValue('firebase-id-token');
   mockAuth.authStateReady.mockResolvedValue(undefined);
   mockInitializeAuth.mockImplementation(() => mockAuth);
   mockPurchases.isConfigured.mockResolvedValue(false);
@@ -59,6 +61,7 @@ beforeEach(() => {
   mockPurchases.getOfferings.mockResolvedValue({ all: { points: { availablePackages: [product()] } } });
   mockPurchases.purchasePackage.mockResolvedValue({ transaction: { transactionIdentifier: 'store-transaction' } });
 });
+afterEach(() => { jest.restoreAllMocks(); });
 
 describe('native guest identity and RevenueCat adapter', () => {
   test('restores persisted Firebase auth before deciding whether to create a guest', async () => {
@@ -130,5 +133,47 @@ describe('native guest identity and RevenueCat adapter', () => {
     await expect(adapter.authenticate()).rejects.toThrow('storage failed');
     expect(mockSignIn).not.toHaveBeenCalled();
     expect(mockPurchases.configure).not.toHaveBeenCalled();
+  });
+
+  test('Workers retains the persisted Firebase UID and RevenueCat binding while replacing only transport', async () => {
+    const fetcher = jest.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify({ result: { wallet: { points: 25 } } }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    const adapter = await runtime({ backendProvider: 'workers', backendUrl: 'https://points.example.com' });
+    expect(await adapter.authenticate()).toBe('restored-guest');
+    await adapter.configure('restored-guest', 'appl_public');
+    expect(await adapter.call('commerceSyncWallet', { environment: 'sandbox' })).toEqual({ wallet: { points: 25 } });
+    expect(mockSignIn).not.toHaveBeenCalled();
+    expect(mockToken).toHaveBeenCalledTimes(1);
+    expect(mockPurchases.configure).toHaveBeenCalledWith({ appUserID: 'restored-guest', apiKey: 'appl_public' });
+    expect(fetcher).toHaveBeenCalledWith('https://points.example.com/commerceSyncWallet', expect.objectContaining({
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer firebase-id-token' },
+    }));
+    expect(mockCallable).not.toHaveBeenCalled();
+  });
+
+  test('Workers rejects a changed UID during token refresh before sending any request', async () => {
+    const fetcher = jest.spyOn(global, 'fetch');
+    let resolveToken!: (value: string) => void;
+    mockToken.mockImplementationOnce(() => new Promise(resolve => { resolveToken = resolve; }));
+    const adapter = await runtime({ backendProvider: 'workers', backendUrl: 'https://points.example.com' });
+    await adapter.configure('restored-guest', 'appl_public');
+    const attempt = expect(adapter.call('commerceRedeemTool', { operationId: 'saved-operation' })).rejects.toMatchObject({ code: 'account' });
+    mockAuth.currentUser = { uid: 'different-guest', getIdToken: mockToken };
+    resolveToken('old-user-token');
+    await attempt;
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(mockCallable).not.toHaveBeenCalled();
+    expect(mockSignIn).not.toHaveBeenCalled();
+  });
+
+  test('an absent provider continues using the original Firebase callable protocol', async () => {
+    const fetcher = jest.spyOn(global, 'fetch');
+    const adapter = await runtime({ backendUrl: 'https://points.example.com' });
+    await adapter.configure('restored-guest', 'appl_public');
+    await adapter.call('commerceRedeemTool', { operationId: 'legacy-operation', environment: 'sandbox' });
+    expect(mockCallable).toHaveBeenCalledWith(expect.anything(), 'commerceRedeemTool');
+    expect(mockCall).toHaveBeenCalledWith({ operationId: 'legacy-operation', environment: 'sandbox' });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });

@@ -1,0 +1,11 @@
+CREATE TABLE weekly_profiles (uid TEXT PRIMARY KEY, alias TEXT NOT NULL);
+CREATE TABLE weekly_runs (id TEXT PRIMARY KEY, uid TEXT NOT NULL, environment TEXT NOT NULL CHECK(environment IN ('sandbox','production')), request_id TEXT NOT NULL, seed INTEGER NOT NULL, week INTEGER NOT NULL, created_at INTEGER NOT NULL, ruleset TEXT NOT NULL, sequence INTEGER NOT NULL DEFAULT 0, elapsed INTEGER NOT NULL DEFAULT 0, aiming INTEGER NOT NULL DEFAULT 0, checkpoint TEXT NOT NULL, UNIQUE(uid,environment,request_id));
+CREATE INDEX weekly_run_owner ON weekly_runs(uid,environment,created_at);
+CREATE TABLE weekly_batches (run_id TEXT NOT NULL REFERENCES weekly_runs(id), sequence INTEGER NOT NULL, digest TEXT NOT NULL, score INTEGER NOT NULL, PRIMARY KEY(run_id,sequence));
+CREATE TABLE weekly_receipts (uid TEXT NOT NULL, environment TEXT NOT NULL, operation_id TEXT NOT NULL, run_id TEXT NOT NULL, PRIMARY KEY(uid,environment,operation_id));
+CREATE TABLE weekly_entries (accepted INTEGER PRIMARY KEY AUTOINCREMENT, uid TEXT NOT NULL, environment TEXT NOT NULL, week INTEGER NOT NULL, score INTEGER NOT NULL CHECK(score > 0), UNIQUE(uid,environment,week));
+CREATE INDEX weekly_ranking ON weekly_entries(environment,week,score DESC,accepted ASC);
+CREATE TABLE weekly_settlements (environment TEXT NOT NULL, week INTEGER NOT NULL, rewards_enabled INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(environment,week));
+CREATE TABLE weekly_winners (environment TEXT NOT NULL, week INTEGER NOT NULL, uid TEXT NOT NULL, rank INTEGER NOT NULL, score INTEGER NOT NULL, PRIMARY KEY(environment,week,uid), UNIQUE(environment,week,rank));
+CREATE TABLE weekly_awards (environment TEXT NOT NULL, week INTEGER NOT NULL, uid TEXT NOT NULL, rank INTEGER NOT NULL, points INTEGER NOT NULL, PRIMARY KEY(environment,week,uid));
+CREATE TABLE commerce_reward_lots (uid TEXT NOT NULL, environment TEXT NOT NULL, tx_key TEXT NOT NULL, remaining INTEGER NOT NULL CHECK(remaining >= 0), purchased_at INTEGER NOT NULL, active INTEGER NOT NULL, revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked = 0), PRIMARY KEY(uid,environment,tx_key), FOREIGN KEY(uid,environment) REFERENCES commerce_wallets(uid,environment));

@@ -1,7 +1,7 @@
 /** @jest-environment node */
 import { describe, expect, test } from '@jest/globals';
 import {
-  activatePreview, createEndlessRun, eligibleTeleportPockets, launchEndless, reviveEndless,
+  activatePreview, createEndlessRun, createLegacyEndlessRun, eligibleTeleportPockets, launchEndless, reviveEndless,
   stepEndless, teleportEndless, type EndlessRun,
 } from '../endless';
 import { scheduledPickupKind } from '../pickups';
@@ -83,8 +83,8 @@ describe('run tools and airborne collectibles', () => {
     }
   });
 
-  test('generation substitutes future revive pickups, without changing an existing visible one', () => {
-    const run = createEndlessRun(0);
+  test('legacy generation substitutes future revive pickups, without changing an existing visible one', () => {
+    const run = createLegacyEndlessRun(0);
     expect(run.room.pickups!.find((pickup) => pickup.id === 'endless-pickup-4')!.kind).toBe('revive');
     run.reviveUsed = true;
     for (let index = 0; index < 14; index += 1) replayNext(run, findNextInput(run));

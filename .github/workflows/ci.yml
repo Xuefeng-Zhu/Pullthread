@@ -36,6 +36,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Verify immutable weekly ruleset
+        run: node scripts/check-weekly-ruleset.cjs
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -72,3 +75,31 @@ jobs:
 
       - name: Test callable validation, transactions, and security rules
         run: npm test --prefix functions
+
+  workers-backend:
+    name: Workers API and D1 transactions
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CI: "true"
+      WRANGLER_SEND_METRICS: "false"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+
+      - name: Install locked Worker dependencies
+        run: npm ci --prefix worker
+
+      - name: Verify API authentication and real D1 transactions
+        run: npm test --prefix worker
+
+      - name: Bundle Worker without deploying
+        run: npm run build --prefix worker

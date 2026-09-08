@@ -67,7 +67,7 @@ describe('commerce service gates and native verification', () => {
     expect(runtime.configure).not.toHaveBeenCalled();
     expect(runtime.purchase).not.toHaveBeenCalled();
     await expect(service.getWallet()).resolves.toEqual(wallet());
-    expect(runtime.configure).toHaveBeenCalledTimes(1);
+    expect(runtime.configure).not.toHaveBeenCalled();
   });
 
   test.each(['cancelled', 'pending'] as const)('a %s native purchase never optimistically credits a pack', async (status) => {
@@ -162,7 +162,7 @@ describe('commerce service gates and native verification', () => {
     expect(await service.getAccountId()).toBe('stable-guest');
     runtime.authenticate.mockResolvedValue('different-guest');
     await expect(service.getAccountId()).rejects.toThrow('guest account changed');
-    expect(runtime.configure).toHaveBeenCalledTimes(1);
+    expect(runtime.configure).not.toHaveBeenCalled();
   });
 });
 

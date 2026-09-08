@@ -2,7 +2,7 @@
 import { describe, expect, test } from '@jest/globals';
 import { BANK_PATTERNS } from '../bankPatterns';
 import { CHALLENGE_PATTERNS, mirrorChallenge } from '../challenges';
-import { createEndlessRun, nextEndlessChallenge } from '../endless';
+import { createLegacyEndlessRun as createEndlessRun, nextEndlessChallenge } from '../endless';
 import { findNextInput, replayNext } from '../testing/routeSolver';
 import type { ChallengePattern } from '../challengeTypes';
 import { FLIGHT_PATTERNS } from '../flightPatterns';

@@ -1,6 +1,6 @@
 /** @jest-environment node */
 import { describe, expect, test } from '@jest/globals';
-import { createEndlessRun, launchEndless, stepEndless } from '../endless';
+import { createEndlessRun, createLegacyEndlessRun, launchEndless, stepEndless } from '../endless';
 import { cloneEndlessRun, deserializeEndlessRun, serializeEndlessRun } from '../snapshots';
 
 describe('run snapshot recovery', () => {
@@ -30,7 +30,7 @@ describe('run snapshot recovery', () => {
   });
 
   test('rejects corrupted versions, unsafe generator cursors, malformed physics, and missing tool state', () => {
-    const encoded = serializeEndlessRun(createEndlessRun(0));
+    const encoded = serializeEndlessRun(createLegacyEndlessRun(0));
     const change = (mutate: (value: any) => void) => { // Test malformed external JSON, intentionally outside the static contract.
       const value: unknown = JSON.parse(encoded);
       mutate(value);

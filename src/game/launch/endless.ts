@@ -7,6 +7,9 @@ import {
   pocketPosition,
   resetLaunchClock,
   stepLaunch,
+  isPocketExpired,
+  startPocketLifetime,
+  activateLandingSwitches,
 } from './simulation';
 import type {
   LaunchBumper,
@@ -24,6 +27,11 @@ import type { ActiveChallenge, AnchorRange, ChallengeFamily, ChallengePattern } 
 import type { ToolKind } from '../../commerce/contracts';
 import { pickupPlacement, scheduledPickupKind } from './pickups';
 import { captureEndlessWorld, restoreEndlessWorld } from './snapshots';
+import type { SectionFamily } from './sections';
+import { updateSectionWindow } from './sectionWindow';
+import { updateInteractiveWindow } from './interactiveWindow';
+import type { IntroducedMechanic, IntroductionProgress, WorldMechanic } from './progression';
+import type { InteractiveIntroduction, InteractiveMechanic } from './interactiveProgression';
 
 export const ENDLESS_WIDTH = 360;
 export const ENDLESS_HEIGHT = 600;
@@ -31,6 +39,8 @@ export const ENDLESS_START_Y = 490;
 const LOOK_AHEAD = 5;
 const KEEP_BEHIND = 2;
 const CAMERA_EASING = 0.08;
+/** Leave room below the oldest retained catch for its pull and a readable miss. */
+const RECOVERY_FLOOR_CLEARANCE = 110;
 
 interface OwnedChallenge extends ActiveChallenge {
   readonly index: number;
@@ -39,7 +49,40 @@ interface OwnedChallenge extends ActiveChallenge {
   readonly pickupIds: readonly string[];
 }
 
+export interface OwnedSection {
+  readonly id: string;
+  readonly index: number;
+  readonly patternId: string;
+  readonly family: SectionFamily;
+  readonly startRank: number;
+  readonly endRank: number;
+  readonly entryPocketId: string;
+  readonly exitPocketId: string;
+  readonly pocketIds: readonly string[];
+  readonly bumperIds: readonly string[];
+  readonly hazardIds: readonly string[];
+  readonly pickupIds: readonly string[];
+  readonly connections: readonly { from: string; to: string }[];
+  readonly cue: string;
+  readonly worldStage?: number;
+  readonly mechanics?: readonly (WorldMechanic | InteractiveMechanic)[];
+  readonly introduction?: IntroducedMechanic | InteractiveIntroduction;
+  readonly windZoneIds?: readonly string[];
+  readonly barrierIds?: readonly string[];
+  readonly switchIds?: readonly string[];
+}
+
+export interface SectionProgress {
+  nextIndex: number;
+  lastFamily?: SectionFamily;
+  sections: readonly OwnedSection[];
+  introductions?: IntroductionProgress;
+}
+
 export interface EndlessRun {
+  /** Missing on historical version-one journals. Never upgrade a run mid-flight. */
+  readonly generationVersion?: 1 | 2 | 3 | 4;
+  sectionProgress?: SectionProgress;
   readonly seed: number;
   room: LaunchRoom;
   state: LaunchState;
@@ -90,10 +133,39 @@ function opening(index: number): ChallengePattern {
 }
 
 export function nextEndlessChallenge(run: EndlessRun): ActiveChallenge | undefined {
+  if ((run.generationVersion ?? 1) >= 2) {
+    const section = run.sectionProgress?.sections.find((item) => item.connections.some((edge) => edge.from === run.state.pocketId));
+    if (section) {
+      const hasPickup = run.room.pickups?.some((pickup) => section.pickupIds.includes(pickup.id));
+      const cue = hasPickup || run.generationVersion === 4 || (run.generationVersion === 3 && section.mechanics?.length) ? section.cue : {
+        fork: 'Choose the roomy pockets, or try the narrower star lane.',
+        cushion: 'The side cushions can bounce you back toward the pockets.',
+        gate: 'Watch the moving thorns. Wait for your route to open.',
+        fray: 'Loose stitches last four seconds after landing. The wide route has no timer.',
+      }[section.family];
+      return { pocketId: run.nextPocketId, patternId: section.patternId,
+        ...(section.introduction ? { introductionKey: section.id } : {}),
+        family: section.family === 'cushion' ? 'bank' : section.family === 'gate' ? 'timing' : 'arc',
+        band: run.pocketsCaught < 7 ? 'intro' : run.pocketsCaught < 15 ? 'mixed' : 'expert', cue };
+    }
+  }
   return run.challenges.find((challenge) => challenge.pocketId === run.nextPocketId);
 }
 
-function updateWindow(run: EndlessRun): void {
+/** Both authored choices are hints, never a restriction on physically legal catches. */
+export function nextEndlessTargets(run: EndlessRun): readonly string[] {
+  if ((run.generationVersion ?? 1) < 2) return [run.nextPocketId];
+  const ids = run.sectionProgress?.sections.flatMap((section) =>
+    section.connections.filter((edge) => edge.from === run.state.pocketId).map((edge) => edge.to)) ?? [];
+  if (!ids.length && run.state.pocketId === 'endless-0') ids.push('endless-1');
+  if (!ids.length && run.state.pocketId === 'endless-1') ids.push('endless-2');
+  return [...new Set(ids)].filter((id) => {
+    const pocket = run.room.pockets.find((candidate) => candidate.id === id);
+    return pocket && !isPocketExpired(run.state, pocket);
+  });
+}
+
+function updateLegacyWindow(run: EndlessRun): void {
   const pockets = [...run.room.pockets];
   const bumpers: LaunchBumper[] = [...run.room.bumpers];
   const hazards: LaunchHazard[] = [...run.room.hazards];
@@ -161,23 +233,45 @@ function updateWindow(run: EndlessRun): void {
   run.nextPocketId = pocketId(run.highestPocket + 1);
 }
 
-export function createEndlessRun(seed: number): EndlessRun {
+function updateWindow(run: EndlessRun): void {
+  if (run.generationVersion === 4) updateInteractiveWindow(run);
+  else if ((run.generationVersion ?? 1) >= 2) updateSectionWindow(run);
+  else updateLegacyWindow(run);
+}
+
+/** Kept for version-one run continuation and historical route verification. */
+export function createLegacyEndlessRun(seed: number): EndlessRun { return createEndlessRun(seed, 1); }
+
+/** Historical section rules remain available for saved version-two runs. */
+export function createSectionEndlessRun(seed: number): EndlessRun { return createEndlessRun(seed, 2); }
+
+/** Historical stitched worlds retain their original mechanics and selection. */
+export function createWorldEndlessRun(seed: number): EndlessRun { return createEndlessRun(seed, 3); }
+
+export function createEndlessRun(seed: number, generationVersion: 1 | 2 | 3 | 4 = 4): EndlessRun {
   const stableSeed = Number.isFinite(seed) ? seed >>> 0 : 0;
   const room: LaunchRoom = {
     id: 'endless-climb',
     name: 'Pull & Launch',
     subtitle: 'How high can one little button climb?',
-    hint: 'Pull down and away, then let go. Keep catching pockets. A fall ends your climb.',
+    hint: generationVersion >= 2
+      ? 'Pull down and away, then let go. Bounce off the padded sides. Lower pockets can catch a miss.'
+      : 'Pull down and away, then let go. Keep catching pockets. A fall ends your climb.',
     bounds: { width: ENDLESS_WIDTH, height: ENDLESS_HEIGHT, top: Number.NEGATIVE_INFINITY, bottom: ENDLESS_HEIGHT },
     gravity: 700,
     flightTimeoutTicks: null,
+    ...(generationVersion >= 2 ? { sideWallRestitution: 0.8 } : {}),
     startPocketId: pocketId(0),
     pockets: [{ id: pocketId(0), center: { x: 80, y: ENDLESS_START_Y }, width: 78, kind: 'start' }],
     bumpers: [],
     hazards: [],
     pickups: [],
+    ...(generationVersion >= 3 ? { windZones: [] } : {}),
+    ...(generationVersion === 4 ? { barriers: [], switches: [] } : {}),
   };
   const run: EndlessRun = {
+    generationVersion,
+    ...(generationVersion >= 2 ? { sectionProgress: { nextIndex: 0, sections: [], ...(generationVersion >= 3 ? { introductions: [0, 0, 0, 0] as IntroductionProgress } : {}) } } : {}),
     seed: stableSeed,
     room,
     state: createLaunchState(room),
@@ -219,9 +313,12 @@ function arrive(run: EndlessRun, id: string): void {
   });
   // The exact caught position is also the stationary anchor for teleport arrivals.
   run.room = { ...run.room, pockets: run.room.pockets.map((candidate) => candidate.id === id && candidate.motion ? {
-    id: candidate.id, kind: candidate.kind, width: candidate.width, center: { ...position },
+    ...candidate, motion: undefined, center: { ...position },
   } : candidate) };
-  const index = pocketIndex(id);
+  startPocketLifetime(run.state, pocket);
+  activateLandingSwitches(run.room, run.state, id);
+  if (run.state.frayedFall !== undefined) run.state.frayedFall = false;
+  const index = (run.generationVersion ?? 1) >= 2 ? pocket.ascentRank! : pocketIndex(id);
   if (index > run.highestPocket) {
     run.pocketsCaught += 1;
     run.highestPocket = index;
@@ -231,13 +328,37 @@ function arrive(run: EndlessRun, id: string): void {
 
 function updateView(run: EndlessRun, cameraFrozen: boolean): void {
   run.height = Math.max(run.height, Math.round(ENDLESS_START_Y - run.state.position.y));
+  // The room stores the physics choice so an existing journal/replay keeps its
+  // rules. New section runs can recover beneath the peak of a missed launch.
+  const forgiving = run.room.sideWallRestitution !== undefined;
   if (!cameraFrozen && run.state.phase !== 'failed') {
     const followLine = run.state.phase === 'held' ? 480 : 320;
-    const target = Math.min(run.cameraY, run.state.position.y - followLine);
+    let target = Math.min(run.cameraY, run.state.position.y - followLine);
+    if (forgiving) {
+      if (run.state.phase === 'held') {
+        const held = run.room.pockets.find((pocket) => pocket.id === run.state.pocketId);
+        const lowestAnchor = held?.orbit ? held.center.y + held.orbit.radius : run.state.position.y;
+        target = Math.min(0, lowestAnchor - followLine);
+      }
+      else if (run.state.velocity.y > 0) {
+        // A dead zone prevents the camera reversing at the exact flight apex.
+        target = Math.min(0, Math.max(run.cameraY, run.state.position.y - 380));
+      }
+    }
     const distance = target - run.cameraY;
     run.cameraY = Math.abs(distance) < 0.05 ? target : run.cameraY + distance * CAMERA_EASING;
+    const heldOrbit = run.state.phase === 'held'
+      ? run.room.pockets.find((pocket) => pocket.id === run.state.pocketId && pocket.orbit) : undefined;
+    if (heldOrbit?.orbit) {
+      // A catch can happen at the top of the orbit. Frame its complete future
+      // travel before the next gesture freezes the camera, including full pull.
+      run.cameraY = Math.max(heldOrbit.center.y + heldOrbit.orbit.radius - 480,
+        Math.min(run.cameraY, heldOrbit.center.y - heldOrbit.orbit.radius - 12));
+    }
   }
-  const bottom = run.cameraY + ENDLESS_HEIGHT;
+  const bottom = forgiving
+    ? Math.max(...run.room.pockets.map((pocket) => pocket.center.y + (pocket.orbit?.radius ?? 0))) + RECOVERY_FLOOR_CLEARANCE
+    : run.cameraY + ENDLESS_HEIGHT;
   if (bottom !== run.room.bounds.bottom) {
     run.room = { ...run.room, bounds: { ...run.room.bounds, bottom } };
   }
@@ -282,7 +403,7 @@ export function eligibleTeleportPockets(run: EndlessRun): readonly LaunchPocket[
   const bottom = Math.min(run.cameraY + ENDLESS_HEIGHT, run.room.bounds.bottom ?? Number.POSITIVE_INFINITY);
   return run.room.pockets.filter((pocket) => {
     const position = pocketPosition(pocket, run.state.tick);
-    return pocket.id !== run.state.pocketId && position.y - BUTTON_RADIUS >= run.cameraY
+    return !isPocketExpired(run.state, pocket) && pocket.id !== run.state.pocketId && position.y - BUTTON_RADIUS >= run.cameraY
       && position.y + BUTTON_RADIUS <= bottom && position.x - pocket.width / 2 >= 0
       && position.x + pocket.width / 2 <= run.room.bounds.width;
   });
@@ -318,7 +439,8 @@ export function advanceEndless(
   clock: LaunchClock,
   elapsedSeconds: number,
   onEvent?: (event: LaunchEvent) => void,
-  cameraFrozen = false,
+  cameraFrozen: boolean | (() => boolean) = false,
+  onStep?: () => void,
 ): number {
   if (!Number.isFinite(elapsedSeconds) || elapsedSeconds <= 0) return 0;
   clock.accumulator += Math.min(elapsedSeconds, MAX_FRAME_SECONDS);
@@ -329,7 +451,8 @@ export function advanceEndless(
       resetLaunchClock(clock);
       break;
     }
-    stepEndless(run, cameraFrozen).forEach((event) => onEvent?.(event));
+    stepEndless(run, typeof cameraFrozen === 'function' ? cameraFrozen() : cameraFrozen).forEach((event) => onEvent?.(event));
+    onStep?.();
     steps += 1;
   }
   return steps;

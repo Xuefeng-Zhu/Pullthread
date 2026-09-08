@@ -53,6 +53,7 @@
     "typecheck": "tsc --noEmit",
     "test": "jest --runInBand",
     "test:firebase": "npm test --prefix functions",
+    "test:worker": "npm test --prefix worker",
     "test:watch": "jest --watch",
     "doctor": "npx expo-doctor@latest",
     "export": "expo export --platform all",

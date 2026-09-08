@@ -1,4 +1,7 @@
 /** @jest-environment node */
+import { RankedJournal } from '../../../leaderboard/journal';
+import { createRankedSimulation, replayBatch } from '../../../leaderboard/replay';
+import type { LeaderboardService, ReplayBatch } from '../../../leaderboard/contracts';
 import { act, renderHook } from '@testing-library/react-native';
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals';
 import { AppState, type AppStateStatus } from 'react-native';
@@ -7,7 +10,8 @@ import { NoopFeedbackService } from '../../feedback/FeedbackService';
 import * as endless from '../endless';
 import { useLaunchSession } from '../useLaunchSession';
 import { deserializeEndlessRun, serializeEndlessRun } from '../snapshots';
-import { pocketPosition } from '../simulation';
+import { createLaunchState, launchVelocity, pocketPosition } from '../simulation';
+import { findTargetInput, replayNext } from '../testing/routeSolver';
 
 const { createEndlessRun } = endless;
 const seed = 14;
@@ -59,6 +63,26 @@ describe('launch session lifecycle', () => {
   async function changeAppState(next: AppStateStatus) {
     await act(() => { AppState.currentState = next; appStateListener(next); });
   }
+
+  test.each([30, 60, 120])('ranked journal matches the actual hook at %i FPS across gestures and backgrounding', async (fps) => {
+    const batches: ReplayBatch[] = [];
+    const ranked = new RankedJournal({ id: 'hook-ranked', uid: 'guest', environment: 'sandbox', seed, week: 0, deadline: 9999999999999, ruleset: 'stitched-v4-weekly-1' },
+      { getItem: async () => null, setItem: async () => undefined, removeItem: async () => undefined },
+      { upload: async (_id, batch) => { batches.push(batch); return { sequence: batch.sequence, score: 0 }; } } as LeaderboardService);
+    const view = await renderHook(() => useLaunchSession(seed, true, feedback, ranked));
+    await frame(1000 / fps);
+    await act(() => { view.result.current.beginAim(start); view.result.current.updateAim({ x: -20, y: 70 }); });
+    for (let i = 0; i < fps / 2; i++) await frame(1000 / fps);
+    await changeAppState('background'); await frame(5000); await changeAppState('active'); await frame(1000 / fps);
+    await act(() => { view.result.current.beginAim(start); view.result.current.updateAim({ x: -20, y: 70 }); view.result.current.releaseAim(); });
+    for (let i = 0; i < fps * 2; i++) await frame(1000 / fps);
+    const final = view.result.current.getSnapshot();
+    await ranked.checkpoint(final); await ranked.flush();
+    const replay = createRankedSimulation(seed), cursor = { elapsed: 0, aiming: false };
+    for (const batch of batches) await replayBatch(replay, cursor, batch);
+    expect(serializeEndlessRun(replay)).toBe(final);
+    await view.unmount();
+  });
 
   test('backgrounding cancels a stretched gesture and resuming discards elapsed wall time', async () => {
     const view = await renderHook(() => useLaunchSession(seed, true, feedback));
@@ -114,7 +138,7 @@ describe('launch session lifecycle', () => {
   });
 
   test('Land targets use the live simulation clock and stay coherent while suspended', async () => {
-    const prepared = createEndlessRun(0);
+    const prepared = endless.createWorldEndlessRun(0);
     prepared.inventory.teleport = 1;
     prepared.room = { ...prepared.room, pockets: prepared.room.pockets.map((pocket) => pocket.id === 'endless-1'
       ? { ...pocket, motion: { amplitude: 35, periodTicks: 360, phaseTicks: 0 } } : pocket) };
@@ -268,10 +292,10 @@ describe('launch session lifecycle', () => {
     await fresh.unmount();
   });
 
-  test('a bottom-edge recatch never converts a tap or downward pull into an upward launch', async () => {
-    const caught = createEndlessRun(0);
-    // Isolate a deep vertical recatch from authored route obstacles. This
-    // specifically exercises the camera floor and touch clamp, not route choice.
+  test('a legacy bottom-edge recatch never converts a tap or downward pull into an upward launch', async () => {
+    const caught = createEndlessRun(0, 1);
+    // Historical runs keep their upward-only camera. Isolate a deep recatch to
+    // preserve the touch-clamp regression for a resumed legacy session.
     caught.room = { ...caught.room, pockets: [caught.room.pockets[0]], bumpers: [], hazards: [] };
     expect(endless.launchEndless(caught, { x: 0, y: 96.8 })).toBe(true);
     for (let tick = 0; tick < 960 && caught.state.phase === 'flying'; tick += 1) endless.stepEndless(caught);
@@ -323,7 +347,7 @@ describe('launch session lifecycle', () => {
   });
 
   test('an armed Preview survives cancellation and backgrounding while fresh predictions follow moving-target time', async () => {
-    const prepared = createEndlessRun(0);
+    const prepared = endless.createWorldEndlessRun(0);
     prepared.inventory.preview = 2;
     prepared.room = { ...prepared.room, pockets: prepared.room.pockets.map((pocket) => pocket.id === 'endless-1'
       ? { ...pocket, motion: { amplitude: 35, periodTicks: 360, phaseTicks: 0 } } : pocket) };
@@ -426,4 +450,288 @@ describe('launch session lifecycle', () => {
     expect(view.result.current.getSnapshot()).toBe(valid);
     await view.unmount();
   });
+
+  test('a section without a gift describes its routes without promising a tool', async () => {
+    const prepared = endless.createWorldEndlessRun(0);
+    while (prepared.state.pocketId !== prepared.sectionProgress!.sections[0].exitPocketId) {
+      const targets = endless.nextEndlessTargets(prepared);
+      const target = targets.find((id) => prepared.room.pockets.find((pocket) => pocket.id === id)?.route !== 'reward') ?? targets[0];
+      replayNext(prepared, findTargetInput(prepared, target));
+    }
+    const section = prepared.sectionProgress!.sections.find((candidate) => candidate.entryPocketId === prepared.state.pocketId)!;
+    expect(section.index).toBe(1);
+    expect(section.pickupIds).toEqual([]);
+    const view = await renderHook(() => useLaunchSession(0, true, feedback));
+    await act(() => { expect(view.result.current.restoreSnapshot(serializeEndlessRun(prepared))).toBe(true); });
+    expect(view.result.current.routeCue).toBe('Choose the wide pocket, or try the narrower star pocket.');
+    expect(view.result.current.challenge?.cue).not.toMatch(/tool|gift/);
+    await view.unmount();
+  });
+
+  test('revisiting a branch after collecting its gift removes the tool promise from both hints', async () => {
+    const prepared = endless.createWorldEndlessRun(0);
+    for (let opening = 0; opening < 2; opening += 1) {
+      replayNext(prepared, findTargetInput(prepared, prepared.nextPocketId));
+    }
+    const parent = prepared.state.pocketId;
+    const giftId = prepared.sectionProgress!.sections[0].pickupIds[0];
+    const view = await renderHook(() => useLaunchSession(0, true, feedback));
+    await act(() => { expect(view.result.current.restoreSnapshot(serializeEndlessRun(prepared))).toBe(true); });
+    expect(view.result.current.routeCue).toContain('for a free tool');
+    for (let hop = 0; hop < 3 && prepared.room.pickups!.some((pickup) => pickup.id === giftId); hop += 1) {
+      const target = endless.nextEndlessTargets(prepared)
+        .find((id) => prepared.room.pockets.find((pocket) => pocket.id === id)?.route === 'reward')!;
+      replayNext(prepared, findTargetInput(prepared, target));
+    }
+    expect(prepared.collectedPickupIds).toContain(giftId);
+    prepared.cameraY = prepared.room.pockets.find((pocket) => pocket.id === parent)!.center.y - 250;
+    expect(endless.teleportEndless(prepared, parent, true)).toBe(true);
+    await act(() => { expect(view.result.current.restoreSnapshot(serializeEndlessRun(prepared))).toBe(true); });
+    expect(view.result.current.routeCue).toBe('Choose the wide pocket, or try the narrower star pocket.');
+    expect(view.result.current.challenge?.cue).not.toMatch(/tool|gift/);
+    await view.unmount();
+  });
+
+  test('temporary-pocket expiry cancels an active pull and preview while publishing the fall', async () => {
+    const prepared = endless.createWorldEndlessRun(0);
+    prepared.room = { ...prepared.room, pockets: prepared.room.pockets.map((pocket) => pocket.id === prepared.state.pocketId
+      ? { ...pocket, frayTicks: 480, route: 'reward' as const } : pocket) };
+    prepared.state.pocketExpiryTicks = { [prepared.state.pocketId]: 480 };
+    prepared.inventory.preview = 1;
+    jest.spyOn(endless, 'createEndlessRun').mockReturnValueOnce(prepared);
+    let renders = 0;
+    const view = await renderHook(() => { renders += 1; return useLaunchSession(0, true, feedback); });
+    await act(() => {
+      expect(view.result.current.useFreeTool('preview')).toBe(true);
+      expect(view.result.current.beginAim(start)).toBe(true);
+      view.result.current.updateAim({ x: -24, y: 72 });
+    });
+    expect(view.result.current.prediction).not.toBeNull();
+    expect(view.result.current.fraySeconds).toBe(4);
+    // The React copy cannot alias the mutable simulation's deadline map.
+    expect(view.result.current.state.pocketExpiryTicks).not.toBe(prepared.state.pocketExpiryTicks);
+    await act(() => view.result.current.cancelAim());
+    await frame();
+    const before = renders;
+    for (let count = 0; count < 30; count += 1) await frame();
+    expect(renders).toBe(before);
+    await act(() => {
+      view.result.current.beginAim(start);
+      view.result.current.updateAim({ x: -24, y: 72 });
+    });
+    for (let count = 0; count < 210; count += 1) await frame();
+    expect(view.result.current.state.phase).toBe('flying');
+    expect(view.result.current.state.event?.type).toBe('fray');
+    expect(view.result.current.motion.pullX.value).toBe(0);
+    expect(view.result.current.motion.pullY.value).toBe(0);
+    expect(view.result.current.prediction).toBeNull();
+    expect(view.result.current.fraySeconds).toBeNull();
+    expect(view.result.current.message).toBe('That pocket unraveled. Find a landing!');
+    await act(() => {
+      expect(view.result.current.updateAim({ x: -40, y: 80 })).toBeNull();
+      view.result.current.releaseAim();
+    });
+    expect(view.result.current.state.launches).toBe(0);
+    for (let count = 0; count < 90 && view.result.current.state.phase === 'flying'; count += 1) await frame();
+    expect(view.result.current.message).toBe('The pocket unraveled before you launched.');
+    await view.unmount();
+  });
+
+  test('temporary-pocket accessible countdown freezes through tool suspension and backgrounding', async () => {
+    const prepared = endless.createWorldEndlessRun(0);
+    prepared.room = { ...prepared.room, pockets: prepared.room.pockets.map((pocket) => pocket.id === prepared.state.pocketId
+      ? { ...pocket, frayTicks: 480 } : pocket) };
+    prepared.state.pocketExpiryTicks = { [prepared.state.pocketId]: 480 };
+    jest.spyOn(endless, 'createEndlessRun').mockReturnValueOnce(prepared);
+    const view = await renderHook(() => useLaunchSession(0, true, feedback));
+    for (let count = 0; count < 62; count += 1) await frame();
+    expect(view.result.current.fraySeconds).toBe(3);
+    const tick = view.result.current.motion.tick.value;
+    await act(() => view.result.current.suspend());
+    await changeAppState('background');
+    await frame(30_000);
+    await changeAppState('active');
+    await frame(30_000);
+    expect(view.result.current.fraySeconds).toBe(3);
+    expect(view.result.current.motion.tick.value).toBe(tick);
+    await act(() => view.result.current.resume());
+    await frame(30_000);
+    expect(view.result.current.motion.tick.value).toBe(tick);
+    await frame();
+    expect(view.result.current.motion.tick.value).toBe(tick + 2);
+    await view.unmount();
+  });
+
+  test('a visited branch stops being advertised at its deadline while waiting in its parent without events', async () => {
+    const prepared = endless.createWorldEndlessRun(0);
+    let expiredTarget = '';
+    let parent = '';
+    // Reach a real generated temporary branch, then return with a legal tool.
+    for (let catchIndex = 0; catchIndex < 40 && !expiredTarget; catchIndex += 1) {
+      const ids = endless.nextEndlessTargets(prepared);
+      const temporary = ids.find((id) => prepared.room.pockets.find((pocket) => pocket.id === id)?.frayTicks);
+      const target = temporary ?? ids.find((id) => prepared.room.pockets.find((pocket) => pocket.id === id)?.route === 'reward') ?? ids[0];
+      parent = prepared.state.pocketId;
+      replayNext(prepared, findTargetInput(prepared, target));
+      if (temporary) expiredTarget = temporary;
+    }
+    expect(expiredTarget).not.toBe('');
+    expect(endless.teleportEndless(prepared, parent, true)).toBe(true);
+    const restored = serializeEndlessRun(prepared);
+    let renders = 0;
+    const view = await renderHook(() => { renders += 1; return useLaunchSession(0, true, feedback); });
+    await act(() => { expect(view.result.current.restoreSnapshot(restored)).toBe(true); });
+    const idsBefore = view.result.current.nextPocketIds;
+    const geometry = view.result.current.room.pockets;
+    const event = view.result.current.state.event;
+    expect(idsBefore).toContain(expiredTarget);
+    expect(view.result.current.routeCue).toContain('Loose pockets last 4 seconds');
+    expect(view.result.current.fraySeconds).toBeNull();
+    await frame();
+    const before = renders;
+    for (let count = 0; count < 239; count += 1) await frame();
+    expect(view.result.current.nextPocketIds).toBe(idsBefore);
+    expect(renders).toBe(before);
+    await frame();
+    expect(view.result.current.nextPocketIds).toEqual(idsBefore.filter((id) => id !== expiredTarget));
+    expect(view.result.current.routeCue).toBeUndefined();
+    expect(view.result.current.room.pockets).toBe(geometry);
+    expect(view.result.current.state.event).toBe(event);
+    expect(view.result.current.state.phase).toBe('held');
+    expect(view.result.current.state.pocketId).toBe(parent);
+    expect(renders).toBe(before + 1);
+    const remainingIds = view.result.current.nextPocketIds;
+    for (let count = 0; count < 60; count += 1) await frame();
+    expect(view.result.current.nextPocketIds).toBe(remainingIds);
+    expect(renders).toBe(before + 1);
+    await view.unmount();
+  });
+
+  function orbitalFixture() {
+    const run = createEndlessRun(71);
+    run.room = { ...run.room, pockets: [{ ...run.room.pockets[0], center: { x: 180, y: 300 }, width: 104,
+      orbit: { radius: 48, periodTicks: 720, phaseTicks: 0 } }], barriers: [], switches: [] };
+    run.state = createLaunchState(run.room);
+    jest.spyOn(endless, 'createEndlessRun').mockReturnValue(run);
+    return run;
+  }
+
+  test('a stationary off-center hoop hold stays under the finger but cannot arm a launch', async () => {
+    const run = orbitalFixture();
+    const view = await renderHook(() => useLaunchSession(71, true, feedback));
+    await frame();
+    const anchor = { ...run.state.position };
+    await act(() => expect(view.result.current.beginAim({ x: anchor.x + 24, y: anchor.y - 16 })).toBe(true));
+    const camera = run.cameraY;
+    for (let index = 0; index < 60; index++) await frame();
+    expect(run.state.tick).toBe(120);
+    expect(run.state.position).toEqual(pocketPosition(run.room.pockets[0], 120));
+    expect(view.result.current.motion.travelerX.value).toBeCloseTo(anchor.x, 2);
+    expect(view.result.current.motion.travelerY.value).toBeCloseTo(anchor.y, 2);
+    expect(run.cameraY).toBe(camera);
+    expect(view.result.current.hasAimed).toBe(false);
+    await act(() => view.result.current.releaseAim());
+    expect(run.state.phase).toBe('held');
+    expect(run.state.launches).toBe(0);
+    await view.unmount();
+  });
+
+  test('continuous hoop dragging preserves the grab offset and releases with the current orbital momentum', async () => {
+    const run = orbitalFixture();
+    const view = await renderHook(() => useLaunchSession(71, true, feedback));
+    await frame();
+    const anchor = { ...run.state.position };
+    await act(() => expect(view.result.current.beginAim({ x: anchor.x - 22, y: anchor.y + 9 })).toBe(true));
+    for (let index = 1; index <= 30; index++) {
+      await act(() => view.result.current.updateAim({ x: -index / 2, y: index * 2 }));
+      await frame();
+      expect(view.result.current.motion.travelerX.value).toBeCloseTo(anchor.x - index / 2, 2);
+      expect(view.result.current.motion.travelerY.value).toBeCloseTo(anchor.y + index * 2, 2);
+    }
+    const pull = { x: view.result.current.motion.pullX.value, y: view.result.current.motion.pullY.value };
+    const expectedVelocity = launchVelocity(run.room.pockets[0], run.state.tick, pull);
+    await act(() => view.result.current.releaseAim());
+    expect(run.state.phase).toBe('flying');
+    expect(run.state.position.x).toBeCloseTo(anchor.x - 15, 2);
+    expect(run.state.position.y).toBeCloseTo(anchor.y + 60, 2);
+    expect(run.state.velocity.x).toBeCloseTo(expectedVelocity.x, 5);
+    expect(run.state.velocity.y).toBeCloseTo(expectedVelocity.y, 5);
+    await view.unmount();
+  });
+
+  test.each([30, 60, 120])('hoop pulls recompute on each fixed tick at %i FPS and freeze in the background', async (fps) => {
+    const run = orbitalFixture();
+    const view = await renderHook(() => useLaunchSession(71, true, feedback));
+    await frame();
+    await act(() => {
+      expect(view.result.current.beginAim(run.state.position)).toBe(true);
+      view.result.current.updateAim({ x: -20, y: 60 });
+    });
+    for (let index = 0; index < fps; index++) await frame(1000 / fps);
+    expect(run.state.tick).toBe(120);
+    expect(view.result.current.motion.travelerX.value).toBeCloseTo(208, 2);
+    expect(view.result.current.motion.travelerY.value).toBeCloseTo(360, 2);
+    const position = { ...run.state.position };
+    await changeAppState('background');
+    await frame(30_000);
+    expect(run.state.position).toEqual(position);
+    expect(run.state.tick).toBe(120);
+    await changeAppState('active');
+    await frame(30_000);
+    await act(() => view.result.current.releaseAim());
+    expect(run.state.phase).toBe('held');
+    await view.unmount();
+  });
+
+  test('world milestones publish on one scored Land, freeze while paused and restore without replaying a banner', async () => {
+    const prepared = createEndlessRun(0);
+    while (prepared.pocketsCaught < 19) {
+      const ids = endless.nextEndlessTargets(prepared);
+      const target = prepared.room.pockets.find((pocket) => ids.includes(pocket.id) && pocket.route !== 'reward')!;
+      const position = pocketPosition(target, prepared.state.tick + 1);
+      Object.assign(prepared.state, { phase: 'flying', position: { x: position.x, y: position.y - 2 },
+        velocity: { x: 0, y: 480 }, sourcePocketImmune: false });
+      endless.stepEndless(prepared);
+      for (let tick = 0; tick < 70; tick++) endless.stepEndless(prepared);
+    }
+    prepared.inventory.teleport = 2;
+    let renders = 0;
+    const view = await renderHook(() => { renders++; return useLaunchSession(0, true, feedback); });
+    await act(() => { expect(view.result.current.restoreSnapshot(serializeEndlessRun(prepared))).toBe(true); });
+    expect(view.result.current.worldStage).toBe(0);
+    const next = view.result.current.getTeleportPockets().find((pocket) => (pocket.ascentRank ?? 0) > prepared.highestPocket)!;
+    expect(next).toBeDefined();
+    await act(() => { expect(view.result.current.useFreeTool('teleport', next.id)).toBe(true); });
+    expect(view.result.current.score.pockets).toBe(20);
+    expect(view.result.current.worldStage).toBe(1);
+    expect(view.result.current.worldAnnouncement).toBe(true);
+    const transition = view.result.current.worldTransitionTick!;
+    await frame();
+    const before = renders;
+    for (let index = 0; index < 20; index++) await frame();
+    expect(renders).toBe(before);
+    await act(() => view.result.current.suspend());
+    const pausedTick = view.result.current.motion.tick.value;
+    await changeAppState('background');
+    await frame(30_000);
+    expect(view.result.current.motion.tick.value).toBe(pausedTick);
+    expect(view.result.current.worldTransitionTick).toBe(transition);
+    expect(view.result.current.worldAnnouncement).toBe(true);
+    await changeAppState('active');
+    await act(() => view.result.current.resume());
+    await frame(30_000);
+    for (let index = 0; index < 170; index++) await frame();
+    expect(view.result.current.worldAnnouncement).toBe(false);
+    const saved = view.result.current.getSnapshot();
+    await act(() => { expect(view.result.current.restoreSnapshot(saved)).toBe(true); });
+    expect(view.result.current.worldStage).toBe(1);
+    expect(view.result.current.worldTransitionTick).toBeUndefined();
+    expect(view.result.current.worldAnnouncement).toBe(false);
+    await view.unmount();
+    const restarted = await renderHook(() => useLaunchSession(1, true, feedback));
+    expect(restarted.result.current.worldStage).toBe(0);
+    expect(restarted.result.current.score.pockets).toBe(0);
+    await restarted.unmount();
+  });
+
 });

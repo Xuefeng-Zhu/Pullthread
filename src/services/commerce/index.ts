@@ -1,5 +1,5 @@
 import type { CommerceService } from '../../commerce/contracts';
-import { readCommerceConfig, type CommerceConfig } from './config';
+import { readCommerceConfig, resolveCommerceBackend, type CommerceConfig } from './config';
 import { CommerceError } from './errors';
 import { createMockCommerceService } from './mockService';
 import { createNativeCommerceService, type NativeRuntimeLoader } from './nativeService';
@@ -23,6 +23,8 @@ export function createCommerceService(config = readCommerceConfig(), loader?: Na
   if (!config.revenueCatKey.startsWith(config.platform === 'ios' ? 'appl_' : 'goog_')) {
     return unavailable(config, 'Points purchases are not configured for this platform.');
   }
+  try { resolveCommerceBackend(config); }
+  catch (error) { return unavailable(config, error instanceof CommerceError ? error.message : 'The points backend is unavailable.'); }
   return createNativeCommerceService(config, loader ?? (async () => (await import('./nativeRuntime')).loadNativeRuntime(config)));
 }
 

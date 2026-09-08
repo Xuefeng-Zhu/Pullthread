@@ -1,0 +1,20 @@
+{
+  "src/game/launch/bankPatterns.ts": "8b2b68aed9a76d1dd365c19e561d48ceb1030f355c56f9e9b9a125fb69bcb179",
+  "src/game/launch/challenges.ts": "4d78117665789f6155fbc7565a224aae112b1bb2895e8aca272f70861eb6d35d",
+  "src/game/launch/endless.ts": "c685e2f5a22a58a477d551f5ccc04ac78973e3a586c4f684b172acfec6a7debf",
+  "src/game/launch/flightPatterns.ts": "bcab547372d0a1d2abd4aa168d1232a9d32e77bcc02ac9715382b43364222099",
+  "src/game/launch/interactivePhysics.ts": "d4452a123f64564c0f22b2c27b14f54fedef4ecc47e4f18852e3885e23de7c57",
+  "src/game/launch/interactiveProgression.ts": "815febf3396529f0d7ba4676825a2b54deaebab880960e8f9241f516f6bee47c",
+  "src/game/launch/interactiveSections.ts": "1e80b764421c440945a67c7d69ece261d0222a8ca8e2bc5dab626e1edcdb55d4",
+  "src/game/launch/interactiveWindow.ts": "3de1b72996c4b9117036d1abfcc0ad2ed68a5c818c303cfcbbe4da1f419b5db4",
+  "src/game/launch/launchInput.ts": "8464d9ec9dd9d7b880f549c7ecac70a5c045e2792d6a83cc43bfb34008de0865",
+  "src/game/launch/pickups.ts": "eda7033b8315ac8075c1f8f85431503b56343d2d76c29f302cfbff2bba13ab57",
+  "src/game/launch/progression.ts": "8373c7a8400f3bd390550812ca91d257a4597db3dc7b89a31b6d90c869bf6d23",
+  "src/game/launch/sectionWindow.ts": "8462b8284227826b8c599cd46993fdab247d0bc5d7e674c17875a2b11e7fa9ca",
+  "src/game/launch/sections.ts": "b1254ae9c22a48e2edb03d916e54505e5025b28101f65f3d87fee9e115020d83",
+  "src/game/launch/simulation.ts": "8984159a2e667d4bba9a1ad9c1628c624ead896a0f902960782f8d134ce2994b",
+  "src/game/launch/snapshots.ts": "ae533806c35d701758c4a3c9b96994caa251f7aca462a735076b52cb0d225cee",
+  "src/game/launch/worldSections.ts": "5a967fa9761f9e62167632a4b962c392db961b32fd133e21342187216e66abfa",
+  "src/leaderboard/contracts.ts": "69ae24105a11aa5c24bc0863c70f1a6fbde11a7a0c381c4a9835e70bbcf182e6",
+  "src/leaderboard/replay.ts": "4145e1bfcef053267dbf0bb5e2571e4d6f191edb37adc98d0962f792bc62b299"
+}

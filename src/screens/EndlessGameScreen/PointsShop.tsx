@@ -8,7 +8,11 @@ import { useCommerceStore } from '../../store/useCommerceStore';
 
 const DISCLOSURE_KEY = 'pullthread.points-guest-disclosure.v1';
 
-export function PointsShop({ onClose }: { onClose: () => void }) {
+export function PointsShop({ onClose, onCustomize, onLeaderboard }: {
+  onClose: () => void;
+  onCustomize?: () => void;
+  onLeaderboard?: () => void;
+}) {
   const commerce = useCommerceStore();
   const [accepted, setAccepted] = useState(false);
   const [checking, setChecking] = useState(true);
@@ -49,6 +53,23 @@ export function PointsShop({ onClose }: { onClose: () => void }) {
         <Text testID="points-shop-balance" style={styles.balanceText}>{commerce.wallet?.points ?? '—'} points</Text>
         {commerce.mode === 'mock' && <Text style={styles.demo}>DEMO</Text>}
       </View>
+      {(onCustomize || onLeaderboard) && <View style={styles.destinations}>
+        <Text style={styles.sectionLabel}>PLAY & PERSONALIZE</Text>
+        {onCustomize && <Pressable testID="points-button-studio" accessibilityRole="button"
+          accessibilityLabel="Open Button Studio" onPress={onCustomize} disabled={busy} style={styles.destination}>
+          <View style={styles.destinationIcon}><Ionicons name="shirt-outline" size={22} color="#28594b" /></View>
+          <View style={styles.destinationCopy}><Text style={styles.destinationTitle}>Button Studio</Text>
+            <Text style={styles.copy}>Mix colors, rims, and stitched patterns.</Text></View>
+          <Ionicons name="chevron-forward" size={20} color="#63705d" />
+        </Pressable>}
+        {onLeaderboard && <Pressable testID="points-weekly-leaderboard" accessibilityRole="button"
+          accessibilityLabel="Open weekly leaderboard" onPress={onLeaderboard} disabled={busy} style={styles.destination}>
+          <View style={styles.destinationIcon}><Ionicons name="trophy-outline" size={22} color="#875e14" /></View>
+          <View style={styles.destinationCopy}><Text style={styles.destinationTitle}>Weekly leaderboard</Text>
+            <Text style={styles.copy}>See this week’s climb and prize places.</Text></View>
+          <Ionicons name="chevron-forward" size={20} color="#63705d" />
+        </Pressable>}
+      </View>}
       <Text style={styles.copy}>Catch stitched tokens to earn free tools for this run. Points let you buy an extra use when you need it.</Text>
       <Text style={styles.prices}>Preview {TOOL_COSTS.preview} · Land {TOOL_COSTS.teleport} · Revive {TOOL_COSTS.revive} points</Text>
       {commerce.mode === 'mock' && <Text style={styles.notice}>Demo wallet. No real purchases or money.</Text>}
@@ -95,6 +116,14 @@ const styles = StyleSheet.create({
   balance: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, borderRadius: 15, backgroundColor: '#f0e1b9' },
   balanceText: { color: '#62450f', fontFamily: 'Fraunces_600SemiBold', fontSize: 26, flex: 1 },
   demo: { fontFamily: 'NunitoSans_800ExtraBold', color: '#755116', fontSize: 10 },
+  destinations: { gap: 9 },
+  sectionLabel: { color: '#73745a', fontFamily: 'NunitoSans_800ExtraBold', fontSize: 9, letterSpacing: 1.2 },
+  destination: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 11, borderWidth: 1,
+    borderColor: '#c8b995', borderRadius: 15, padding: 12, backgroundColor: '#fffdf5' },
+  destinationIcon: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 21,
+    backgroundColor: '#eee7cf' },
+  destinationCopy: { flex: 1, gap: 1 },
+  destinationTitle: { color: '#244b45', fontFamily: 'NunitoSans_800ExtraBold', fontSize: 16 },
   copy: { color: '#58614d', fontFamily: 'NunitoSans_600SemiBold', fontSize: 13, lineHeight: 19 },
   prices: { color: '#315746', fontFamily: 'NunitoSans_800ExtraBold', fontSize: 12 },
   noticeBox: { backgroundColor: '#eee8d7', padding: 14, borderRadius: 14, gap: 5 },

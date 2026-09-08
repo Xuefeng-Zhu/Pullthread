@@ -1,3 +1,9 @@
+import { ButtonStudio } from './ButtonStudio';
+import { useCollectionStore } from '../../cosmetics/store';
+import { WeeklyLeaderboard } from './WeeklyLeaderboard';
+import { RankedJournal, ACTIVE_RANKED_KEY } from '../../leaderboard/journal';
+import { leaderboardService } from '../../leaderboard/service';
+import { readCommerceConfig } from '../../services/commerce/config';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useIsFocused } from '@react-navigation/native';
@@ -14,6 +20,7 @@ import { ExpoFeedbackService } from '../../game/feedback';
 import { LaunchCanvas } from '../../game/launch/LaunchCanvas';
 import type { LaunchPoint } from '../../game/launch/types';
 import { useLaunchSession } from '../../game/launch/useLaunchSession';
+import { worldForStage } from '../../game/launch/progression';
 import { getLaunchViewport } from '../../game/launch/viewport';
 import { useEndlessProgressStore } from '../../store/useEndlessProgressStore';
 import { usePreferencesStore } from '../../store/usePreferencesStore';
@@ -54,19 +61,25 @@ type ToolLayer = { type: 'shop' } | { type: 'tool'; kind: ToolKind; pocketId?: s
   | { type: 'land'; cameraY: number; pockets: readonly { id: string; x: number; y: number; width: number }[] }
   | { type: 'recovery' } | null;
 
-function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
-  seed: number; best: number; onRestart: () => void; onScore: (score: number) => void; onSettings: () => void;
+function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
+  ranked?: RankedJournal | null; seed: number; best: number; onRestart: () => void; onScore: (score: number) => void; onSettings: () => void;
 }) {
   const focused = useIsFocused();
   const insets = useSafeAreaInsets();
   const { fontScale = 1 } = useWindowDimensions();
   const [paused, setPaused] = useState(false);
+  const [weeklyOpen, setWeeklyOpen] = useState(false);
+  const [studioOpen, setStudioOpen] = useState(false);
+  const appearance = useCollectionStore(s => s.appearance);
+  useEffect(() => { void useCollectionStore.getState().initialize(); }, []);
+  const [awardNotice, setAwardNotice] = useState('');
+  const pendingAwardNotice = useRef<{ key: string; week: number } | null>(null);
   const [toolLayer, setToolLayer] = useState<ToolLayer>(null);
   const [toolBusy, setToolBusy] = useState(true);
   const [toolError, setToolError] = useState('');
   const [toolNotice, setToolNotice] = useState('');
   const [trayHeight, setTrayHeight] = useState(46);
-  const [runId] = useState(() => `run-${seed}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
+  const [runId] = useState(() => ranked?.run.id ?? `run-${seed}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
   const operationCounter = useRef(0);
   const toolLock = useRef(false);
   const returnToRecovery = useRef(false);
@@ -83,12 +96,39 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
   const feedback = useMemo(() => new ExpoFeedbackService(), []);
   useEffect(() => { feedback.setPreferences({ soundEnabled: sound, hapticsEnabled: haptics }); }, [feedback, sound, haptics]);
   useEffect(() => () => feedback.dispose(), [feedback]);
-  const session = useLaunchSession(seed, focused && !paused && !toolLayer && !toolBusy, feedback);
+  const session = useLaunchSession(seed, focused && !paused && !studioOpen && !weeklyOpen && !toolLayer && !toolBusy, feedback, ranked);
   const { state, room, motion, score, beginAim, updateAim, releaseAim, cancelAim } = session;
-  const { cue: challengeCue, beginCuePull, updateCuePull, cancelCuePull } = useChallengeCue(session.challenge, state.pocketId, hints);
+  const { cue: challengeCue, beginCuePull, updateCuePull, cancelCuePull } = useChallengeCue(session.challenge, state.pocketId, hints && !session.worldAnnouncement && session.fraySeconds == null);
   const { scale, offsetX, offsetY } = getLaunchViewport(area, room.bounds, insets.bottom);
   const { suspend, resume, getSnapshot, restoreSnapshot, preparePaidTool, useFreeTool: consumeFreeTool,
     getCameraY, getTeleportTargets } = session;
+  useEffect(() => {
+    const save = () => { if (ranked) void ranked.checkpoint(getSnapshot()).then(() => ranked.flush()); };
+    const timer = setInterval(save, 2000);
+    const listener = AppState.addEventListener('change', save);
+    return () => { clearInterval(timer); listener.remove(); save(); };
+  }, [ranked, getSnapshot]);
+  useEffect(() => { if (ranked) void ranked.checkpoint(getSnapshot()).then(() => ranked.flush()); }, [ranked, getSnapshot, state.phase, paused, weeklyOpen]);
+  useEffect(() => {
+    let mounted = true;
+    void leaderboardService.standings().then(async (board) => {
+      useCommerceStore.getState().acceptWallet(board.wallet);
+      const key = `pullthread.weekly.award-notice.${board.wallet.environment}.${board.uid}`;
+      const seen = Number(await AsyncStorage.getItem(key) ?? 0);
+      const fresh = board.awards.filter(award => award.week > seen);
+      if (fresh.length && mounted) {
+        pendingAwardNotice.current = { key, week: Math.max(...fresh.map(award => award.week)) };
+        setAwardNotice(`Weekly prize: +${fresh.reduce((sum, award) => sum + award.points, 0)} points added!`);
+      }
+    }).catch(() => undefined);
+    return () => { mounted = false; };
+  }, []);
+  useEffect(() => {
+    const notice = pendingAwardNotice.current;
+    if (notice && awardNotice && (paused || state.phase === 'failed')) {
+      void AsyncStorage.setItem(notice.key, String(notice.week)).then(() => { if (pendingAwardNotice.current === notice) pendingAwardNotice.current = null; }).catch(() => undefined);
+    }
+  }, [awardNotice, paused, state.phase]);
   const failedTool = useCallback((error: unknown) => {
     suspend();
     setToolError(error instanceof Error ? error.message : 'Your tool could not be checked. Try again.');
@@ -100,7 +140,9 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
     void useCommerceStore.getState().initialize();
     void journal.recover().then((recovered) => {
       if (!mounted) return;
-      if (recovered.snapshot) restoreSnapshot(recovered.snapshot);
+      if (recovered.snapshot) {
+        if (!ranked?.snapshot || ranked.hasPendingTool) { ranked?.reconcileTool(recovered.snapshot); restoreSnapshot(recovered.snapshot); }
+      }
       if (recovered.result) useCommerceStore.getState().acceptWallet(recovered.result.wallet);
       if (recovered.snapshot) setToolNotice('Your saved run is ready to continue.');
       if (recovered.refunded) setToolNotice('Your unused tool was refunded to points.');
@@ -108,7 +150,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
     }).catch((error: unknown) => { if (mounted) failedTool(error); })
       .finally(() => { if (mounted) setToolBusy(false); });
     return () => { mounted = false; };
-  }, [failedTool, journal, restoreSnapshot]);
+  }, [failedTool, journal, ranked, restoreSnapshot]);
 
   // Only runs with a paid receipt are persisted. Free runs keep their immediate
   // start/restart behavior; a paid effect always has a recoverable run snapshot.
@@ -139,10 +181,10 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
     if (toolBusy || toolLock.current) return;
     toolLock.current = true;
     suspend(); setToolBusy(true);
-    try { await journal.abandonRun(); onRestart(); }
+    try { if (ranked) { await ranked.checkpoint(getSnapshot()); await ranked.flush(); } await journal.abandonRun(); onRestart(); }
     catch (error) { failedTool(error); }
     finally { toolLock.current = false; setToolBusy(false); }
-  }, [failedTool, journal, onRestart, suspend, toolBusy]);
+  }, [failedTool, getSnapshot, journal, onRestart, ranked, suspend, toolBusy]);
   const openSettings = useCallback(async () => {
     if (toolBusy) return;
     suspend();
@@ -175,14 +217,17 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
     try {
       const before = getSnapshot();
       const after = preparePaidTool(kind, pocketId);
+      const exact = deserializeEndlessRun(before)!;
       const request = {
         operationId,
         runId: runId, tool: kind, expectedCost: TOOL_COSTS[kind],
-        contextKey: `${state.tick}:${state.pocketId}:${kind}:${pocketId ?? ''}`,
+        contextKey: `${exact.state.tick}:${exact.state.pocketId}:${kind}:${pocketId ?? ''}`,
       };
+      await ranked?.prepareTool({ type: 'tool', tool: kind, operationId, ...(pocketId ? { pocketId } : {}) }, before, after);
       const result = await journal.redeem(request, before, after);
       if (result.result) useCommerceStore.getState().acceptWallet(result.result.wallet);
-      if (result.snapshot && !restoreSnapshot(result.snapshot)) throw new Error('Your saved tool needs recovery.');
+      if (result.snapshot) ranked?.reconcileTool(result.snapshot);
+      if (result.snapshot && !restoreSnapshot(result.snapshot, kind !== 'revive')) throw new Error('Your saved tool needs recovery.');
       setToolLayer(null); setPaused(false); resume();
       void feedback.play('stitchComplete');
     } catch (error) {
@@ -193,7 +238,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
       } else failedTool(error);
     }
     finally { toolLock.current = false; setToolBusy(false); }
-  }, [failedTool, feedback, getSnapshot, journal, preparePaidTool, restoreSnapshot, resume, runId, state.pocketId, state.tick, suspend, toolBusy]);
+  }, [failedTool, feedback, getSnapshot, journal, preparePaidTool, restoreSnapshot, resume, runId, ranked, suspend, toolBusy]);
   const recoverTool = useCallback(async () => {
     if (toolBusy || toolLock.current) return;
     toolLock.current = true;
@@ -201,14 +246,14 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
     try {
       const result = await journal.recover();
       if (result.result) useCommerceStore.getState().acceptWallet(result.result.wallet);
-      if (result.snapshot) restoreSnapshot(result.snapshot);
+      if (result.snapshot) { ranked?.reconcileTool(result.snapshot); restoreSnapshot(result.snapshot); }
       setToolNotice(result.cancelled ? 'Not enough points for that tool. No points were spent.'
         : result.refunded ? 'Your unused tool was refunded.' : 'Your tool is ready.');
       if (result.cancelled) void useCommerceStore.getState().refreshWallet().catch(() => undefined);
       setToolLayer(null); setToolError(''); resume();
     } catch (error) { failedTool(error); }
     finally { toolLock.current = false; setToolBusy(false); }
-  }, [failedTool, journal, restoreSnapshot, resume, toolBusy]);
+  }, [failedTool, journal, ranked, restoreSnapshot, resume, toolBusy]);
   const cancelGesture = useCallback(() => {
     cancelCuePull();
     cancelAim();
@@ -221,7 +266,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
   // Resizing changes the finger-to-world mapping. Discard a pull instead of
   // releasing it through a different projection; the flight itself is preserved.
   useEffect(() => { cancelGesture(); }, [cancelGesture, offsetX, offsetY, scale]);
-  useEffect(() => { if (!focused || paused || toolLayer || toolBusy) cancelGesture(); }, [cancelGesture, focused, paused, toolBusy, toolLayer]);
+  useEffect(() => { if (!focused || paused || toolLayer || toolBusy || state.phase !== 'held') cancelGesture(); }, [cancelGesture, focused, paused, state.phase, toolBusy, toolLayer]);
   const gesture = useMemo(() => Gesture.Pan().withTestId('launch-pull-gesture').runOnJS(true).minDistance(0).maxPointers(1)
     .enabled(focused && !paused && !toolLayer && !toolBusy && state.phase === 'held')
     .onBegin((event) => {
@@ -244,11 +289,18 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
     setArea((previous) => previous.width === width && previous.height === height ? previous : { width, height });
   };
   const dead = state.phase === 'failed';
+  const pocketCountdown = session.fraySeconds != null ? `Loose pocket · ${session.fraySeconds} ${session.fraySeconds === 1 ? 'second' : 'seconds'} to launch` : undefined;
+  const recoveryCue = room.sideWallRestitution !== undefined && score.pockets === 1 && state.launches === 1
+    ? 'The padded sides bounce you back. A lower pocket can save a fall.' : undefined;
+  const worldName = worldForStage(session.worldStage).name;
+  const showWorldAnnouncement = session.worldAnnouncement && !pocketCountdown && focused && !paused && !toolLayer && !toolBusy && !dead;
+  const choiceCue = pocketCountdown || challengeCue || session.routeCue || recoveryCue;
   const status = dead ? session.message : paused ? 'Your run is paused.'
-    : state.phase === 'flying' ? 'Find your next landing…' : session.message || 'Pull back. Keep climbing.';
+    : state.phase === 'flying' ? session.message || 'Find your next landing…'
+      : pocketCountdown || session.routeCue || recoveryCue || session.message || 'Pull back. Keep climbing.';
   const showCue = hints && !session.hasAimed && score.pockets === 0 && state.phase === 'held' && !paused && !toolLayer;
-  const showChallengeCue = !showCue && hints && focused && !paused && state.phase === 'held'
-    && !toolLayer && challengeCue;
+  const showChallengeCue = !showWorldAnnouncement && !showCue && (hints || !!pocketCountdown) && focused && !paused && state.phase === 'held'
+    && !toolLayer && choiceCue;
   const trayTop = insets.top + hudHeight + 20;
   const cueTop = trayTop + trayHeight + 8;
   const teleportTargets = toolLayer?.type === 'land' ? toolLayer.pockets.map((pocket) => ({
@@ -258,13 +310,16 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
     && target.x - target.width / 2 >= 0 && target.x + target.width / 2 <= area.width) : [];
 
   return <View style={styles.run} testID="launch-run-screen">
+    {studioOpen && <ButtonStudio highContrast={highContrast} onClose={() => setStudioOpen(false)} />}
+    {weeklyOpen && <WeeklyLeaderboard highContrast={highContrast} status={() => ranked?.status ?? 'Local run · start online to compete'} onClose={() => setWeeklyOpen(false)} />}
     {focused && <StatusBar style="dark" />}
     <View style={styles.playArea} onLayout={measure} testID="launch-play-area">
       {area.width > 1 && area.height > 1 && <GestureDetector gesture={gesture}>
         <View testID="launch-playfield" collapsable={false} style={[styles.canvasFrame, area]}
-          accessibilityLabel="Endless fabric playground. Pull the button's pocket backward and release. Catch pockets above you. Falling off or touching thorns ends the run.">
-          <LaunchCanvas room={room} state={state} motion={motion} size={area} bottomInset={insets.bottom}
-            nextPocketId={session.nextPocketId} highContrast={highContrast} reducedMotion={reducedMotion}
+          accessibilityLabel={`Endless fabric playground. ${worldName}. Pull the button's pocket backward and release. ${room.sideWallRestitution !== undefined ? 'Padded side walls bounce you back, and lower pockets can catch your fall. ' : ''}Choose wide stitched pockets or narrower star pockets. Some star routes offer free tools. Loose stitched pockets unravel four seconds after you land. ${room.barriers !== undefined ? 'Hoops carry your pocket while aiming. Strong shots tear loose cloth. Hit snap buttons to open matching doors. Shutters warn before closing. Thorns and closed shutters are sharp and end the run.' : 'Falling off or touching thorns or scissors ends the run.'}`}>
+          <LaunchCanvas appearance={appearance} room={room} state={state} motion={motion} size={area} bottomInset={insets.bottom}
+            highContrast={highContrast} reducedMotion={reducedMotion}
+            worldStage={session.worldStage} worldTransitionTick={session.worldTransitionTick}
             showTutorial={showCue} prediction={session.prediction} previewActive={session.tools.previewActive} />
         </View>
       </GestureDetector>}
@@ -301,20 +356,24 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
         highContrast={highContrast} onTool={chooseTool} />
     </View>}
 
+    {showWorldAnnouncement && <View testID="launch-world-announcement" pointerEvents="none"
+      style={[styles.cue, highContrast && styles.contrastSurface, { top: cueTop }]}>
+      <Text accessibilityLiveRegion="polite" style={styles.hint}>{worldName}</Text>
+    </View>}
     {showCue && <View testID="launch-cue" pointerEvents="none"
       style={[styles.cue, highContrast && styles.contrastSurface, { top: cueTop }]}>
       <Text testID="launch-instruction" numberOfLines={fontScale > 1.3 ? 3 : 2} style={styles.hint}>
-        Pull the button down and left. Let go to catch the gold pocket.
+        Pull the button down and left. Let go to catch the pocket above.
       </Text>
     </View>}
     {showChallengeCue && <View testID="launch-challenge-cue" pointerEvents="none"
       style={[styles.cue, highContrast && styles.contrastSurface,
         { top: cueTop, left: insets.left + 20, right: insets.right + 20 }]}>
       <Text accessibilityLiveRegion="polite" numberOfLines={fontScale > 1.3 ? 3 : 2} style={styles.hint}>
-        {challengeCue}
+        {choiceCue}
       </Text>
     </View>}
-    {!showCue && !showChallengeCue && !toolLayer && !paused && !dead
+    {!showWorldAnnouncement && !showCue && !showChallengeCue && !toolLayer && !paused && !dead
       && (toolNotice || session.tools.previewActive || session.message.startsWith('+1')) && <View pointerEvents="none" style={[styles.cue, { top: cueTop }]}>
       <Text style={styles.hint}>{toolNotice || (session.tools.previewActive ? session.prediction?.horizon
         ? 'Preview ends at 8 seconds · … means the flight continues' : 'Preview ready · pull to see your flight' : session.message)}</Text>
@@ -322,6 +381,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
     <Text testID="launch-status" accessibilityLiveRegion="polite" style={styles.screenReaderStatus}>{status}</Text>
 
     {(dead || paused) && !toolLayer && <View style={[styles.modalLayer, { paddingTop: cueTop + 12, paddingBottom: insets.bottom + 16 }]}>
+      <ScrollView style={styles.dialogScroller} contentContainerStyle={styles.dialogScroll}>
       <View testID={dead ? 'launch-game-over' : 'launch-paused'} style={styles.overlay}>
         <Text style={styles.overlayEyebrow}>PULLTHREAD</Text>
         <Text accessibilityRole="header" style={styles.overlayTitle}>{dead ? 'Run over' : 'Paused'}</Text>
@@ -333,6 +393,9 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
           <Text style={styles.actionText}>{session.tools.inventory.revive > 0 ? 'Use free Revive' : `Revive · ${TOOL_COSTS.revive} points`}</Text>
         </Pressable>}
         {dead && session.tools.reviveUsed && <Text style={styles.overlayCopy}>Revive used this run.</Text>}
+        {!!awardNotice && <Text accessibilityLiveRegion="polite" style={styles.result}>{awardNotice}</Text>}
+        <Pressable accessibilityRole="button" testID="launch-points-tools" onPress={openShop} disabled={toolBusy}
+          style={styles.reviveButton}><Text style={styles.actionText}>Points & tools</Text></Pressable>
         <View style={styles.controls}>
           {dead ? <Action label="Play again" testID="launch-restart-button" disabled={toolBusy} primary onPress={() => void restartRun()} /> : <>
             <Action label="New run" testID="launch-restart-button" disabled={toolBusy} onPress={() => void restartRun()} />
@@ -340,6 +403,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
           </>}
         </View>
       </View>
+      </ScrollView>
     </View>}
     {toolLayer?.type === 'land' && <View testID="teleport-selection" style={styles.targetLayer} pointerEvents="box-none" accessibilityViewIsModal>
       {teleportTargets.map((target, index) => <Pressable key={target.id} testID={`teleport-${target.id}`}
@@ -355,7 +419,8 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
     </View>}
     {toolLayer && toolLayer.type !== 'land' && <View style={[styles.shopLayer,
       { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 12, paddingLeft: insets.left + 14, paddingRight: insets.right + 14 }]}>
-      {toolLayer.type === 'shop' ? <PointsShop onClose={closeTools} /> : <ScrollView contentContainerStyle={styles.dialogScroll} style={styles.dialogScroller}>
+      {toolLayer.type === 'shop' ? <PointsShop onClose={closeTools}
+        onCustomize={() => setStudioOpen(true)} onLeaderboard={() => setWeeklyOpen(true)} /> : <ScrollView contentContainerStyle={styles.dialogScroll} style={styles.dialogScroller}>
         <View testID={toolLayer.type === 'recovery' ? 'tool-recovery' : 'tool-confirmation'} style={styles.overlay} accessibilityViewIsModal>
           {toolLayer.type === 'tool' ? <>
             <ToolIcon kind={toolLayer.kind} size={36} color="#28594b" />
@@ -388,13 +453,37 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings }: {
 }
 
 export function EndlessGameScreen({ navigation }: Props) {
-  const [seed, setSeed] = useState(() => Math.floor(Math.random() * 0x100000000));
+  const config = readCommerceConfig();
+  const connected = ['ios', 'android'].includes(config.platform) && config.backendProvider === 'workers' && !!config.firebase.apiKey;
+  const prefetched = useRef<Promise<RankedJournal | null> | null>(null);
+  const [current, setCurrent] = useState<{ seed: number; ranked: RankedJournal | null } | null>(() => connected ? null : { seed: Math.floor(Math.random() * 0x100000000), ranked: null });
   const best = useEndlessProgressStore((state) => state.bestPockets);
   const onScore = useEndlessProgressStore((state) => state.recordScore);
-  const restart = useCallback(() => setSeed((previous) => (previous + 0x9e3779b9) >>> 0), []);
+  const start = useCallback(async (recover = false) => {
+    if (recover) {
+      const saved = await RankedJournal.recover(AsyncStorage, leaderboardService).catch(() => null);
+      if (saved?.snapshot) { saved.action({ type: 'cancel' }); setCurrent({ seed: saved.run.seed, ranked: saved }); return; }
+    }
+    const register = () => leaderboardService.register(`start-${Date.now()}-${Math.random().toString(36).slice(2)}`).then(run => new RankedJournal(run, AsyncStorage, leaderboardService)).catch(() => null);
+    const available = prefetched.current; prefetched.current = null;
+    const registration = available ? available.then(value => value && value.run.deadline > Date.now() ? value : register()) : connected ? register() : Promise.resolve(null);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ranked = connected ? await Promise.race([
+      registration,
+      new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), 1800); }),
+    ]) : null;
+    if (timer) clearTimeout(timer);
+    if (connected) prefetched.current = register();
+    if (ranked) await ranked.activate();
+    else await AsyncStorage.removeItem(ACTIVE_RANKED_KEY);
+    void RankedJournal.retryPending(AsyncStorage, leaderboardService, ranked?.run.id).catch(() => undefined);
+    setCurrent({ seed: ranked?.run.seed ?? Math.floor(Math.random() * 0x100000000), ranked });
+  }, [connected]);
+  useEffect(() => { if (connected) void Promise.resolve().then(() => start(true)); }, [connected, start]);
+  const restart = useCallback(() => { void start(); }, [start]);
   return <View style={styles.screen} testID="endless-game-screen">
-    <EndlessFlight key={seed} seed={seed} best={best} onRestart={restart} onScore={onScore}
-      onSettings={() => navigation.navigate('Settings')} />
+    {current ? <EndlessFlight key={current.ranked?.run.id ?? current.seed} seed={current.seed} ranked={current.ranked} best={best} onRestart={restart} onScore={onScore}
+      onSettings={() => navigation.navigate('Settings')} /> : <ActivityIndicator accessibilityLabel="Preparing your climb" color="#28594b" style={{ flex: 1 }} />}
   </View>;
 }
 

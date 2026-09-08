@@ -2,6 +2,7 @@
 import { describe, expect, test } from '@jest/globals';
 
 import { getLaunchViewport } from '../viewport';
+import { MAX_PULL } from '../simulation';
 
 const bounds = { width: 360, height: 600 };
 
@@ -11,7 +12,7 @@ describe('full-screen launch projection', () => {
       const viewport = getLaunchViewport(size, bounds, 34);
       expect(viewport.scale).toBeGreaterThan(0);
       expect(Object.values(viewport).every(Number.isFinite)).toBe(true);
-      expect(viewport.offsetY + bounds.height * viewport.scale).toBeCloseTo(1);
+      expect(viewport.offsetY + bounds.height * viewport.scale).toBeLessThan(1);
       const provisionalX = viewport.offsetX + 80 * viewport.scale;
       expect((provisionalX - viewport.offsetX) / viewport.scale).toBeCloseTo(80);
     }
@@ -20,18 +21,18 @@ describe('full-screen launch projection', () => {
   test.each([
     { width: 390, height: 844, bottom: 34 },
     { width: 320, height: 568, bottom: 12 },
-  ])('fills portrait width and aligns the physical floor at $width × $height', ({ width, height, bottom }) => {
+  ])('fills portrait width with a pull gutter above the safe inset at $width × $height', ({ width, height, bottom }) => {
     const viewport = getLaunchViewport({ width, height }, bounds, bottom);
     expect(viewport.offsetX).toBeCloseTo(0);
     expect(viewport.scale * bounds.width).toBeCloseTo(width);
-    expect(viewport.offsetY + bounds.height * viewport.scale).toBeCloseTo(height - bottom);
-    expect((height - bottom) / viewport.scale).toBeGreaterThanOrEqual(520);
+    expect(viewport.offsetY + bounds.height * viewport.scale).toBeLessThan(height - bottom);
+    expect((height - bottom) / viewport.scale).toBeGreaterThanOrEqual(600);
   });
 
-  test('short landscape screens keep at least 520 world units visible and center the lane', () => {
+  test('short landscape screens keep the bank rise visible as well as the pull gutter', () => {
     const size = { width: 844, height: 390 };
     const viewport = getLaunchViewport(size, bounds, 34);
-    expect((size.height - 34) / viewport.scale).toBeCloseTo(520);
+    expect((size.height - 34) / viewport.scale).toBeCloseTo(600);
     expect(viewport.offsetX).toBeGreaterThan(0);
     expect(viewport.offsetX * 2 + bounds.width * viewport.scale).toBeCloseTo(size.width);
     expect(viewport.offsetY).toBeLessThan(0);
@@ -43,7 +44,7 @@ describe('full-screen launch projection', () => {
   test('tall screens expose future world positions above the camera origin', () => {
     const viewport = getLaunchViewport({ width: 390, height: 844 }, bounds, 34);
     expect(viewport.offsetY).toBeGreaterThan(0);
-    const nextPocketAboveOrigin = viewport.offsetY - 100 * viewport.scale;
+    const nextPocketAboveOrigin = viewport.offsetY - 40 * viewport.scale;
     expect(nextPocketAboveOrigin).toBeGreaterThan(0);
     expect(nextPocketAboveOrigin).toBeLessThan(viewport.offsetY);
   });
@@ -89,9 +90,28 @@ describe('full-screen launch projection', () => {
     expect((screenEnd.y - screenPoint.y) / viewport.scale).toBeCloseTo(pull.y);
   });
 
-  test('zero bottom inset projects the same unchanged 360 × 600 physics bounds', () => {
+  test.each([
+    { width: 320, height: 568, bottom: 12 },
+    { width: 390, height: 844, bottom: 34 },
+    { width: 1022, height: 1280, bottom: 24 },
+    { width: 844, height: 390, bottom: 34 },
+  ])('keeps the stretched fabric and finger clear of the bottom at $width × $height', ({ width, height, bottom }) => {
+    const viewport = getLaunchViewport({ width, height }, bounds, bottom);
+    for (const cameraY of [0, -2400]) {
+      // Opening lip is at 490; later settled catches sit at 480.
+      for (const lipY of [490, 480]) {
+        const anchor = cameraY + lipY;
+        const screenY = (worldY: number) => viewport.offsetY + (worldY - cameraY) * viewport.scale;
+        expect(height - bottom - screenY(anchor + MAX_PULL + 35)).toBeGreaterThanOrEqual(30);
+        // Begin at the bottom of the accepted pocket touch area, not only its center.
+        expect(height - bottom - screenY(anchor + MAX_PULL + 52)).toBeGreaterThanOrEqual(20);
+      }
+    }
+  });
+
+  test('the extra pull space leaves the 360 × 600 physics bounds unchanged', () => {
     const viewport = getLaunchViewport({ width: 360, height: 600 }, bounds);
-    expect(viewport).toEqual({ scale: 1, offsetX: 0, offsetY: 0 });
+    expect(viewport).toEqual({ scale: 1, offsetX: 0, offsetY: -80 });
     expect(bounds).toEqual({ width: 360, height: 600 });
   });
 });

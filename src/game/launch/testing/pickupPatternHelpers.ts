@@ -1,6 +1,6 @@
 /** Test-only optional-route verification using the real input clamp, camera, and sweeps. */
 import type { ChallengePattern } from '../challengeTypes';
-import { createEndlessRun, launchEndless, stepEndless, type EndlessRun } from '../endless';
+import { createLegacyEndlessRun as createEndlessRun, launchEndless, stepEndless, type EndlessRun } from '../endless';
 import { clampEndlessPull } from '../launchInput';
 import { pickupPlacement } from '../pickups';
 import { createLaunchState } from '../simulation';

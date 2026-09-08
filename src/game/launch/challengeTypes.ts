@@ -23,4 +23,6 @@ export interface ActiveChallenge {
   readonly family: ChallengeFamily;
   readonly band: ChallengeBand;
   readonly cue?: string;
+  /** Each authored world lesson teaches once, independently of historical family hints. */
+  readonly introductionKey?: string;
 }

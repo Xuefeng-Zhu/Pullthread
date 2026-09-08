@@ -14,7 +14,7 @@ export interface LaunchPrediction {
   readonly horizon: boolean;
 }
 
-/** A copy uses the real collision order, moving targets and scrolling failure floor. */
+/** A copy uses the real collision order, wall rebounds and retained recovery floor. */
 export function predictEndlessLaunch(run: EndlessRun, rawPull: LaunchPoint): LaunchPrediction {
   const attempt = cloneEndlessRun(run);
   const points: LaunchPoint[] = [];
@@ -28,7 +28,8 @@ export function predictEndlessLaunch(run: EndlessRun, rawPull: LaunchPoint): Lau
     ticks += 1;
     const bounced = events.filter((event) => event.type === 'bounce');
     bounced.forEach((event) => bounces.push({ ...attempt.state.position, tick: event.tick, id: event.id }));
-    if (ticks % 4 === 0 || bounced.length || events.some((event) => event.type === 'catch' || event.type === 'fail')) {
+    if (ticks % 4 === 0 || bounced.length || events.some((event) => event.type === 'catch' || event.type === 'fail'
+      || event.type === 'break' || event.type === 'switch')) {
       points.push({ ...attempt.state.position });
     }
   }

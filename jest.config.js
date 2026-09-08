@@ -1,6 +1,7 @@
 module.exports = {
   preset: 'jest-expo',
   testEnvironment: '@shopify/react-native-skia/jestEnv.js',
+  testPathIgnorePatterns: ['/node_modules/', '/worker/'],
   setupFilesAfterEnv: [
     '@shopify/react-native-skia/jestSetup.js',
     '<rootDir>/jest.setup.ts',

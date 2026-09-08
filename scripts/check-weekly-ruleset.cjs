@@ -1,0 +1,11 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const root = path.resolve(__dirname, '..');
+const contracts = fs.readFileSync(path.join(root, 'src/leaderboard/contracts.ts'), 'utf8');
+const active = contracts.match(/export const RULESET = '([^']+)'/)?.[1];
+if (!active || !/^stitched-v4-weekly-[1-9]\d*$/.test(active)) throw new Error('Could not resolve the active weekly ruleset.');
+const sources = JSON.parse(fs.readFileSync(path.join(root, 'worker/rulesets', `${active}.sources.json`), 'utf8'));
+const changed = Object.entries(sources).filter(([file, hash]) => crypto.createHash('sha256').update(fs.readFileSync(path.join(root, file))).digest('hex') !== hash);
+if (changed.length) throw new Error(`Ranked physics changed. Preserve the frozen server engine and publish a new ruleset before updating its source manifest: ${changed.map(([file]) => file).join(', ')}`);
+console.log(`Ranked client sources match frozen engine ${active}.`);

@@ -3,16 +3,19 @@ import { getApps, initializeApp } from 'firebase/app';
 import * as FirebaseAuth from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import Purchases, { PRODUCT_CATEGORY, PURCHASES_ERROR_CODE, type PurchasesPackage } from 'react-native-purchases';
-import type { CommerceConfig } from './config';
+import { resolveCommerceBackend, type CommerceConfig } from './config';
 import { CommerceError } from './errors';
 import type { NativeCommerceRuntime } from './nativeService';
 import { requirePointPack } from './validation';
+import { createWorkersCaller } from './workersTransport';
 
 let configuration: Promise<void> | undefined;
 let configuredIdentity: { accountId: string; apiKey: string } | undefined;
 let authentication: Promise<string> | undefined;
+let authenticatedIdentity: string | undefined;
 
-export async function loadNativeRuntime(config: CommerceConfig): Promise<NativeCommerceRuntime> {
+export async function loadNativeRuntime(config: CommerceConfig, weekly: boolean | 'cosmetics' = false): Promise<NativeCommerceRuntime> {
+  const backend = resolveCommerceBackend(config);
   const name = 'pullthread-commerce';
   const app = getApps().find((candidate) => candidate.name === name) ?? initializeApp(config.firebase, name);
   if (app.options.projectId !== config.firebase.projectId || app.options.appId !== config.firebase.appId) {
@@ -29,18 +32,32 @@ export async function loadNativeRuntime(config: CommerceConfig): Promise<NativeC
     if ((error as { code?: string }).code !== 'auth/already-initialized') throw error;
     auth = FirebaseAuth.getAuth(app);
   }
-  const functions = getFunctions(app, 'us-west1');
+  const functions = backend.provider === 'firebase' ? getFunctions(app, 'us-west1') : undefined;
   const packages = new Map<string, PurchasesPackage>();
   const checkIdentity = () => {
-    if (configuredIdentity && auth.currentUser?.uid !== configuredIdentity.accountId) {
+    const expected = authenticatedIdentity ?? configuredIdentity?.accountId;
+    if (expected && auth.currentUser?.uid !== expected) {
       throw new CommerceError('Your guest account changed. Restart before using points.', 'account');
     }
   };
+  const workersCall = backend.provider === 'workers' ? createWorkersCaller(backend.url, async () => {
+    checkIdentity();
+    const user = auth.currentUser;
+    if (!user) throw new CommerceError('Your guest account is unavailable. Please try again.', 'account');
+    // The SDK refreshes an expiring ID token while retaining this persisted UID.
+    const token = await user.getIdToken();
+    checkIdentity();
+    if (auth.currentUser?.uid !== user.uid) throw new CommerceError('Your guest account changed. Restart before using points.', 'account');
+    return token;
+  }, fetch, weekly) : undefined;
   return {
     authenticate: () => {
       if (!authentication) authentication = (async () => {
         await auth.authStateReady();
-        return (auth.currentUser ?? (await FirebaseAuth.signInAnonymously(auth)).user).uid;
+        const uid = (auth.currentUser ?? (await FirebaseAuth.signInAnonymously(auth)).user).uid;
+        if (authenticatedIdentity && uid !== authenticatedIdentity) throw new CommerceError('Your guest account changed. Restart before using points.', 'account');
+        authenticatedIdentity = uid;
+        return uid;
       })().finally(() => { authentication = undefined; });
       return authentication;
     },
@@ -83,7 +100,7 @@ export async function loadNativeRuntime(config: CommerceConfig): Promise<NativeC
     call: async (endpoint, payload) => {
       // Never silently purchase/redeem under a changed anonymous identity.
       checkIdentity();
-      return (await httpsCallable(functions, endpoint)(payload)).data;
+      return workersCall ? workersCall(endpoint, payload) : (await httpsCallable(functions!, endpoint)(payload)).data;
     },
   };
 }

@@ -7,6 +7,8 @@ interface FabricTextureProps {
   readonly width: number;
   readonly height: number;
   readonly highContrast?: boolean;
+  /** Optional world fabric tint; weave and legacy callers keep their palette. */
+  readonly baseColor?: string;
 }
 
 function createWeavePath(
@@ -35,6 +37,7 @@ export function FabricTexture({
   width,
   height,
   highContrast = false,
+  baseColor,
 }: FabricTextureProps) {
   const palette = getGamePalette(highContrast);
   const horizontalWeave = useMemo(
@@ -53,7 +56,7 @@ export function FabricTexture({
         y={0}
         width={width}
         height={height}
-        color={palette.fabricBase}
+        color={baseColor ?? palette.fabricBase}
       />
       <Path
         path={horizontalWeave}

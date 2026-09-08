@@ -4,13 +4,13 @@ import type { ActiveChallenge } from '../../game/launch/challengeTypes';
 import { MIN_PULL } from '../../game/launch/simulation';
 import type { LaunchPoint } from '../../game/launch/types';
 
-type CueFamily = 'bank' | 'timing';
+type CueFamily = string;
 
 /** Remounting the flight starts a fresh set of introductions for the new run. */
 export function useChallengeCue(challenge: ActiveChallenge | undefined, heldPocketId: string, hints: boolean) {
   const [introduced, setIntroduced] = useState<Record<CueFamily, boolean>>({ bank: false, timing: false });
   const activePull = useRef<{ family: CueFamily; heldPocketId: string; receiverId: string } | null>(null);
-  const family = challenge?.family === 'bank' || challenge?.family === 'timing' ? challenge.family : undefined;
+  const family = challenge?.introductionKey ?? (challenge?.family === 'bank' || challenge?.family === 'timing' ? challenge.family : undefined);
   const receiverId = challenge?.pocketId;
   const cue = challenge?.cue;
 

@@ -108,6 +108,13 @@ function cameraOffset() {
   return camera.value;
 }
 
+function pocketTouchPoint() {
+  const canvas = latestCanvas();
+  const { scale, offsetX, offsetY } = getLaunchViewport(canvas.size, canvas.room.bounds, canvas.bottomInset);
+  return { x: offsetX + canvas.state.position.x * scale,
+    y: offsetY + (canvas.state.position.y - cameraOffset()) * scale };
+}
+
 describe('endless Pull & Launch screen', () => {
   let frames: Map<number, FrameRequestCallback>;
   let timestamp: number;
@@ -188,6 +195,9 @@ describe('endless Pull & Launch screen', () => {
     await fireEvent.press(view.getByTestId('launch-pause-button'));
     expect(view.getByTestId('launch-paused')).toBeTruthy();
     expect(within(view.getByTestId('launch-paused')).getByTestId('launch-resume-button')).toBeTruthy();
+    expect(within(view.getByTestId('launch-paused')).getByTestId('launch-points-tools')).toBeTruthy();
+    expect(within(view.getByTestId('launch-paused')).queryByText('Button Studio')).toBeNull();
+    expect(within(view.getByTestId('launch-paused')).queryByText('Weekly leaderboard')).toBeNull();
     const pausedTick = latestCanvas().motion.tick.value;
     await runFrames(90);
     expect(latestCanvas().motion.tick.value).toBe(pausedTick);
@@ -227,7 +237,7 @@ describe('endless Pull & Launch screen', () => {
     await measure(view);
     const gesture = getByGestureTestId('launch-pull-gesture') as ReturnType<typeof Gesture.Pan>;
     type PanEvent = Parameters<NonNullable<typeof gesture.handlers.onBegin>>[0];
-    const event = { x: 80, y: 490, translationX: 0, translationY: 0, state: State.BEGAN } as PanEvent;
+    const event = { ...pocketTouchPoint(), translationX: 0, translationY: 0, state: State.BEGAN } as PanEvent;
     await act(() => {
       gesture.handlers.onBegin?.(event);
       for (let count = 1; count <= 50; count += 1) {
@@ -393,7 +403,7 @@ describe('endless Pull & Launch screen', () => {
     await measure(view);
     const gesture = getByGestureTestId('launch-pull-gesture') as ReturnType<typeof Gesture.Pan>;
     type PanEvent = Parameters<NonNullable<typeof gesture.handlers.onBegin>>[0];
-    const event = { x: 80, y: 490, translationX: -24, translationY: 72, state: State.BEGAN } as PanEvent;
+    const event = { ...pocketTouchPoint(), translationX: -24, translationY: 72, state: State.BEGAN } as PanEvent;
     // Invoke the registered callbacks directly to interleave a layout event with an unfinished drag.
     // fireGestureHandler automatically appends END, which would hide this lifecycle regression.
     await act(() => {
@@ -470,6 +480,61 @@ describe('endless Pull & Launch screen', () => {
     await view.unmount();
   });
 
+  test('each authored world lesson teaches independently of the earlier bank and timing hints', async () => {
+    let challenge: ActiveChallenge = { ...bankChallenge, family: 'arc', introductionKey: 'section-10', cue: 'Swaying pockets settle when caught.' };
+    overrideChallenge(() => challenge);
+    const props = harness();
+    const view = await render(<EndlessGameScreen {...props} />);
+    await measure(view);
+    expect(view.getByText(challenge.cue!)).toBeTruthy();
+    await drag({ x: -24, y: 72 }, { quick: false, cancelled: true });
+    expect(view.queryByTestId('launch-challenge-cue')).toBeNull();
+    challenge = { ...challenge, introductionKey: 'section-11' };
+    await view.rerender(<EndlessGameScreen {...props} />);
+    expect(view.getByText(challenge.cue!)).toBeTruthy();
+    await view.unmount();
+  });
+
+  test('world announcements remain nonblocking and yield to the loose-pocket deadline', async () => {
+    const actual = jest.requireActual<typeof import('../../../game/launch/useLaunchSession')>('../../../game/launch/useLaunchSession');
+    let fraySeconds: number | null = null;
+    jest.mocked(useLaunchSession).mockImplementation((...args) => ({ ...actual.useLaunchSession(...args),
+      hasAimed: true, worldStage: 4, worldTransitionTick: 60, worldAnnouncement: true, fraySeconds }));
+    usePreferencesStore.setState({ tutorialHintsEnabled: false });
+    const props = harness();
+    const view = await render(<EndlessGameScreen {...props} />);
+    await measure(view);
+    expect(view.getByTestId('launch-world-announcement').props.pointerEvents).toBe('none');
+    expect(view.getByText('Moonlit Quilt')).toBeTruthy();
+    expect(latestCanvas()).toMatchObject({ worldStage: 4, worldTransitionTick: 60 });
+    expect(view.getByTestId('launch-playfield').props.accessibilityLabel).toContain('Moonlit Quilt');
+    await fireEvent.press(view.getByTestId('launch-pause-button'));
+    expect(view.queryByTestId('launch-world-announcement')).toBeNull();
+    await fireEvent.press(view.getByTestId('launch-resume-button'));
+    fraySeconds = 2;
+    await view.rerender(<EndlessGameScreen {...props} />);
+    expect(view.queryByTestId('launch-world-announcement')).toBeNull();
+    expect(within(view.getByTestId('launch-challenge-cue')).getByText('Loose pocket · 2 seconds to launch')).toBeTruthy();
+    await view.unmount();
+  });
+
+  test('pulls during a world announcement do not consume the hidden lesson', async () => {
+    const actual = jest.requireActual<typeof import('../../../game/launch/useLaunchSession')>('../../../game/launch/useLaunchSession');
+    let announcing = true;
+    const lesson: ActiveChallenge = { ...bankChallenge, family: 'arc', introductionKey: 'section-10', cue: 'Catch a swaying pocket to hold it still.' };
+    jest.mocked(useLaunchSession).mockImplementation((...args) => ({ ...actual.useLaunchSession(...args),
+      hasAimed: true, worldStage: 1, worldAnnouncement: announcing, challenge: lesson }));
+    const props = harness();
+    const view = await render(<EndlessGameScreen {...props} />);
+    await measure(view);
+    expect(view.queryByTestId('launch-challenge-cue')).toBeNull();
+    await drag({ x: -24, y: 72 }, { quick: false, cancelled: true });
+    announcing = false;
+    await view.rerender(<EndlessGameScreen {...props} />);
+    expect(view.getByText(lesson.cue!)).toBeTruthy();
+    await view.unmount();
+  });
+
   test('disabled hints suppress contextual cues without consuming an unseen introduction', async () => {
     usePreferencesStore.setState({ tutorialHintsEnabled: false });
     overrideChallenge(() => bankChallenge);
@@ -509,7 +574,7 @@ describe('endless Pull & Launch screen', () => {
     await measure(view);
     const gesture = getByGestureTestId('launch-pull-gesture') as ReturnType<typeof Gesture.Pan>;
     type PanEvent = Parameters<NonNullable<typeof gesture.handlers.onBegin>>[0];
-    const event = { x: 80, y: 490, translationX: 2, translationY: 3, state: State.BEGAN } as PanEvent;
+    const event = { ...pocketTouchPoint(), translationX: 2, translationY: 3, state: State.BEGAN } as PanEvent;
     await act(() => {
       gesture.handlers.onBegin?.(event);
       gesture.handlers.onUpdate?.({ ...event, state: State.ACTIVE });
@@ -627,6 +692,72 @@ describe('endless Pull & Launch screen', () => {
     await runFrames(3);
     expect(latestCanvas().motion.tick.value).toBe(tick + 4);
     expect(latestCanvas().previewActive).toBe(false);
+    await view.unmount();
+  });
+
+  test('route choice is available in the hint and to screen readers', async () => {
+    const actual = jest.requireActual<typeof import('../../../game/launch/useLaunchSession')>(
+      '../../../game/launch/useLaunchSession',
+    );
+    jest.mocked(useLaunchSession).mockImplementation((...args) => ({
+      ...actual.useLaunchSession(...args), hasAimed: true, challenge: undefined,
+      nextPocketIds: ['wide-route', 'reward-route'],
+      routeCue: 'Choose the wide pocket, or follow the star for a free tool.',
+    }));
+    const view = await render(<EndlessGameScreen {...harness()} />);
+    await measure(view, 320, 568);
+    expect(within(view.getByTestId('launch-challenge-cue')).getByText('Choose the wide pocket, or follow the star for a free tool.')).toBeTruthy();
+    expect(view.getByTestId('launch-status').props.children).toBe('Choose the wide pocket, or follow the star for a free tool.');
+    await drag({ x: -24, y: 72 });
+    expect(view.queryByTestId('launch-challenge-cue')).toBeNull();
+    await view.unmount();
+  });
+
+  test('temporary-pocket countdown remains visible with hints disabled and expiry disables the gesture', async () => {
+    usePreferencesStore.setState({ tutorialHintsEnabled: false });
+    const run = endless.createEndlessRun(0);
+    run.room = { ...run.room, pockets: run.room.pockets.map((pocket) => pocket.id === run.state.pocketId
+      ? { ...pocket, frayTicks: 480 } : pocket) };
+    run.state.pocketExpiryTicks = { [run.state.pocketId]: 480 };
+    jest.spyOn(endless, 'createEndlessRun').mockReturnValueOnce(run);
+    const view = await render(<EndlessGameScreen {...harness()} />);
+    await measure(view);
+    expect(within(view.getByTestId('launch-challenge-cue')).getByText('Loose pocket · 4 seconds to launch')).toBeTruthy();
+    await runFrames(122);
+    expect(view.getByTestId('launch-status').props.children).toBe('Loose pocket · 2 seconds to launch');
+    await fireEvent.press(view.getByTestId('launch-pause-button'));
+    const tick = latestCanvas().motion.tick.value;
+    await runFrames(300);
+    expect(latestCanvas().motion.tick.value).toBe(tick);
+    await fireEvent.press(view.getByTestId('launch-resume-button'));
+    await runFrames(120);
+    expect(latestCanvas().state.phase).toBe('flying');
+    expect(view.queryByTestId('launch-challenge-cue')).toBeNull();
+    const gesture = getByGestureTestId('launch-pull-gesture') as ReturnType<typeof Gesture.Pan>;
+    expect(gesture.config.enabled).toBe(false);
+    await runFrames(90);
+    expect(within(view.getByTestId('launch-game-over')).getByText('The pocket unraveled before you launched.')).toBeTruthy();
+    await fireEvent.press(view.getByTestId('launch-restart-button'));
+    await measure(view);
+    expect(latestCanvas().state.phase).toBe('held');
+    expect(view.queryByTestId('launch-game-over')).toBeNull();
+    await view.unmount();
+  });
+
+  test('teaches wall rebounds and lower-pocket recovery after the first catch without obscuring the first launch', async () => {
+    const run = endless.createEndlessRun(0);
+    run.room = { ...run.room, sideWallRestitution: 0.8 };
+    jest.spyOn(endless, 'createEndlessRun').mockReturnValueOnce(run);
+    const view = await render(<EndlessGameScreen {...harness()} />);
+    await measure(view, 320, 568);
+    expect(view.getByTestId('launch-playfield').props.accessibilityLabel).toContain('Padded side walls bounce you back, and lower pockets can catch your fall.');
+    expect(view.getByTestId('launch-instruction').props.children).toBe('Pull the button down and left. Let go to catch the pocket above.');
+    await drag({ x: -24, y: 72 });
+    await runFrames(160);
+    expect(view.getByTestId('launch-score').props.children).toBe(1);
+    expect(within(view.getByTestId('launch-challenge-cue')).getByText('The padded sides bounce you back. A lower pocket can save a fall.')).toBeTruthy();
+    await drag({ x: 0, y: 60 });
+    expect(view.queryByTestId('launch-challenge-cue')).toBeNull();
     await view.unmount();
   });
 });

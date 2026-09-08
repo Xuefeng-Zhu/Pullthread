@@ -3,7 +3,7 @@ import { describe, expect, test } from '@jest/globals';
 
 import {
   ENDLESS_HEIGHT,
-  createEndlessRun,
+  createLegacyEndlessRun as createEndlessRun,
   advanceEndless,
   launchEndless,
   nextEndlessChallenge,

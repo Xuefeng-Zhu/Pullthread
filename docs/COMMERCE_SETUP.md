@@ -1,10 +1,12 @@
 # Points and tools: backend setup
 
-The code is ready for local verification. Live purchases remain unavailable until the native stores, RevenueCat, Firebase secrets, and the explicit environment gate are configured. No production configuration or deployment is performed by the application.
+New builds use Cloudflare Workers and D1 for the points ledger. Firebase remains the guest identity provider and can stay on Spark; this path does not deploy Firebase Functions. Live purchases still require the native stores, RevenueCat secrets, and the explicit environment gate. See [the dated setup record](IPHONE_SHOP_SETUP_STATUS.md) for what is actually connected.
 
 ## Contract
 
-Firebase project: `pullthread-xuefeng-zhu`. Region: `us-west1`. All callable requests require Firebase authentication; anonymous guest authentication is supported. Configure RevenueCat with the exact Firebase UID as its app user ID. The first wallet sync establishes the server-owned customer mapping. A receipt is globally unique by store transaction ID and sandbox/production environment, so RevenueCat aliases cannot grant it to two guests. Guest identity recovery across reinstall is outside this milestone; an anonymous account's points are tied to its Firebase UID.
+Firebase identity project: `pullthread-xuefeng-zhu`. All commerce requests require a Firebase ID token; anonymous guest authentication is supported. Configure RevenueCat with the exact Firebase UID as its app user ID. The first wallet sync establishes the server-owned customer mapping. A receipt is globally unique by store transaction ID and sandbox/production environment, so RevenueCat aliases cannot grant it to two guests. Guest identity recovery across reinstall is outside this milestone; an anonymous account's points are tied to its Firebase UID.
+
+The Worker accepts `POST /<callable-name>` with `Authorization: Bearer <Firebase ID token>` and a JSON `{data: request}` body. Success is `{result: response}`. Errors use `{error: {status, message, details?}}`, with uppercase statuses such as `RESOURCE_EXHAUSTED`; the native adapter preserves the existing error and recovery contract. The Worker verifies the token signature, issuer, audience, subject, and time claims against Google's public signing keys. No Firebase admin key is required.
 
 | Callable | Request | Response |
 | --- | --- | --- |
@@ -26,20 +28,41 @@ A tool operation atomically deducts its catalog price and writes a durable `read
 1. Create the three **consumable** products in App Store Connect / Google Play and import them into the RevenueCat project. Keep their exact store identifiers above. Configure the RevenueCat offering with the exact identifier `points`, containing these packs. Intended US store setup prices are 100 points for $0.99, 550 for $4.99, and 1,200 for $9.99; these are catalog setup choices, while the app displays localized store-provided prices. Prices displayed by the app come from the store, never from a hard-coded currency amount.
 2. Configure native RevenueCat SDK public keys separately from server secrets. Configure purchases with Firebase's authenticated guest UID. The server accepts only purchased App Store / Play Store consumables; promotional, family-shared, and RevenueCat Test Store purchases do not grant points. Use actual store sandbox purchases for end-to-end validation.
 3. Create a RevenueCat **V2 secret API key** with read scopes `customer_information:purchases:read` and `project_configuration:products:read`. The backend reads every customer purchase page, validates its product/app/store/environment, and credits only owned purchases. V2 refunded purchases reconcile revocations. Unknown statuses fail closed. Product responses must report `consumable` or `one_time` with `one_time.is_consumable: true`.
-4. Set Firebase Secret Manager secrets `REVENUECAT_API_KEY` and `REVENUECAT_WEBHOOK_AUTHORIZATION`. Use a long random authorization value, at least 24 characters. Set that exact value as RevenueCat's webhook Authorization header. Never use an `EXPO_PUBLIC_` variable for either secret. The HTTP handler compares the entire header in constant time.
-5. Set Functions runtime parameters `REVENUECAT_PROJECT_ID` to the RevenueCat project ID, `REVENUECAT_APP_IDS` to a comma-separated allowlist of the project's native RevenueCat app IDs, and `COMMERCE_ENABLED_ENVIRONMENTS` to `sandbox` for the sandbox acceptance phase. Its default is empty, disabling commerce. Enabling `production` is a separate release decision after real store verification.
-6. Once deployment is explicitly approved, deploy the commerce functions, Firestore rules, and indexes together. The webhook endpoint is `https://us-west1-pullthread-xuefeng-zhu.cloudfunctions.net/commerceRevenueCatWebhook`. Subscribe to `NON_RENEWING_PURCHASE` and `CANCELLATION` events for both configured environments. A configured authorization header is required; there is no unauthenticated webhook grant path.
+4. Set Worker secrets `REVENUECAT_API_KEY` and `REVENUECAT_WEBHOOK_AUTHORIZATION` using `npx wrangler secret put <name>` from `worker/`. Use a long random webhook authorization value, at least 24 characters. Set that exact value as RevenueCat's webhook Authorization header. Never use an `EXPO_PUBLIC_` variable for either secret. The HTTP handler compares the entire header in constant time.
+5. Set `worker/wrangler.jsonc` variables `REVENUECAT_PROJECT_ID` to the RevenueCat project ID, `REVENUECAT_APP_IDS` to a comma-separated allowlist of the project's native RevenueCat app IDs, and `COMMERCE_ENABLED_ENVIRONMENTS` to `sandbox` for the sandbox acceptance phase. Its default is empty, disabling commerce. Enabling `production` is a separate release decision after real store verification.
+6. Deploy the Worker and D1 schema using the steps below. The webhook endpoint is `<Worker HTTPS URL>/commerceRevenueCatWebhook`. Subscribe to `NON_RENEWING_PURCHASE` and `CANCELLATION` events for the configured environments. A configured authorization header is required; there is no unauthenticated webhook grant path.
+
+## Workers deployment and native configuration
+
+From `worker/`, install the locked dependencies and authenticate the official Wrangler CLI to the intended Cloudflare account. Create the database once, then replace the placeholder `database_id` in `wrangler.jsonc` with the returned ID. If the checked-in ID is already configured, inspect that database rather than creating another one.
+
+```sh
+npm ci
+npx wrangler login --scopes account:read user:read workers_scripts:write d1:write
+npx wrangler d1 create pullthread-commerce
+npm run db:remote
+npm run deploy
+```
+
+Use Workers and D1 on the account's free plan. No paid-plan upgrade is part of this setup. Free-tier limits are enforced by Cloudflare, so usage beyond those limits can make requests unavailable. Check [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) and [D1 limits](https://developers.cloudflare.com/d1/platform/limits/) before scaling.
+
+The Worker reads existing transaction records in batches of 1,000 IDs and skips unchanged receipts. A wallet sync applies at most four verified changes, with refunds first and the explicitly queried purchase next. Larger grant backlogs reconcile across subsequent syncs, so the balance can initially omit unprocessed grants. If known refunds remain after a batch, that sync returns unavailable until subsequent syncs finish them. Changes already committed remain durable and idempotent. Reconciliation fails closed above 3,000 unique transactions or 35 provider HTTP requests; accounts beyond these limits require an explicit reconciliation/scaling change. Normal worst-case sync work stays below D1's 50-query free limit; unusually high concurrent contention can still require a retry. These bounds do not establish live CPU or daily-quota acceptance.
+
+New native builds set `EXPO_PUBLIC_COMMERCE_BACKEND_PROVIDER=workers` and `EXPO_PUBLIC_COMMERCE_BACKEND_URL` to the returned HTTPS origin. Keep the same Firebase public configuration and native RevenueCat public key. The app never falls back to another ledger after a Workers error. Builds with an absent provider retain the legacy Firebase Functions transport for compatibility. Browser builds still do not offer native App Store purchases.
+
+Enable Anonymous Auth in the existing Firebase project. Complete the provider setup, deploy with the sandbox gate, and set `EXPO_PUBLIC_COMMERCE_ENABLED=1` for the native sandbox acceptance build. Verify `/health`, an authenticated wallet sync, and an actual Apple sandbox purchase; the health endpoint alone is not purchase proof. Sandbox and production share a database but have separate wallet/transaction namespaces.
+
+### Existing ledger cutover
+
+This repository retains `functions/` and its tests for legacy builds. Changing the transport does not copy Firestore data. Before cutting over any environment that has served purchases, freeze its commerce writes and migrate **all** wallet revisions, customer mappings, transaction ownership/refund tombstones, purchase lots, tool receipts/allocations, and revive reservations into D1. Reconcile balances and receipts before updating clients or webhooks. Preserve Firebase UIDs and operation IDs. An empty D1 database must never replace an active paid wallet. No Firestore-to-D1 data migration is claimed by this change.
+
+The current device build has commerce disabled and has not demonstrated a live paid wallet; the dated setup record states the verified scope. Keep the legacy backend and configuration available until existing pending tool operations have been reconciled. Switching environments or backends midway through a pending operation requires the matching ledger records first.
 
 Provider reference: [webhook delivery and authorization](https://www.revenuecat.com/docs/integrations/webhooks), [event fields](https://www.revenuecat.com/docs/integrations/webhooks/event-types-and-fields), [customer purchase API](https://www.revenuecat.com/docs/api-v2/customer/resources), [purchase API and store identity](https://www.revenuecat.com/docs/api-v2/purchase), [product schema](https://www.revenuecat.com/docs/api-v2/product). The linked OpenAPI purchase schema enumerates `owned` and `refunded`; V1 non-subscription IDs are not interchangeable with store transaction IDs.
 
 ## Ledger and refunds
 
-All commerce collections are callable-only: even authenticated owners cannot directly read or write wallets, receipts, lots, customer mappings, or transaction ownership. Historical Daily Scrap rules and backend contracts are unchanged.
-
-- Wallet: `commerce_wallets/{sha256(uid)}/environments/{environment}`.
-- Purchase lots, redemptions, and once-per-run revive markers are subcollections of that wallet.
-- `commerce_transactions/{environment}_{sha256(store:transactionId)}` binds each transaction to a single UID, catalog pack, and quantity.
-- `commerce_customers/{sha256(uid)}` maps established Firebase guest identities to RevenueCat app user IDs.
+The D1 binding is server-only: clients cannot directly read or write wallets, receipts, lots, customer mappings, or transaction ownership. The schema is versioned in `worker/migrations/`; atomic batches and conflict guards preserve wallet revisions and receipt recovery under concurrent requests. Historical Daily Scrap rules and backend contracts are unchanged.
 
 Debits consume oldest available purchase lots first. A store refund removes only that pack's unspent points. Already applied tools remain applied; balances never become negative. Refunding an unused tool restores its original purchase allocations only if those packs have not themselves been refunded. Refund tombstones override duplicate or delayed purchase events and stale owned API snapshots, including cancellations arriving before their purchase. Purchase webhooks that omit quantity are not credited optimistically: the server resolves the exact V2 transaction and verified quantity first, returning 503 for retry while it is absent. Cancellations may omit quantity; an existing purchase's verified quantity remains authoritative.
 
@@ -55,8 +78,11 @@ From the repository root:
 npm --prefix functions ci
 npm --prefix functions test
 npm --prefix functions run build
+npm --prefix worker ci
+npm run test:worker
+npm --prefix worker run build
 ```
 
-The test command runs provider/catalog unit tests and a local Firestore emulator under the non-production project `pullthread-rules-test`; it does not deploy. Java and the Firebase CLI's Firestore emulator are required. Fixtures exercise duplicates, simultaneous debits, exact receipt recovery, conflicting idempotency keys, once-per-run revive, cross-UID denial, environment isolation, FIFO refunds, refund-before-purchase, concurrent refund/spend, and direct client write denial. Existing historical backend tests run alongside them.
+Worker tests execute the D1 schema against Miniflare's actual SQLite-backed D1 runtime and check authentication and HTTP contracts. The build command bundles with Wrangler's dry-run mode and does not deploy. Legacy tests run provider/catalog checks and a local Firestore emulator under `pullthread-rules-test`; Java is required for that emulator. Fixtures exercise duplicates, simultaneous debits, exact receipt recovery, conflicting idempotency keys, once-per-run revive, cross-UID denial, environment isolation, FIFO refunds, refund-before-purchase, concurrent refund/spend, and direct client write denial. Existing historical backend tests remain available.
 
 Before enabling production, complete real iOS/Android sandbox checks for each pack, cancellation, delayed confirmation, app restart after purchase/debit, refund delivery and duplicate delivery. Confirm native prices and exact transaction identities in that environment without recording secrets. Automated fixtures cannot establish that the external product catalog, receipts, webhook delivery, or store accounts are configured correctly.
