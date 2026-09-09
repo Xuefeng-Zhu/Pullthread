@@ -119,7 +119,7 @@ export function createCommerceHandler(dependencies: Dependencies = {}) {
       if (url.pathname.startsWith('/weekly')) {
         if (!enabled(env.LEADERBOARD_ENABLED_ENVIRONMENTS, selected)) throw new CommerceError('unavailable', 'Weekly competition is not open yet.');
         const weekly = new WeeklyLeaderboard(env);
-        const result = url.pathname === '/weeklyRegister' ? await weekly.register(uid, selected, data.requestId as string)
+        const result = url.pathname === '/weeklyRegister' ? await weekly.register(uid, selected, data.requestId as string, data.ruleset)
           : url.pathname === '/weeklyUpload' ? await weekly.upload(uid, selected, data.runId as string, data.batch as ReplayBatch)
             : await weekly.standings(uid, selected);
         return json({ result });

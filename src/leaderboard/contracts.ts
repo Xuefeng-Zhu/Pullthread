@@ -1,6 +1,9 @@
-import type { CommerceEnvironment, CommerceWallet, ToolKind } from '../commerce/contracts';
+import type { CommerceEnvironment, CommerceWallet } from '../commerce/contracts';
+import type { ToolUse } from '../commerce/toolUse';
 export const WEEK_MS = 7 * 86400000;
-export const RULESET = 'stitched-v4-weekly-3';
+export const RULESET = 'stitched-v6-weekly-1';
+/** Clients released before ruleset negotiation send no requested version. */
+export const LEGACY_REGISTRATION_RULESET = 'stitched-v4-weekly-3';
 export const MAX_BATCH_TICKS = 240;
 export const MAX_BATCH_COMMANDS = 64;
 export const PRIZES = [100, 50, 25] as const;
@@ -9,7 +12,7 @@ export function weekStart(now: number): number {
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - (date.getUTCDay() + 6) % 7);
 }
 export type ReplayAction = { type: 'aim' } | { type: 'cancel' } | { type: 'launch'; x: number; y: number }
-  | { type: 'tool'; tool: ToolKind; pocketId?: string; operationId?: string };
+  | ({ type: 'tool'; operationId?: string } & ToolUse);
 export type ReplayCommand = ReplayAction & { at: number };
 export interface ReplayBatch { sequence: number; from: number; to: number; commands: ReplayCommand[] }
 export interface RankedRun { id: string; seed: number; week: number; deadline: number; ruleset: string; uid: string; environment: CommerceEnvironment }

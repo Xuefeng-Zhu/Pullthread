@@ -8,6 +8,7 @@ import { createEndlessRun } from '../endless';
 import * as simulation from '../simulation';
 import * as viewport from '../viewport';
 import * as progression from '../progression';
+import * as toolEffects from '../toolEffects';
 import * as toolCatalog from '../../../commerce/toolCatalog';
 import type { LaunchRoom, LaunchState } from '../types';
 
@@ -45,7 +46,7 @@ function renderer(code: string, room: LaunchRoom, state: LaunchState, reducedMot
   const mappers: Mapper[] = [];
   const shared = (value: unknown): Value => ({ value, _isReanimatedSharedValue: true });
   const motion = {
-    tick: shared(state.tick), travelerX: shared(state.position.x), travelerY: shared(state.position.y),
+    tick: shared(state.tick), velocityY: shared(state.velocity.y), travelerX: shared(state.position.x), travelerY: shared(state.position.y),
     pullX: shared(0), pullY: shared(0), cameraY: shared(0),
     impactTick: shared(-1000), impactX: shared(0), impactY: shared(0),
   };
@@ -87,6 +88,8 @@ function renderer(code: string, room: LaunchRoom, state: LaunchState, reducedMot
     '../rendering/FabricTexture': { FabricTexture: (props: Element['props']) => jsx('FabricTexture', props) },
     '../rendering/Traveler': { Traveler: () => null },
     './simulation': simulation,
+    './tools': { effectivePockets: toolEffects.effectivePockets },
+    './toolEffects': toolEffects,
     './viewport': viewport,
     './progression': progression,
     '../../commerce/toolCatalog': toolCatalog,
@@ -105,6 +108,7 @@ function renderer(code: string, room: LaunchRoom, state: LaunchState, reducedMot
   };
   imports['./WorldBackdrop'] = evaluate(compileCanvas(resolve(__dirname, '../WorldBackdrop.tsx')));
   imports['./InteractiveVisuals'] = evaluate(compileCanvas(resolve(__dirname, '../InteractiveVisuals.tsx')));
+  imports['./LaunchToolVisuals'] = evaluate(compileCanvas(resolve(__dirname, '../LaunchToolVisuals.tsx')));
   const components = evaluate(code);
   const elements: Element[] = [];
   const mount = (value: unknown): void => {
@@ -579,4 +583,42 @@ describe('LaunchCanvas reactive work', () => {
     }
     expect(view.paths).toHaveLength(0);
   });
+
+  test('a pin freezes the rendered receiver and orbit arm at the same effective tick', () => {
+    const run = createEndlessRun(14);
+    const pocket = { ...run.room.pockets[1], orbit: { radius: 42, periodTicks: 480, phaseTicks: 0 } };
+    const state: LaunchState = { ...run.state, toolEffects: { pin: { targetId: pocket.id, startedTick: 60 } } };
+    const view = renderer(code, { ...run.room, pockets: [run.room.pockets[0], pocket] }, state);
+    const position = simulation.pocketPosition(pocket, 60, state);
+    for (const tick of [60, 120, 360]) {
+      view.motion.tick.value = tick; view.flush();
+      expect(view.elements.filter(element => element.type === 'Group').map(element => view.value(element.props.transform)))
+        .toContainEqual([{ translateX: position.x }, { translateY: position.y }]);
+      expect(view.elements.some(element => element.type === 'Line' && JSON.stringify(view.value(element.props.p2)) === JSON.stringify(position))).toBe(true);
+    }
+  });
+
+  test('sail visibility follows actual descent without requiring a React event at the apex', () => {
+    const run = createEndlessRun(14);
+    const view = renderer(code, run.room, { ...run.state, phase: 'flying', velocity: { x: 10, y: -100 }, toolEffects: { sail: true } });
+    const sail = view.elements.find(element => element.type === 'Group' && Array.isArray(element.props.children)
+      && (element.props.children as Element[]).some(child => child?.type === 'Path' && child.props.color === '#f4e4b4'))!;
+    expect(view.value(sail.props.opacity)).toBe(0);
+    view.motion.velocityY.value = 0; view.flush();
+    expect(view.value(sail.props.opacity)).toBe(1);
+    view.motion.velocityY.value = -100; view.flush();
+    expect(view.value(sail.props.opacity)).toBe(0);
+  });
+
+  test('a temporary pocket is drawn while available and disappears after its outgoing launch', () => {
+    const run = createEndlessRun(14);
+    const pocket = { id: 'tool-stitch-0-0', center: { x: 170, y: 170 }, kind: 'checkpoint' as const, width: 80 };
+    const state = { ...run.state, stitchedPocket: { pocket, spent: false, originPocketId: run.state.pocketId } };
+    const visible = renderer(code, run.room, state);
+    const spent = renderer(code, run.room, { ...state, phase: 'flying', pocketId: pocket.id, stitchedPocket: { ...state.stitchedPocket, spent: true } });
+    const transforms = (view: ReturnType<typeof renderer>) => view.elements.filter(element => element.type === 'Group').map(element => view.value(element.props.transform));
+    expect(transforms(visible)).toContainEqual([{ translateX: 170 }, { translateY: 170 }]);
+    expect(transforms(spent)).not.toContainEqual([{ translateX: 170 }, { translateY: 170 }]);
+  });
+
 });

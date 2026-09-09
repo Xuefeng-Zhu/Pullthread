@@ -1,10 +1,12 @@
 import { readTrustedCheckpoint } from './checkpoint';
 import { CommerceError, identifier } from '../../functions/src/commerce/domain';
 import type { CommerceEnvironment } from '../../src/commerce/contracts';
-import { RULESET, WEEK_MS, weekStart, type ReplayBatch, type RankedRun, type Standings } from '../../src/leaderboard/contracts';
+import { LEGACY_REGISTRATION_RULESET, RULESET, WEEK_MS, weekStart, type ReplayBatch, type RankedRun, type Standings } from '../../src/leaderboard/contracts';
 import * as weekly1 from '../rulesets/stitched-v4-weekly-1';
 import * as weekly2 from '../rulesets/stitched-v4-weekly-2';
 import * as weekly3 from '../rulesets/stitched-v4-weekly-3';
+import * as creativeWeekly1 from '../rulesets/stitched-v5-weekly-1';
+import * as inventoryWeekly1 from '../rulesets/stitched-v6-weekly-1';
 import type { Env } from './env';
 import { D1CommerceWallet } from './wallet';
 interface RunRow { id: string; uid: string; environment: CommerceEnvironment; seed: number; week: number; created_at: number; ruleset: string; sequence: number; elapsed: number; aiming: number; checkpoint: string }
@@ -13,31 +15,36 @@ const engines = {
   'stitched-v4-weekly-1': weekly1,
   'stitched-v4-weekly-2': weekly2,
   'stitched-v4-weekly-3': weekly3,
+  'stitched-v5-weekly-1': creativeWeekly1,
+  'stitched-v6-weekly-1': inventoryWeekly1,
 } as const;
 type Engine = typeof weekly1;
-const engineFor = (ruleset: string): Engine | undefined => engines[ruleset as keyof typeof engines];
+const engineFor = (ruleset: string): Engine | undefined => Object.hasOwn(engines, ruleset) ? engines[ruleset as keyof typeof engines] : undefined;
+const registrationRulesets: readonly string[] = [LEGACY_REGISTRATION_RULESET, 'stitched-v5-weekly-1', RULESET];
 export const enabled = (value: string | undefined, environment: string) => (value ?? '').split(',').includes(environment);
 export class WeeklyLeaderboard {
   constructor(private env: Env, private now: () => number = Date.now) {}
   private sql(query: string, ...values: (number | string)[]) { return this.env.DB.prepare(query).bind(...values); }
   private publicRun(run: RunRow): RankedRun { return { id: run.id, uid: run.uid, environment: run.environment, seed: run.seed, week: run.week, deadline: run.week + WEEK_MS, ruleset: run.ruleset }; }
-  async register(uid: string, environment: CommerceEnvironment, requestId: string): Promise<RankedRun> {
+  async register(uid: string, environment: CommerceEnvironment, requestId: string, requestedRuleset?: unknown): Promise<RankedRun> {
     identifier(requestId, 'request ID');
     const prior = await this.sql('SELECT * FROM weekly_runs WHERE uid=? AND environment=? AND request_id=?', uid, environment, requestId).first<RunRow>();
     if (prior) return this.publicRun(prior);
+    const ruleset = requestedRuleset === undefined ? LEGACY_REGISTRATION_RULESET : requestedRuleset;
+    if (typeof ruleset !== 'string' || !registrationRulesets.includes(ruleset) || !engineFor(ruleset)) return invalid('This competition version is unavailable. Update the app.');
     const now = this.now();
     const seed = crypto.getRandomValues(new Uint32Array(1))[0];
     const id = crypto.randomUUID();
     // A deterministic alias is stable without collecting a public display name.
     const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(uid)));
     const alias = `${['Cozy','Brave','Nimble','Sunny','Velvet','Merry','Tiny','Lucky'][hash[0] % 8]} ${['Button','Bobbin','Thimble','Ribbon','Stitch','Spool','Pocket','Quilt'][hash[1] % 8]} ${Array.from(hash.slice(2, 5), n => n.toString(16).padStart(2, '0')).join('')}`;
-    const engine = engineFor(RULESET)!;
+    const engine = engineFor(ruleset)!;
     await this.env.DB.batch([
       this.sql('INSERT OR IGNORE INTO weekly_profiles(uid,alias) VALUES (?,?)', uid, alias),
       this.sql(`INSERT OR IGNORE INTO weekly_runs(id,uid,environment,request_id,seed,week,created_at,ruleset,checkpoint)
         SELECT ?,?,?,?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM weekly_runs WHERE uid=? AND environment=? AND created_at>?) < 20
         AND (SELECT COUNT(*) FROM weekly_runs WHERE uid=? AND environment=? AND created_at>?) < 200`,
-      id, uid, environment, requestId, seed, weekStart(now), now, RULESET, engine.serializeEndlessRun(engine.createRankedSimulation(seed)), uid, environment, now - 60000, uid, environment, now - 86400000),
+      id, uid, environment, requestId, seed, weekStart(now), now, ruleset, engine.serializeEndlessRun(engine.createRankedSimulation(seed)), uid, environment, now - 60000, uid, environment, now - 86400000),
     ]);
     const row = await this.sql('SELECT * FROM weekly_runs WHERE uid=? AND environment=? AND request_id=?', uid, environment, requestId).first<RunRow>();
     if (!row) throw new CommerceError('resource-exhausted', 'Too many run starts. Play locally and try again later.');

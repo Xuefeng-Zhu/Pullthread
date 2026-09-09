@@ -9,6 +9,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { NoopFeedbackService } from '../../feedback/FeedbackService';
 import * as endless from '../endless';
 import { useLaunchSession } from '../useLaunchSession';
+import { grantFreeTool } from '../toolInventory';
 import { deserializeEndlessRun, serializeEndlessRun } from '../snapshots';
 import { createLaunchState, launchVelocity, pocketPosition } from '../simulation';
 import { findTargetInput, replayNext } from '../testing/routeSolver';
@@ -139,7 +140,7 @@ describe('launch session lifecycle', () => {
 
   test('Land targets use the live simulation clock and stay coherent while suspended', async () => {
     const prepared = endless.createWorldEndlessRun(0);
-    prepared.inventory.teleport = 1;
+    grantFreeTool(prepared, 'teleport');
     prepared.room = { ...prepared.room, pockets: prepared.room.pockets.map((pocket) => pocket.id === 'endless-1'
       ? { ...pocket, motion: { amplitude: 35, periodTicks: 360, phaseTicks: 0 } } : pocket) };
     const receiver = prepared.room.pockets.find((pocket) => pocket.id === 'endless-1')!;
@@ -348,7 +349,8 @@ describe('launch session lifecycle', () => {
 
   test('an armed Preview survives cancellation and backgrounding while fresh predictions follow moving-target time', async () => {
     const prepared = endless.createWorldEndlessRun(0);
-    prepared.inventory.preview = 2;
+    grantFreeTool(prepared, 'preview');
+    grantFreeTool(prepared, 'preview');
     prepared.room = { ...prepared.room, pockets: prepared.room.pockets.map((pocket) => pocket.id === 'endless-1'
       ? { ...pocket, motion: { amplitude: 35, periodTicks: 360, phaseTicks: 0 } } : pocket) };
     const view = await renderHook(() => useLaunchSession(0, true, feedback));
@@ -394,7 +396,8 @@ describe('launch session lifecycle', () => {
 
   test('free Teleport publishes the arrival and revive restores its checkpoint with a fresh render clock', async () => {
     const prepared = createEndlessRun(0);
-    prepared.inventory = { preview: 0, teleport: 1, revive: 1 };
+    grantFreeTool(prepared, 'teleport');
+    grantFreeTool(prepared, 'revive');
     const view = await renderHook(() => useLaunchSession(0, true, feedback));
     await act(() => { view.result.current.restoreSnapshot(serializeEndlessRun(prepared)); });
     await frame();
@@ -427,7 +430,7 @@ describe('launch session lifecycle', () => {
 
   test('preparing a paid result is isolated and restoring the same journal result is idempotent', async () => {
     const prepared = createEndlessRun(0);
-    prepared.inventory.teleport = 1;
+    grantFreeTool(prepared, 'teleport');
     const view = await renderHook(() => useLaunchSession(0, true, feedback));
     await act(() => { view.result.current.restoreSnapshot(serializeEndlessRun(prepared)); });
     await frame();
@@ -448,6 +451,37 @@ describe('launch session lifecycle', () => {
     const valid = view.result.current.getSnapshot();
     await act(() => { expect(view.result.current.restoreSnapshot('{')).toBe(false); });
     expect(view.result.current.getSnapshot()).toBe(valid);
+    await view.unmount();
+  });
+
+  test.each([
+    { pickupKind: 'needle' as const, awardedKind: 'needle', text: '+1 Needle Tip.' },
+    { pickupKind: 'revive' as const, awardedKind: 'preview', text: '+1 Preview. Your extra Revive became a Preview.' },
+  ])('a fourth $pickupKind pickup publishes its replacement through the arrival', async ({ pickupKind, awardedKind, text }) => {
+    const prepared = createEndlessRun(seed);
+    grantFreeTool(prepared, 'sail');
+    grantFreeTool(prepared, 'revive');
+    grantFreeTool(prepared, 'teleport');
+    const receiver = prepared.room.pockets.find(pocket => pocket.id === 'endless-1')!;
+    const position = pocketPosition(receiver, prepared.state.tick + 1);
+    const center = { x: position.x, y: position.y - 2 };
+    prepared.room = { ...prepared.room, pickups: [{ id: 'replacement-pickup', kind: pickupKind, center, radius: 14 }] };
+    Object.assign(prepared.state, { phase: 'flying', position: { ...center }, velocity: { x: 0, y: 480 }, sourcePocketImmune: false });
+    jest.spyOn(endless, 'createEndlessRun').mockReturnValueOnce(prepared);
+    const view = await renderHook(() => useLaunchSession(seed, true, feedback));
+    const initialQueue = view.result.current.tools.freeToolQueue;
+    expect(initialQueue).toEqual(['sail', 'revive', 'teleport']);
+    await frame();
+    await frame();
+    expect(view.result.current.state.phase).toBe('held');
+    expect(view.result.current.state.pocketId).toBe(receiver.id);
+    expect(view.result.current.tools.freeToolQueue).toEqual(['revive', 'teleport', awardedKind]);
+    expect(initialQueue).toEqual(['sail', 'revive', 'teleport']);
+    expect(view.result.current.message).toBe(`${text} Replaced your oldest free tool: Silk Sail.`);
+    expect(view.result.current.tools.inventory.sail).toBe(0);
+    expect(Object.values(view.result.current.tools.inventory).reduce((total, count) => total + count, 0)).toBe(3);
+    await act(() => { expect(view.result.current.beginAim(view.result.current.state.position)).toBe(true); });
+    expect(view.result.current.message).toBe('Pull back, then let go.');
     await view.unmount();
   });
 
@@ -497,7 +531,7 @@ describe('launch session lifecycle', () => {
     prepared.room = { ...prepared.room, pockets: prepared.room.pockets.map((pocket) => pocket.id === prepared.state.pocketId
       ? { ...pocket, frayTicks: 480, route: 'reward' as const } : pocket) };
     prepared.state.pocketExpiryTicks = { [prepared.state.pocketId]: 480 };
-    prepared.inventory.preview = 1;
+    grantFreeTool(prepared, 'preview');
     jest.spyOn(endless, 'createEndlessRun').mockReturnValueOnce(prepared);
     let renders = 0;
     const view = await renderHook(() => { renders += 1; return useLaunchSession(0, true, feedback); });
@@ -694,7 +728,8 @@ describe('launch session lifecycle', () => {
       endless.stepEndless(prepared);
       for (let tick = 0; tick < 70; tick++) endless.stepEndless(prepared);
     }
-    prepared.inventory.teleport = 2;
+    grantFreeTool(prepared, 'teleport');
+    grantFreeTool(prepared, 'teleport');
     let renders = 0;
     const view = await renderHook(() => { renders++; return useLaunchSession(0, true, feedback); });
     await act(() => { expect(view.result.current.restoreSnapshot(serializeEndlessRun(prepared))).toBe(true); });
@@ -732,6 +767,43 @@ describe('launch session lifecycle', () => {
     expect(restarted.result.current.worldStage).toBe(0);
     expect(restarted.result.current.score.pockets).toBe(0);
     await restarted.unmount();
+  });
+
+
+  test.each(['held', 'flying'] as const)('creative effects preserve their exact state while backgrounded %s', async (phase) => {
+    const prepared = createEndlessRun(seed);
+    grantFreeTool(prepared, 'sail');
+    grantFreeTool(prepared, 'needle');
+    const view = await renderHook(() => useLaunchSession(seed, true, feedback));
+    await act(() => {
+      expect(view.result.current.restoreSnapshot(serializeEndlessRun(prepared))).toBe(true);
+      expect(view.result.current.useFreeTool({ tool: 'sail' })).toBe(true);
+      expect(view.result.current.useFreeTool({ tool: 'needle' })).toBe(true);
+    });
+    await frame();
+    if (phase === 'flying') {
+      await act(() => {
+        view.result.current.beginAim(start);
+        view.result.current.updateAim({ x: -24, y: 72 });
+        view.result.current.releaseAim();
+      });
+      await frame();
+    }
+    expect(view.result.current.state.phase).toBe(phase);
+    const before = view.result.current.getSnapshot();
+    const tick = view.result.current.motion.tick.value;
+    await changeAppState('background');
+    await frame(30_000);
+    await changeAppState('active');
+    await frame(30_000);
+    expect(view.result.current.getSnapshot()).toBe(before);
+    expect(view.result.current.state.toolEffects).toMatchObject({ sail: true, needle: {} });
+    expect(view.result.current.tools.inventory.sail).toBe(0);
+    expect(view.result.current.tools.inventory.needle).toBe(0);
+    await frame();
+    expect(view.result.current.motion.tick.value).toBe(tick + 2);
+    expect(view.result.current.state.toolEffects).toMatchObject({ sail: true, needle: {} });
+    await view.unmount();
   });
 
 });

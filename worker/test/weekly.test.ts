@@ -1,4 +1,4 @@
-import { createRankedSimulation } from '../../src/leaderboard/replay';
+import { createRankedSimulation, toolContext } from '../../src/leaderboard/replay';
 import { eligibleTeleportPockets } from '../../src/game/launch/endless';
 import { URL } from 'node:url';
 import assert from 'node:assert/strict';
@@ -7,14 +7,14 @@ import { before, after, test } from 'node:test';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { WeeklyLeaderboard } from '../src/leaderboard';
 import { D1CommerceWallet } from '../src/wallet';
-import { WEEK_MS, weekStart } from '../../src/leaderboard/contracts';
+import { RULESET, WEEK_MS, weekStart } from '../../src/leaderboard/contracts';
 import type { Env } from '../src/env';
 let runtime: Miniflare, db: D1Database, board: WeeklyLeaderboard, wallet: D1CommerceWallet, env: Env;
 let now = Date.UTC(2026, 8, 7, 12);
 before(async () => {
   runtime = new Miniflare(convertV4MiniflareOptions({ modules: true, script: 'export default { fetch() { return new Response("test"); } }', compatibilityDate: '2026-09-07', d1Databases: ['DB'] }));
   db = await runtime.getD1Database('DB') as unknown as D1Database;
-  for (const file of ['0001_commerce.sql', '0002_weekly.sql']) {
+  for (const file of ['0001_commerce.sql', '0002_weekly.sql', '0003_cosmetics.sql', '0004_creative_tools.sql']) {
     const migration = await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8');
     await db.exec(migration.split('\n').filter(line => line.trim() && !line.startsWith('--')).join('\n'));
   }
@@ -48,12 +48,59 @@ test('old registrations continue through their frozen replay engines', async () 
     const uid = `legacy-player-${ruleset}`;
     const legacy = await board.register(uid, 'sandbox', `legacy-register-${ruleset}`);
     await db.prepare('UPDATE weekly_runs SET ruleset=? WHERE id=?').bind(ruleset, legacy.id).run();
+    assert.deepEqual(await board.register(uid, 'sandbox', `legacy-register-${ruleset}`, RULESET), { ...legacy, ruleset });
     const batch = { sequence: 0, from: 0, to: 120, commands: [] };
     assert.deepEqual(await board.upload(uid, 'sandbox', legacy.id, batch), { sequence: 0, score: 0 });
   }
 });
+test('registration negotiates explicit rulesets while keeping prior request identities', async () => {
+  const creative = await board.register('creative-player', 'sandbox', 'creative-register', RULESET);
+  assert.equal(creative.ruleset, RULESET);
+  assert.deepEqual(await board.register('creative-player', 'sandbox', 'creative-register', 'stitched-v4-weekly-3'), creative);
+  const legacy = await board.register('legacy-request', 'sandbox', 'legacy-register');
+  assert.equal(legacy.ruleset, 'stitched-v4-weekly-3');
+  assert.deepEqual(await board.register('legacy-request', 'sandbox', 'legacy-register', RULESET), legacy);
+  const installed = await board.register('installed-v5', 'sandbox', 'installed-v5-register', 'stitched-v5-weekly-1');
+  assert.equal(installed.ruleset, 'stitched-v5-weekly-1');
+  assert.deepEqual(await board.register('installed-v5', 'sandbox', 'installed-v5-register', RULESET), installed);
+  await assert.rejects(board.register('bad-ruleset', 'sandbox', 'bad-register', 'unknown'), /version is unavailable/);
+  await assert.rejects(board.register('bad-ruleset', 'sandbox', 'bad-register-proto', 'constructor'), /version is unavailable/);
+  await assert.rejects(board.register('bad-ruleset', 'sandbox', 'bad-register-retired', 'stitched-v4-weekly-1'), /version is unavailable/);
+  await assert.rejects(board.register('bad-ruleset', 'sandbox', 'bad-register-null', null), /version is unavailable/);
+});
+test('FIFO pickup inventory is isolated to generation 6 while installed v5 runs remain uncapped', async () => {
+  for (const [ruleset, generation] of [['stitched-v5-weekly-1', 5], [RULESET, 6]] as const) {
+    const uid = `inventory-player-v${generation}`;
+    const ranked = await board.register(uid, 'sandbox', `inventory-register-v${generation}`, ruleset);
+    const row = await db.prepare('SELECT checkpoint FROM weekly_runs WHERE id=?').bind(ranked.id).first<{ checkpoint: string }>();
+    const checkpoint = JSON.parse(row!.checkpoint);
+    assert.equal(checkpoint.run.generationVersion, generation);
+    checkpoint.run.inventory.preview = 1;
+    checkpoint.run.inventory.sail = 1;
+    checkpoint.run.inventory.needle = 1;
+    if (generation === 6) checkpoint.run.freeToolQueue = ['preview', 'sail', 'needle'];
+    else assert.equal(checkpoint.run.freeToolQueue, undefined);
+    checkpoint.run.room.pickups = [{ id: 'inventory-fourth-pickup', kind: 'bounce', radius: 12,
+      center: { x: checkpoint.run.state.position.x, y: checkpoint.run.state.position.y + 90 } }];
+    await db.prepare('UPDATE weekly_runs SET checkpoint=? WHERE id=?').bind(JSON.stringify(checkpoint), ranked.id).run();
+    const batch = { sequence: 0, from: 0, to: 1, commands: [
+      { type: 'aim' as const, at: 0 }, { type: 'launch' as const, at: 0, x: 0, y: 90 },
+    ] };
+    assert.deepEqual(await board.upload(uid, 'sandbox', ranked.id, batch), { sequence: 0, score: 0 });
+    assert.deepEqual(await board.upload(uid, 'sandbox', ranked.id, batch), { sequence: 0, score: 0 });
+    const saved = await db.prepare('SELECT checkpoint FROM weekly_runs WHERE id=?').bind(ranked.id).first<{ checkpoint: string }>();
+    const run = JSON.parse(saved!.checkpoint).run;
+    assert.equal(run.inventory.bounce, 1);
+    assert.equal(run.inventory.preview, generation === 6 ? 0 : 1);
+    assert.equal(run.inventory.sail, 1);
+    assert.equal(run.inventory.needle, 1);
+    assert.equal(Object.values<number>(run.inventory).reduce((sum, count) => sum + count, 0), generation === 6 ? 3 : 4);
+    if (generation === 6) assert.deepEqual(run.freeToolQueue, ['sail', 'needle', 'bounce']);
+    else assert.equal(run.freeToolQueue, undefined);
+  }
+});
 test('only an applied, run-bound paid tool can contribute a verified catch', async () => {
-  const ranked = await board.register('tool-player', 'sandbox', 'tool-register');
+  const ranked = await board.register('tool-player', 'sandbox', 'tool-register', RULESET);
   const live = createRankedSimulation(ranked.seed);
   const target = eligibleTeleportPockets(live)[0];
   assert.ok(target);
@@ -66,6 +113,24 @@ test('only an applied, run-bound paid tool can contribute a verified catch', asy
   assert.deepEqual(await board.upload('tool-player', 'sandbox', ranked.id, batch), { sequence: 0, score: 1 });
   assert.equal((await board.standings('tool-player', 'sandbox')).own?.score, 1);
   assert.equal((await wallet.getWallet('tool-player', 'sandbox')).points, 75);
+});
+test('new rulesets verify a paid creative effect once using its exact receipt context', async () => {
+  const uid = 'creative-paid-player';
+  const ranked = await board.register(uid, 'sandbox', 'creative-paid-register', RULESET);
+  const live = createRankedSimulation(ranked.seed);
+  const command = { type: 'tool' as const, tool: 'sail' as const, at: 0, operationId: 'creative-paid-sail' };
+  await wallet.applyVerifiedPurchase(uid, { transactionId: 'creative-paid-pack', productId: 'pullthread_points_100', environment: 'sandbox', store: 'app_store', quantity: 1, purchasedAt: now, refunded: false });
+  const request = { operationId: command.operationId, runId: ranked.id, contextKey: toolContext(live, command), tool: command.tool, expectedCost: 10 };
+  await wallet.redeemTool(uid, 'sandbox', request);
+  const batch = { sequence: 0, from: 0, to: 0, commands: [command] };
+  await assert.rejects(board.upload(uid, 'sandbox', ranked.id, batch), /could not be verified/);
+  await wallet.resolveTool(uid, 'sandbox', command.operationId, 'applied');
+  await assert.rejects(board.upload(uid, 'sandbox', ranked.id, { ...batch, commands: [{ ...command, tool: 'needle' }] }), /could not be verified/);
+  assert.deepEqual(await board.upload(uid, 'sandbox', ranked.id, batch), { sequence: 0, score: 0 });
+  assert.deepEqual(await board.upload(uid, 'sandbox', ranked.id, batch), { sequence: 0, score: 0 });
+  const row = await db.prepare('SELECT checkpoint FROM weekly_runs WHERE id=?').bind(ranked.id).first<{ checkpoint: string }>();
+  assert.equal(JSON.parse(row!.checkpoint).run.state.toolEffects.sail, true);
+  assert.equal((await wallet.getWallet(uid, 'sandbox')).points, 90);
 });
 test('settlement freezes ties in acceptance order, grants 100/50/25 once, and separates environments', async () => {
   const week = weekStart(now);

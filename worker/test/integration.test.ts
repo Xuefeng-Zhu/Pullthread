@@ -46,7 +46,8 @@ test('native HTTP adapter, bundled Worker auth, provider fixtures and actual D1 
   }));
   try {
     const database = await runtime.getD1Database('DB');
-    const migration = (await readFile(new URL('../migrations/0001_commerce.sql', import.meta.url), 'utf8')) + '\n' + (await readFile(new URL('../migrations/0002_weekly.sql', import.meta.url), 'utf8'));
+    const migration = (await Promise.all(['0001_commerce.sql', '0002_weekly.sql', '0003_cosmetics.sql', '0004_creative_tools.sql']
+      .map(file => readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8')))).join('\n');
     await database.exec(migration.split('\n').filter((line) => line.trim() && !line.trimStart().startsWith('--')).join('\n'));
     let loseDebitReply = true;
     const request: typeof fetch = async (input, init) => {

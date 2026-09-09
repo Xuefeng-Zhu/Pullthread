@@ -1,4 +1,4 @@
-import { POINT_PACKS, TOOL_COSTS, type CommerceEnvironment, type CommerceWallet, type RedemptionResult, type ToolReceipt } from '../../commerce/contracts';
+import { isToolKind, POINT_PACKS, TOOL_COSTS, type CommerceEnvironment, type CommerceWallet, type RedemptionResult, type ToolReceipt } from '../../commerce/contracts';
 import { CommerceError } from './errors';
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -24,7 +24,7 @@ export function readRedemption(value: unknown, environment: CommerceEnvironment,
   const receipt = value.receipt;
   if (receipt.operationId !== operationId || typeof receipt.runId !== 'string' || !receipt.runId
     || typeof receipt.contextKey !== 'string' || !receipt.contextKey
-    || (receipt.tool !== 'preview' && receipt.tool !== 'teleport' && receipt.tool !== 'revive')
+    || !isToolKind(receipt.tool)
     || receipt.expectedCost !== TOOL_COSTS[receipt.tool]
     || (receipt.status !== 'ready' && receipt.status !== 'applied' && receipt.status !== 'refunded')) {
     throw new CommerceError('We couldn’t verify this tool purchase.', 'invalid');

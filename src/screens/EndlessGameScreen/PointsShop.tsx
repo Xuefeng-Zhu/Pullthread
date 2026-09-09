@@ -72,6 +72,7 @@ export function PointsShop({ onClose, onCustomize, onLeaderboard }: {
       </View>}
       <Text style={styles.copy}>Catch stitched tokens to earn free tools for this run. Points let you buy an extra use when you need it.</Text>
       <Text style={styles.prices}>Preview {TOOL_COSTS.preview} · Land {TOOL_COSTS.teleport} · Revive {TOOL_COSTS.revive} points</Text>
+      <Text style={styles.prices}>Trick shot tools {TOOL_COSTS.sail}–{TOOL_COSTS.stitch} points · find all six in Tools</Text>
       {commerce.mode === 'mock' && <Text style={styles.notice}>Demo wallet. No real purchases or money.</Text>}
       {commerce.status === 'loading' && <ActivityIndicator color="#28594b" accessibilityLabel="Loading points shop" />}
       {!enabled && commerce.status !== 'loading' && <View style={styles.noticeBox}>

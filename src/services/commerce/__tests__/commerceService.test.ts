@@ -1,6 +1,7 @@
 /** @jest-environment node */
 import { describe, expect, jest, test } from '@jest/globals';
 import type { CommerceWallet, RedeemToolRequest } from '../../../commerce/contracts';
+import { CREATIVE_TOOLS, TOOL_COSTS } from '../../../commerce/contracts';
 import { createCommerceService, getCommerceService } from '..';
 import type { CommerceConfig } from '../config';
 import type { NativeCommerceRuntime, NativeRuntimeLoader } from '../nativeService';
@@ -136,6 +137,18 @@ describe('commerce service gates and native verification', () => {
     await expect(service.redeemTool(request)).rejects.toThrow('another action');
     runtime.call.mockResolvedValue({ wallet: { ...wallet(90, 1), environment: 'production' }, receipt });
     await expect(service.getRedemption(request.operationId)).rejects.toThrow('verify this balance');
+  });
+  test.each(CREATIVE_TOOLS)('%s receipts accept only the authoritative price and exact context', async tool => {
+    const runtime = provider();
+    const creativeRequest = { ...request, tool, expectedCost: TOOL_COSTS[tool], contextKey: `0:endless-0:${tool}:position` };
+    const receipt = { ...creativeRequest, status: 'ready' };
+    runtime.call.mockResolvedValue({ wallet: wallet(100 - TOOL_COSTS[tool], 1), receipt });
+    const service = createCommerceService(config, async () => runtime);
+    expect((await service.redeemTool(creativeRequest)).receipt).toEqual(receipt);
+    runtime.call.mockResolvedValue({ wallet: wallet(), receipt: { ...receipt, expectedCost: 0 } });
+    await expect(service.redeemTool(creativeRequest)).rejects.toThrow('verify this tool purchase');
+    runtime.call.mockResolvedValue({ wallet: wallet(), receipt: { ...receipt, contextKey: 'different-position' } });
+    await expect(service.redeemTool(creativeRequest)).rejects.toThrow('another action');
   });
 
   test('only an authoritative insufficient balance response for this operation proves no debit', async () => {

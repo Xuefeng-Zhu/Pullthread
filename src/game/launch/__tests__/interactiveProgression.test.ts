@@ -116,7 +116,7 @@ describe('version-four milestone and tool compatibility', () => {
     expect(deserializeEndlessRun(serializeEndlessRun(run))).toEqual(run);
   });
 
-  test('a new v4 run clears world and interaction progress while preserving the durable best', async () => {
+  test('a new v5 run clears world and interaction progress while preserving the durable best', async () => {
     await resetEndlessProgressStoreForTests();
     const previous = progress(createEndlessRun(0), (run) => run.pocketsCaught === 100);
     useEndlessProgressStore.getState().recordScore(previous.pocketsCaught);
@@ -126,7 +126,7 @@ describe('version-four milestone and tool compatibility', () => {
     expect(JSON.parse(persisted!).state.bestPockets).toBe(100);
     const fresh = createEndlessRun(previous.seed);
     useEndlessProgressStore.getState().recordScore(fresh.pocketsCaught);
-    expect(fresh.generationVersion).toBe(4);
+    expect(fresh.generationVersion).toBe(6);
     expect(fresh.pocketsCaught).toBe(0);
     expect(fresh.sectionProgress!.introductions).toEqual([0, 0, 0, 0]);
     expect(fresh.state.brokenBarrierIds).toEqual([]);

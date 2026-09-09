@@ -36,15 +36,15 @@ function rejectBoth(run: EndlessRun, mutations: ((world: any) => void)[]): void 
   }
 }
 
-describe('version-four interactive world snapshots', () => {
-  test('all four new introductions survive save/load, cloning and bounded section pruning', () => {
+describe('interactive world snapshots', () => {
+  test.each([4, 5, 6] as const)('v%i introductions survive save/load, cloning and bounded section pruning', (version) => {
     for (const seed of [0, 7]) {
-      let run = createEndlessRun(seed);
+      let run = createEndlessRun(seed, version);
       const control = cloneEndlessRun(run);
       const lessons = new Map<string, string>();
       for (let count = 0; count <= 160; count += 1) {
-        expect(run.generationVersion).toBe(4);
-        expect(JSON.parse(serializeEndlessRun(run)).version).toBe(4);
+        expect(run.generationVersion).toBe(version);
+        expect(JSON.parse(serializeEndlessRun(run)).version).toBe(version);
         expect(deserializeEndlessRun(serializeEndlessRun(run))).toEqual(run);
         for (const section of run.sectionProgress!.sections) if (section.introduction) lessons.set(section.id, section.introduction);
         expect(run.room.barriers!.length).toBeLessThanOrEqual(64);
@@ -66,7 +66,7 @@ describe('version-four interactive world snapshots', () => {
   });
 
   test('rejects missing v4 ownership and state ledgers or old mechanics in either saved world', () => {
-    rejectBoth(createEndlessRun(0), [
+    rejectBoth(createEndlessRun(0, 4), [
       (world) => { delete world.room.barriers; },
       (world) => { delete world.room.switches; },
       (world) => { delete world.state.brokenBarrierIds; },

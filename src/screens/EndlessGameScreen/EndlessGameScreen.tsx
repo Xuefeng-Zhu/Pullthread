@@ -25,7 +25,7 @@ import { getLaunchViewport } from '../../game/launch/viewport';
 import { useEndlessProgressStore } from '../../store/useEndlessProgressStore';
 import { usePreferencesStore } from '../../store/usePreferencesStore';
 import { useChallengeCue } from './useChallengeCue';
-import { TOOL_COSTS, type ToolKind } from '../../commerce/contracts';
+import { CREATIVE_TOOLS, TOOL_COSTS, isCreativeTool, type CreativeToolKind, type ToolKind } from '../../commerce/contracts';
 import { PaidToolJournal } from '../../commerce/paidToolJournal';
 import { TOOL_DESCRIPTIONS, TOOL_LABELS } from '../../commerce/toolCatalog';
 import { ToolIcon } from '../../components/ToolIcon';
@@ -35,6 +35,9 @@ import { isInsufficientPointsError } from '../../services/commerce/errors';
 import { useCommerceStore } from '../../store/useCommerceStore';
 import { ToolTray } from './ToolTray';
 import { PointsShop } from './PointsShop';
+import { Toolbox, ToolSetup, type ToolSetupData } from './Toolbox';
+import type { ToolUse } from '../../commerce/toolUse';
+import { toolContext } from '../../leaderboard/replay';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'EndlessGame'>;
 
@@ -57,7 +60,9 @@ function IconAction({ label, icon, onPress, testID, disabled = false }: {
   </Pressable>;
 }
 
-type ToolLayer = { type: 'shop' } | { type: 'tool'; kind: ToolKind; pocketId?: string }
+type ToolLayer = { type: 'shop' } | { type: 'toolbox' }
+  | { type: 'setup'; kind: CreativeToolKind; data: ToolSetupData; draft?: ToolUse }
+  | { type: 'tool'; kind: ToolKind; pocketId?: string; use?: ToolUse; discardsPrepared?: boolean }
   | { type: 'land'; cameraY: number; pockets: readonly { id: string; x: number; y: number; width: number }[] }
   | { type: 'recovery' } | null;
 
@@ -83,6 +88,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
   const operationCounter = useRef(0);
   const toolLock = useRef(false);
   const returnToRecovery = useRef(false);
+  const returnToSetup = useRef<Extract<ToolLayer, { type: 'setup' }> | null>(null);
   const commerce = useCommerceStore();
   const journal = useMemo(() => new PaidToolJournal(AsyncStorage, getCommerceService(),
     (value) => deserializeEndlessRun(value) !== null), []);
@@ -102,6 +108,9 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
   const { scale, offsetX, offsetY } = getLaunchViewport(area, room.bounds, insets.bottom);
   const { suspend, resume, getSnapshot, restoreSnapshot, preparePaidTool, useFreeTool: consumeFreeTool,
     getCameraY, getTeleportTargets } = session;
+  const preparedTools = CREATIVE_TOOLS.filter(kind => kind === 'stitch'
+    ? !!state.stitchedPocket && !state.stitchedPocket.spent
+    : kind === 'bounce' ? !!state.toolEffects?.bounce && !state.toolEffects.bounce.spent : !!state.toolEffects?.[kind]);
   useEffect(() => {
     const save = () => { if (ranked) void ranked.checkpoint(getSnapshot()).then(() => ranked.flush()); };
     const timer = setInterval(save, 2000);
@@ -170,6 +179,10 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
       setToolLayer({ type: 'recovery' });
       return;
     }
+    if (returnToSetup.current) {
+      setToolLayer(returnToSetup.current); returnToSetup.current = null; setToolError('');
+      return;
+    }
     setToolLayer(null); setToolError(''); resume();
   }, [resume, toolBusy]);
   const openShop = useCallback(() => {
@@ -194,6 +207,10 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
   const chooseTool = useCallback((kind: ToolKind) => {
     if (toolBusy) return;
     suspend(); setToolError(''); setToolNotice('');
+    if (isCreativeTool(kind)) {
+      setToolLayer({ type: 'setup', kind, data: session.getToolSetup(kind) });
+      return;
+    }
     if (kind === 'teleport') {
       setToolLayer({ type: 'land', ...getTeleportTargets() });
       return;
@@ -202,28 +219,34 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
       if (consumeFreeTool(kind)) { setPaused(false); resume(); return; }
     }
     setToolLayer({ type: 'tool', kind });
-  }, [resume, session.tools.inventory, suspend, toolBusy, consumeFreeTool, getTeleportTargets]);
+  }, [resume, suspend, toolBusy, consumeFreeTool, getTeleportTargets, session]);
   const landAt = useCallback((pocketId: string) => {
     if (toolBusy) return;
+    if (preparedTools.length) {
+      setToolLayer({ type: 'tool', kind: 'teleport', pocketId, discardsPrepared: true });
+      return;
+    }
     if (session.tools.inventory.teleport > 0 && consumeFreeTool('teleport', pocketId)) {
       setToolLayer(null); resume();
     } else setToolLayer({ type: 'tool', kind: 'teleport', pocketId });
-  }, [resume, session.tools.inventory.teleport, toolBusy, consumeFreeTool]);
-  const buyTool = useCallback(async (kind: ToolKind, pocketId?: string) => {
+  }, [resume, session.tools.inventory.teleport, toolBusy, consumeFreeTool, preparedTools.length]);
+  const buyTool = useCallback(async (value: ToolUse | ToolKind, pocketId?: string) => {
+    const use = typeof value === 'string' ? (value === 'teleport' ? { tool: value, pocketId: pocketId ?? '' } : { tool: value }) as ToolUse : value;
+    const kind = use.tool;
     if (toolBusy || toolLock.current) return;
     toolLock.current = true;
     suspend(); setToolBusy(true); setToolError('');
     const operationId = `${runId}-${++operationCounter.current}-${Date.now().toString(36)}`;
     try {
       const before = getSnapshot();
-      const after = preparePaidTool(kind, pocketId);
+      const after = preparePaidTool(use);
       const exact = deserializeEndlessRun(before)!;
       const request = {
         operationId,
         runId: runId, tool: kind, expectedCost: TOOL_COSTS[kind],
-        contextKey: `${exact.state.tick}:${exact.state.pocketId}:${kind}:${pocketId ?? ''}`,
+        contextKey: toolContext(exact, { type: 'tool', ...use, at: 0 }),
       };
-      await ranked?.prepareTool({ type: 'tool', tool: kind, operationId, ...(pocketId ? { pocketId } : {}) }, before, after);
+      await ranked?.prepareTool({ type: 'tool', ...use, operationId }, before, after);
       const result = await journal.redeem(request, before, after);
       if (result.result) useCommerceStore.getState().acceptWallet(result.result.wallet);
       if (result.snapshot) ranked?.reconcileTool(result.snapshot);
@@ -233,12 +256,22 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
     } catch (error) {
       if (isInsufficientPointsError(error, operationId)) {
         setToolError('You need more points for this tool. No points were spent.');
-        setToolLayer({ type: 'tool', kind, pocketId });
+        setToolLayer(previous => previous?.type === 'setup' ? previous : { type: 'tool', kind, pocketId, use });
         void useCommerceStore.getState().refreshWallet().catch(() => undefined);
       } else failedTool(error);
     }
     finally { toolLock.current = false; setToolBusy(false); }
   }, [failedTool, feedback, getSnapshot, journal, preparePaidTool, restoreSnapshot, resume, runId, ranked, suspend, toolBusy]);
+  const confirmCreativeTool = (use: ToolUse) => {
+    if (toolBusy || toolLock.current || !session.validateUse(use)) return;
+    if (session.tools.inventory[use.tool] > 0 && consumeFreeTool(use)) {
+      setToolLayer(null); setPaused(false); resume();
+    } else void buyTool(use);
+  };
+  const openToolbox = () => {
+    if (toolBusy || state.phase !== 'held') return;
+    suspend(); setToolError(''); setToolLayer({ type: 'toolbox' });
+  };
   const recoverTool = useCallback(async () => {
     if (toolBusy || toolLock.current) return;
     toolLock.current = true;
@@ -325,7 +358,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
       </GestureDetector>}
     </View>
 
-    <View testID="launch-hud" pointerEvents="box-none"
+    {toolLayer?.type !== 'setup' && <View testID="launch-hud" pointerEvents="box-none"
       onLayout={(event) => setHudHeight(event.nativeEvent.layout.height)}
       style={[styles.hud, { top: insets.top + 12, left: insets.left + 12, right: insets.right + 12 }]}>
       <Pressable testID="launch-points-button" accessibilityRole="button" accessibilityLabel={`Points shop. ${commerce.wallet?.points ?? 0} points`}
@@ -348,12 +381,12 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
           onPress={() => { cancelGesture(); setPaused(true); }} />}
         <IconAction label="Settings" icon="settings-outline" testID="launch-settings-button" disabled={toolBusy || !!toolLayer} onPress={() => void openSettings()} />
       </View>
-    </View>
-    {!paused && <View pointerEvents="box-none" onLayout={(event) => setTrayHeight(event.nativeEvent.layout.height)}
+    </View>}
+    {!paused && toolLayer?.type !== 'setup' && <View pointerEvents="box-none" onLayout={(event) => setTrayHeight(event.nativeEvent.layout.height)}
       style={[styles.toolTray, { top: trayTop, left: insets.left + 12, right: insets.right + 12 }]}>
       <ToolTray inventory={session.tools.inventory} previewActive={session.tools.previewActive}
         reviveUsed={session.tools.reviveUsed} phase={state.phase} disabled={toolBusy || !!toolLayer}
-        highContrast={highContrast} onTool={chooseTool} />
+        highContrast={highContrast} onTool={chooseTool} onTools={openToolbox} preparedCount={preparedTools.length} preparedTools={preparedTools} creativeEnabled={session.tools.creativeEnabled} freeToolQueue={session.tools.freeToolQueue} />
     </View>}
 
     {showWorldAnnouncement && <View testID="launch-world-announcement" pointerEvents="none"
@@ -417,23 +450,34 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
         <Pressable testID="teleport-cancel" accessibilityRole="button" onPress={closeTools} style={styles.cancelLanding}><Text style={styles.actionText}>Cancel</Text></Pressable>
       </View>
     </View>}
-    {toolLayer && toolLayer.type !== 'land' && <View style={[styles.shopLayer,
+    {toolLayer?.type === 'setup' && <ToolSetup key={toolLayer.kind} kind={toolLayer.kind} data={toolLayer.data} draft={toolLayer.draft}
+      projection={{ scale, offsetX, offsetY, top: insets.top + 12, bottom: insets.bottom + 12, height: area.height }}
+      free={session.tools.inventory[toolLayer.kind]} points={commerce.wallet?.points ?? 0} commerceReady={commerce.status === 'ready'}
+      busy={toolBusy} error={toolError} validate={session.validateUse} placement={session.placementForTool}
+      onConfirm={confirmCreativeTool} onCancel={closeTools} onGetPoints={(draft) => {
+        returnToSetup.current = { ...toolLayer, draft }; openShop();
+      }} />}
+    {toolLayer && toolLayer.type !== 'land' && toolLayer.type !== 'setup' && <View style={[styles.shopLayer,
       { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 12, paddingLeft: insets.left + 14, paddingRight: insets.right + 14 }]}>
-      {toolLayer.type === 'shop' ? <PointsShop onClose={closeTools}
+      {toolLayer.type === 'toolbox' ? <Toolbox inventory={session.tools.inventory} prepared={preparedTools} freeToolQueue={session.tools.freeToolQueue} onChoose={chooseTool} onClose={closeTools} /> : toolLayer.type === 'shop' ? <PointsShop onClose={closeTools}
         onCustomize={() => setStudioOpen(true)} onLeaderboard={() => setWeeklyOpen(true)} /> : <ScrollView contentContainerStyle={styles.dialogScroll} style={styles.dialogScroller}>
         <View testID={toolLayer.type === 'recovery' ? 'tool-recovery' : 'tool-confirmation'} style={styles.overlay} accessibilityViewIsModal>
           {toolLayer.type === 'tool' ? <>
             <ToolIcon kind={toolLayer.kind} size={36} color="#28594b" />
             <Text accessibilityRole="header" style={styles.overlayTitle}>{TOOL_LABELS[toolLayer.kind]}</Text>
             <Text style={styles.overlayCopy}>{TOOL_DESCRIPTIONS[toolLayer.kind]}</Text>
-            <Text style={styles.result}>{TOOL_COSTS[toolLayer.kind]} points · {commerce.wallet?.points ?? 0} available</Text>
+            <Text style={styles.result}>{toolLayer.discardsPrepared && session.tools.inventory.teleport > 0 ? 'Use one free Land' : `${TOOL_COSTS[toolLayer.kind]} points · ${commerce.wallet?.points ?? 0} available`}</Text>
+            {toolLayer.discardsPrepared && <Text testID="land-discard-warning" style={styles.overlayCopy}>Landing now ends your prepared trick shot tools. Their charges will not be returned.</Text>}
             {!!toolError && <Text accessibilityLiveRegion="polite" style={styles.overlayCopy}>{toolError}</Text>}
             {commerce.status !== 'ready' && <Text style={[styles.overlayCopy, { marginTop: 10 }]}>Find free tools in the climb. The points shop is unavailable on this device right now.</Text>}
             <View style={styles.controls}>
               <Action label="Cancel" testID="tool-confirm-cancel" disabled={toolBusy} onPress={closeTools} />
-              {commerce.status === 'ready' && (commerce.wallet?.points ?? 0) >= TOOL_COSTS[toolLayer.kind]
+              {toolLayer.discardsPrepared && session.tools.inventory.teleport > 0
+                ? <Action label="Land and end tools" testID="tool-confirm-free" primary disabled={toolBusy}
+                    onPress={() => { if (consumeFreeTool('teleport', toolLayer.pocketId)) { setToolLayer(null); resume(); } }} />
+                : commerce.status === 'ready' && (commerce.wallet?.points ?? 0) >= TOOL_COSTS[toolLayer.kind]
                 ? <Action label={`Use ${TOOL_COSTS[toolLayer.kind]} points`} testID="tool-confirm-buy" primary disabled={toolBusy}
-                  onPress={() => void buyTool(toolLayer.kind, toolLayer.pocketId)} />
+                  onPress={() => void buyTool(toolLayer.use ?? toolLayer.kind, toolLayer.pocketId)} />
                 : <Action label="Get points" testID="tool-get-points" primary disabled={toolBusy} onPress={openShop} />}
             </View>
           </> : <>

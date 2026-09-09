@@ -2,22 +2,24 @@ import { readCommerceConfig, resolveCommerceBackend } from '../services/commerce
 import type { LeaderboardService, RankedRun, Standings } from './contracts';
 import { RULESET } from './contracts';
 import { readWallet } from '../services/commerce/validation';
-export function createLeaderboardService(): LeaderboardService {
+import type { NativeRuntimeLoader } from '../services/commerce/nativeService';
+export function createLeaderboardService(load?: NativeRuntimeLoader): LeaderboardService {
   const config = readCommerceConfig();
+  const runtimeForCall = load ?? (async () => (await import('../services/commerce/nativeRuntime')).loadNativeRuntime(config, true));
   const call = async (name: string, payload: Record<string, unknown>) => {
     if (!['ios', 'android'].includes(config.platform) || !config.environment || !config.firebase.apiKey
       || resolveCommerceBackend(config).provider !== 'workers') throw new Error('Weekly competition is available in the connected mobile app.');
-    const runtime = await (await import('../services/commerce/nativeRuntime')).loadNativeRuntime(config, true);
+    const runtime = await runtimeForCall();
     const uid = await runtime.authenticate();
     return { uid, result: await runtime.call(name, { environment: config.environment, ...payload }) };
   };
   return {
     getAccountId: async () => {
-      const runtime = await (await import('../services/commerce/nativeRuntime')).loadNativeRuntime(config, true);
+      const runtime = await runtimeForCall();
       return runtime.authenticate();
     },
     register: async (requestId) => {
-      const { uid, result } = await call('weeklyRegister', { requestId });
+      const { uid, result } = await call('weeklyRegister', { requestId, ruleset: RULESET });
       const run = result as RankedRun;
       if (!run || run.uid !== uid || run.environment !== config.environment || run.ruleset !== RULESET
         || typeof run.id !== 'string' || !Number.isInteger(run.seed) || !Number.isSafeInteger(run.deadline)) throw new Error('Invalid ranked run response.');

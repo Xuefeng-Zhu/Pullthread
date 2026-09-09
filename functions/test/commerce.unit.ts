@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { CommerceError, parseRedemption } from '../src/commerce/domain';
+import { CREATIVE_TOOLS, TOOL_COSTS } from '../../src/commerce/contracts';
 import { fetchVerifiedPurchases, parsePurchaseWebhook, requireConfiguration, validWebhookAuthorization, type ProviderConfig, type ProviderFetch } from '../src/commerce/revenuecat';
 
 const config: ProviderConfig = { apiKey: 'server-only-fixture', projectId: 'proj_fixture', appIds: ['app_fixture'], enabledEnvironments: ['sandbox'] };
@@ -14,6 +15,13 @@ test('tool catalog price and complete operation binding are validated server-sid
   const request = { operationId: 'operation_1', runId: 'run_123456', tool: 'preview', expectedCost: 10, contextKey: 'tick:120:source' };
   assert.equal(parseRedemption(request).expectedCost, 10);
   for (const change of [{ expectedCost: 0 }, { tool: 'credits' }, { runId: '../user' }, { contextKey: '' }, { operationId: 'short' }]) assert.throws(() => parseRedemption({ ...request, ...change }), CommerceError);
+});
+test('all creative tools use authoritative prices and reject forged prices', () => {
+  for (const tool of CREATIVE_TOOLS) {
+    const request = { operationId: 'creative_operation', runId: 'creative_run', tool, expectedCost: TOOL_COSTS[tool], contextKey: '0:endless-0:creative' };
+    assert.deepEqual(parseRedemption(request), request);
+    assert.throws(() => parseRedemption({ ...request, expectedCost: 0 }), CommerceError);
+  }
 });
 test('missing config and production stay unavailable; webhook checks the exact configured authorization', () => {
   assert.throws(() => requireConfiguration({ ...config, apiKey: '' }, 'sandbox'), /not configured/);

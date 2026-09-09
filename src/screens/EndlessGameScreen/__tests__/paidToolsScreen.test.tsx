@@ -1,11 +1,13 @@
 /** @jest-environment node */
-import { act, fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render, within } from '@testing-library/react-native';
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ComponentProps } from 'react';
 import MockReact from 'react';
-import { AccessibilityInfo, AppState, View as MockView } from 'react-native';
+import { AccessibilityInfo, AppState, type AppStateStatus, View as MockView } from 'react-native';
 import type { CommerceService } from '../../../commerce/contracts';
+import * as endless from '../../../game/launch/endless';
+import { grantFreeTool } from '../../../game/launch/toolInventory';
 import { LaunchCanvas } from '../../../game/launch/LaunchCanvas';
 import * as commerceService from '../../../services/commerce';
 import { createMockCommerceService } from '../../../services/commerce/mockService';
@@ -59,9 +61,9 @@ beforeEach(async () => {
 });
 afterEach(() => { AppState.currentState = initialAppState; jest.restoreAllMocks(); });
 
-async function mount(): Promise<ScreenView> {
+async function mount(width = 390, height = 844): Promise<ScreenView> {
   const view = await render(<EndlessGameScreen {...props()} />);
-  await fireEvent(view.getByTestId('launch-play-area'), 'layout', { nativeEvent: { layout: { width: 390, height: 844 } } });
+  await fireEvent(view.getByTestId('launch-play-area'), 'layout', { nativeEvent: { layout: { width, height } } });
   return view;
 }
 
@@ -130,4 +132,232 @@ describe('paid tools in the playable screen', () => {
     expect(service.getRedemption).toHaveBeenCalledTimes(1);
     expect(mockStore.getState().wallet).toEqual({ points: 75, revision: 10, environment: 'sandbox' });
   });
+
+  test('the compact toolbox shows all six tools and a cancelled setup never spends points', async () => {
+    const view = await mount(320, 568);
+    await fireEvent.press(view.getByTestId('tool-box'));
+    expect(view.getByTestId('toolbox-scroll')).toBeTruthy();
+    for (const kind of ['bounce', 'pin', 'velcro', 'sail', 'needle', 'stitch']) expect(view.getByTestId(`toolbox-${kind}`)).toBeTruthy();
+    await fireEvent.press(view.getByTestId('toolbox-sail'));
+    expect(view.getByTestId('tool-setup-sail')).toBeTruthy();
+    expect(view.queryByTestId('launch-hud')).toBeNull();
+    expect(view.queryByTestId('launch-tool-tray')).toBeNull();
+    expect(canvas().state.toolEffects?.sail).toBeUndefined();
+    await fireEvent.press(view.getByTestId('tool-setup-cancel'));
+    expect(service.redeemTool).not.toHaveBeenCalled();
+    expect(canvas().state.toolEffects?.sail).toBeUndefined();
+  });
+
+  test('different paid tools combine with Preview while duplicate preparations are disabled', async () => {
+    const view = await mount();
+    for (const kind of ['sail', 'needle']) {
+      await fireEvent.press(view.getByTestId('tool-box'));
+      await fireEvent.press(view.getByTestId(`toolbox-${kind}`));
+      await fireEvent.press(view.getByTestId('tool-setup-confirm'));
+    }
+    expect(canvas().state.toolEffects).toMatchObject({ sail: true, needle: {} });
+    expect(service.redeemTool).toHaveBeenCalledTimes(2);
+    expect(mockStore.getState().wallet?.points).toBe(70);
+    await fireEvent.press(view.getByTestId('tool-box'));
+    expect(view.getByTestId('toolbox-sail').props.accessibilityState.disabled).toBe(true);
+    await fireEvent.press(view.getByTestId('toolbox-close'));
+    await fireEvent.press(view.getByTestId('tool-preview'));
+    await fireEvent.press(view.getByTestId('tool-confirm-buy'));
+    expect(canvas().previewActive).toBe(true);
+    expect(canvas().state.toolEffects).toMatchObject({ sail: true, needle: {} });
+  });
+
+  test('confirmed creative tools consume a free pickup before considering points', async () => {
+    const original = endless.createEndlessRun;
+    jest.spyOn(endless, 'createEndlessRun').mockImplementationOnce(seed => {
+      const run = original(seed);
+      grantFreeTool(run, 'preview');
+      grantFreeTool(run, 'sail');
+      grantFreeTool(run, 'needle');
+      return run;
+    });
+    const view = await mount();
+    expect(view.getByTestId('free-tool-slots').props.accessibilityLabel).toBe('Free tools, 3 of 3. Oldest to newest: Preview, Silk Sail, Needle Tip. The next pickup replaces Preview.');
+    for (let slot = 0; slot < 3; slot++) expect(view.getByTestId(`free-tool-slots-${slot}`)).toBeTruthy();
+    await fireEvent.press(view.getByTestId('tool-box'));
+    expect(view.getByTestId('toolbox-free-slots').props.accessibilityLabel).toContain('Free tools, 3 of 3.');
+    expect(view.getByText('Oldest on the left. When full, a pickup replaces your oldest free tool.')).toBeTruthy();
+    await fireEvent.press(view.getByTestId('toolbox-sail'));
+    expect(view.getByText('Use free tool')).toBeTruthy();
+    await fireEvent.press(view.getByTestId('tool-setup-confirm'));
+    expect(canvas().state.toolEffects?.sail).toBe(true);
+    expect(service.redeemTool).not.toHaveBeenCalled();
+    expect(mockStore.getState().wallet?.points).toBe(100);
+    expect(view.getByTestId('free-tool-slots').props.accessibilityLabel).toBe('Free tools, 2 of 3. Oldest to newest: Preview, Needle Tip.');
+    expect(view.getByTestId('prepared-tools').props.children.join('')).toBe('Ready: Silk Sail');
+    await fireEvent.press(view.getByTestId('tool-box'));
+    expect(view.getByTestId('toolbox-sail').props.accessibilityLabel).toContain('0 free');
+  });
+
+  test('historical uncapped runs keep their inventory and omit the three-slot rule', async () => {
+    const original = endless.createEndlessRun;
+    jest.spyOn(endless, 'createEndlessRun').mockImplementationOnce(seed => {
+      const run = original(seed, 5);
+      for (let charge = 0; charge < 4; charge++) grantFreeTool(run, 'sail');
+      return run;
+    });
+    const view = await mount(320, 568);
+    expect(view.queryByTestId('free-tool-slots')).toBeNull();
+    await fireEvent.press(view.getByTestId('tool-box'));
+    expect(view.queryByTestId('toolbox-free-slots')).toBeNull();
+    expect(view.queryByText('Oldest on the left. When full, a pickup replaces your oldest free tool.')).toBeNull();
+    expect(view.getByTestId('toolbox-sail').props.accessibilityLabel).toContain('4 free');
+  });
+
+  test('bounce adjustment stays a draft until exact position and angle are confirmed', async () => {
+    const view = await mount();
+    await fireEvent.press(view.getByTestId('tool-box'));
+    await fireEvent.press(view.getByTestId('toolbox-bounce'));
+    await fireEvent.press(view.getByTestId('tool-valid-position'));
+    await fireEvent.press(view.getByTestId('tool-angle-increase'));
+    expect(canvas().state.toolEffects?.bounce).toBeUndefined();
+    expect(service.redeemTool).not.toHaveBeenCalled();
+    await fireEvent.press(view.getByTestId('tool-setup-confirm'));
+    expect(canvas().state.toolEffects?.bounce?.angle).toBe(5);
+    const request = service.redeemTool.mock.calls[0][0];
+    expect(request.tool).toBe('bounce');
+    expect(request.contextKey).toContain('"angle":5');
+    expect(request.contextKey).toContain('"position":');
+    expect(request.expectedCost).toBe(15);
+  });
+
+  test('Land requires confirmation before discarding prepared tools', async () => {
+    const view = await mount();
+    await fireEvent.press(view.getByTestId('tool-box'));
+    await fireEvent.press(view.getByTestId('toolbox-sail'));
+    await fireEvent.press(view.getByTestId('tool-setup-confirm'));
+    await fireEvent.press(view.getByTestId('tool-teleport'));
+    await fireEvent.press(view.getAllByLabelText(/Land in visible pocket/)[0]);
+    expect(view.getByTestId('land-discard-warning')).toBeTruthy();
+    expect(canvas().state.toolEffects?.sail).toBe(true);
+    await fireEvent.press(view.getByTestId('tool-confirm-cancel'));
+    expect(canvas().state.toolEffects?.sail).toBe(true);
+    expect(service.redeemTool).toHaveBeenCalledTimes(1);
+  });
+
+
+  test('a creative draft survives the points shop without activation or advancing the frozen run', async () => {
+    service.getWallet.mockResolvedValue({ points: 0, revision: 2, environment: 'sandbox' });
+    const view = await mount();
+    await fireEvent.press(view.getByTestId('tool-box'));
+    await fireEvent.press(view.getByTestId('toolbox-bounce'));
+    await fireEvent.press(view.getByTestId('tool-valid-position'));
+    await fireEvent.press(view.getByTestId('tool-angle-increase'));
+    const before = view.getByTestId('tool-placement-draft').props.style;
+    const tick = canvas().motion.tick.value;
+    await fireEvent.press(view.getByTestId('tool-setup-points'));
+    expect(view.queryByTestId('tool-setup-bounce')).toBeNull();
+    await fireEvent.press(view.getByTestId('points-shop-close'));
+    expect(view.getByTestId('tool-setup-bounce')).toBeTruthy();
+    expect(view.getByTestId('tool-placement-draft').props.style).toEqual(before);
+    expect(canvas().motion.tick.value).toBe(tick);
+    expect(canvas().state.toolEffects?.bounce).toBeUndefined();
+    expect(service.redeemTool).not.toHaveBeenCalled();
+  });
+
+  test('Preview alone survives Land without a creative-tool discard warning', async () => {
+    const view = await mount();
+    await fireEvent.press(view.getByTestId('tool-preview'));
+    await fireEvent.press(view.getByTestId('tool-confirm-buy'));
+    await fireEvent.press(view.getByTestId('tool-teleport'));
+    await fireEvent.press(view.getAllByLabelText(/Land in visible pocket/)[0]);
+    expect(view.queryByTestId('land-discard-warning')).toBeNull();
+    await fireEvent.press(view.getByTestId('tool-confirm-buy'));
+    expect(canvas().previewActive).toBe(true);
+  });
+
+
+  test('a prepared temporary pocket remains selectable for a combined Velcro patch', async () => {
+    const view = await mount(320, 568);
+    await fireEvent.press(view.getByTestId('tool-box'));
+    await fireEvent.press(view.getByTestId('toolbox-stitch'));
+    await fireEvent.press(view.getByTestId('tool-valid-position'));
+    await fireEvent.press(view.getByTestId('tool-setup-confirm'));
+    const pocketId = canvas().state.stitchedPocket!.pocket.id;
+    await fireEvent.press(view.getByTestId('tool-box'));
+    await fireEvent.press(view.getByTestId('toolbox-velcro'));
+    await fireEvent.press(view.getByTestId(`tool-target-${pocketId}`));
+    await fireEvent.press(view.getByTestId('tool-setup-confirm'));
+    expect(canvas().state.toolEffects?.velcro?.targetId).toBe(pocketId);
+    expect(canvas().state.stitchedPocket?.pocket.id).toBe(pocketId);
+  });
+
+
+  test('a compact setup uses space freed by a tall HUD and prepared-tool tray', async () => {
+    const view = await mount(320, 568);
+    await fireEvent(view.getByTestId('launch-hud'), 'layout', { nativeEvent: { layout: { width: 296, height: 200 } } });
+    await fireEvent(view.getByTestId('launch-tool-tray'), 'layout', { nativeEvent: { layout: { width: 296, height: 100 } } });
+    await fireEvent.press(view.getByTestId('tool-box'));
+    await fireEvent.press(view.getByTestId('toolbox-velcro'));
+    expect(view.queryByTestId('launch-hud')).toBeNull();
+    await fireEvent.press(view.getByTestId('tool-target-endless-2'));
+    expect(view.getByTestId('tool-setup-confirm').props.accessibilityState.disabled).toBe(false);
+    await fireEvent.press(view.getByTestId('tool-setup-cancel'));
+    expect(view.getByTestId('launch-hud')).toBeTruthy();
+    expect(service.redeemTool).not.toHaveBeenCalled();
+  });
+
+
+  test('setup cancellation and the exact purchase cost stay outside scrolling details on a compact screen', async () => {
+    const view = await mount(320, 568);
+    await fireEvent.press(view.getByTestId('tool-box'));
+    await fireEvent.press(view.getByTestId('toolbox-bounce'));
+    const details = within(view.getByTestId('tool-setup-details'));
+    const footer = within(view.getByTestId('tool-setup-footer'));
+    expect(details.queryByTestId('tool-setup-cancel')).toBeNull();
+    expect(details.queryByTestId('tool-setup-confirm')).toBeNull();
+    expect(footer.getByText('15 points · 100 available')).toBeTruthy();
+    expect(footer.getByTestId('tool-setup-confirm')).toBeTruthy();
+    await fireEvent.press(footer.getByTestId('tool-setup-cancel'));
+    expect(view.queryByTestId('tool-setup-bounce')).toBeNull();
+    expect(service.redeemTool).not.toHaveBeenCalled();
+  });
+
+
+  test('backgrounding and resuming a creative setup keeps its frozen selection and never consumes a charge', async () => {
+    const listeners = new Set<(state: AppStateStatus) => void>();
+    jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, listener) => {
+      listeners.add(listener); return { remove: () => { listeners.delete(listener); } };
+    });
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextId = 0, timestamp = 0;
+    jest.mocked(global.requestAnimationFrame).mockImplementation(callback => {
+      const id = ++nextId; frames.set(id, callback); return id;
+    });
+    jest.mocked(global.cancelAnimationFrame).mockImplementation(id => { if (typeof id === 'number') frames.delete(id); });
+    const frame = async (elapsed: number) => {
+      await act(() => { timestamp += elapsed; const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(callback => callback(timestamp)); });
+    };
+    const changeState = async (state: AppStateStatus) => {
+      await act(() => { AppState.currentState = state; [...listeners].forEach(listener => listener(state)); });
+    };
+    const view = await mount(320, 568);
+    await frame(16);
+    await fireEvent.press(view.getByTestId('tool-box'));
+    await fireEvent.press(view.getByTestId('toolbox-bounce'));
+    await fireEvent.press(view.getByTestId('tool-valid-position'));
+    await fireEvent.press(view.getByTestId('tool-angle-increase'));
+    const draft = view.getByTestId('tool-placement-draft').props.style;
+    const tick = canvas().motion.tick.value;
+    await changeState('background');
+    await frame(30_000);
+    await changeState('active');
+    await frame(30_000);
+    expect(view.getByTestId('tool-placement-draft').props.style).toEqual(draft);
+    expect(canvas().motion.tick.value).toBe(tick);
+    expect(canvas().state.toolEffects?.bounce).toBeUndefined();
+    expect(service.redeemTool).not.toHaveBeenCalled();
+    await fireEvent.press(view.getByTestId('tool-setup-cancel'));
+    await frame(30_000);
+    expect(canvas().motion.tick.value).toBe(tick);
+    await frame(1000 / 60);
+    expect(canvas().motion.tick.value).toBe(tick + 2);
+    await view.unmount();
+  });
+
 });

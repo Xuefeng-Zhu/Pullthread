@@ -2,6 +2,7 @@
 import { describe, expect, jest, test } from '@jest/globals';
 
 import type { CommerceService, RedeemToolRequest, ToolReceipt } from '../contracts';
+import { CREATIVE_TOOLS, TOOL_COSTS } from '../contracts';
 import { PaidToolJournal, paidToolJournalKey, type JournalStorage } from '../paidToolJournal';
 import { CommerceError } from '../../services/commerce/errors';
 
@@ -42,6 +43,17 @@ function setup() {
 }
 
 describe('paid tool interruption journal', () => {
+  test.each(CREATIVE_TOOLS)('%s recovers its exact armed snapshot without a second debit', async tool => {
+    const { service, journal } = setup();
+    const creativeRequest = { ...request, tool, expectedCost: TOOL_COSTS[tool], contextKey: `0:endless-0:${tool}:exact-placement` };
+    jest.mocked(service.resolveTool).mockRejectedValueOnce(new Error('connection lost'));
+    await expect(journal().redeem(creativeRequest, 'run:before', `run:${tool}:armed:exact-placement`)).rejects.toThrow('connection lost');
+    const restored = await journal().recover();
+    expect(restored.snapshot).toBe(`run:${tool}:armed:exact-placement`);
+    expect(restored.result?.receipt).toMatchObject({ ...creativeRequest, status: 'applied' });
+    expect(service.redeemTool).toHaveBeenCalledTimes(1);
+    expect((await service.getWallet()).points).toBe(100 - TOOL_COSTS[tool]);
+  });
   test('background snapshots captured while a debit settles cannot replace its delivered effect', async () => {
     const { service, journal, storage } = setup();
     const persist = storage.setItem;

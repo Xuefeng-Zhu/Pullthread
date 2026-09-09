@@ -1,10 +1,18 @@
 import type { LeaderboardService, RankedRun, ReplayAction, ReplayBatch, ReplayCommand } from './contracts';
 import { MAX_BATCH_COMMANDS, MAX_BATCH_TICKS } from './contracts';
+import { parseToolUse } from '../commerce/toolUse';
 export interface JournalStorage { getItem(key: string): Promise<string | null>; setItem(key: string, value: string): Promise<void>; removeItem(key: string): Promise<void> }
 interface SavedJournal { run: RankedRun; elapsed: number; sequence: number; from: number; commands: ReplayCommand[]; batches: ReplayBatch[]; snapshot: string; verified: number; disabled?: string; pendingTool?: { action: Extract<ReplayAction, { type: 'tool' }>; before: string; after: string } }
 export const ACTIVE_RANKED_KEY = 'pullthread.weekly.active.v1';
 const QUEUE_KEY = 'pullthread.weekly.queue.v1';
 let queueWrite: Promise<void> = Promise.resolve();
+function copyAction(action: ReplayAction): ReplayAction {
+  if (action.type !== 'tool') return { ...action };
+  const { type: _type, operationId, ...payload } = action;
+  const use = parseToolUse(payload);
+  if (!use) throw new Error('Invalid tool action.');
+  return { type: 'tool', ...use, ...(operationId !== undefined ? { operationId } : {}) };
+}
 export class RankedJournal {
   private data: SavedJournal;
   private write: Promise<void> = Promise.resolve();
@@ -62,7 +70,7 @@ export class RankedJournal {
     }
   }
   async prepareTool(action: Extract<ReplayAction, { type: 'tool' }>, before: string, after: string): Promise<void> {
-    this.data.pendingTool = { action, before, after };
+    this.data.pendingTool = { action: copyAction(action) as Extract<ReplayAction, { type: 'tool' }>, before, after };
     await this.checkpoint(before);
   }
   reconcileTool(snapshot: string): boolean {
@@ -79,7 +87,7 @@ export class RankedJournal {
     if (this.failed) return;
     if (this.data.commands.length >= MAX_BATCH_COMMANDS || (action.type === 'tool' && action.operationId && this.data.commands.filter(command => command.type === 'tool' && command.operationId).length >= 8)) this.seal();
     this.aiming = action.type === 'aim' ? true : action.type === 'cancel' || action.type === 'launch' || action.type === 'tool' ? false : this.aiming;
-    this.data.commands.push({ ...action, at: this.data.elapsed });
+    this.data.commands.push({ ...copyAction(action), at: this.data.elapsed });
   }
   cancelActiveAim(): void { if (this.aiming) this.action({ type: 'cancel' }); }
   tick(): void { if (!this.failed) { this.data.elapsed++; if (this.data.elapsed - this.data.from >= MAX_BATCH_TICKS) this.seal(); } }

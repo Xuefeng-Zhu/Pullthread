@@ -1,5 +1,6 @@
 /** @jest-environment node */
 import { describe, expect, test } from '@jest/globals';
+import { emptyToolInventory } from '../../../commerce/contracts';
 import {
   activatePreview, createEndlessRun, createLegacyEndlessRun, eligibleTeleportPockets, launchEndless, reviveEndless,
   stepEndless, teleportEndless, type EndlessRun,
@@ -9,6 +10,7 @@ import { captureEndlessWorld, cloneEndlessRun } from '../snapshots';
 import { pocketPosition } from '../simulation';
 import { findNextInput, replayNext } from '../testing/routeSolver';
 import type { LaunchEvent, LaunchPickup } from '../types';
+import { grantFreeTool } from '../toolInventory';
 
 function finish(run: EndlessRun): LaunchEvent[] {
   const events: LaunchEvent[] = [];
@@ -33,7 +35,7 @@ describe('run tools and airborne collectibles', () => {
       [2, 'preview'], [4, 'revive'], [6, 'teleport'], [10, 'preview'], [14, 'teleport'],
       [19, 'revive'], [24, 'preview'], [29, 'teleport'], [34, 'revive'],
     ]);
-    expect(createEndlessRun(0).inventory).toEqual({ preview: 0, teleport: 0, revive: 0 });
+    expect(createEndlessRun(0).inventory).toEqual(emptyToolInventory());
   });
 
   test('swept contact collects before a later hazard in the same fast tick, without granting score', () => {
@@ -75,7 +77,7 @@ describe('run tools and airborne collectibles', () => {
     for (const used of [false, true]) {
       const run = pickupFlight('revive');
       run.reviveUsed = used;
-      run.inventory.revive = used ? 0 : 1;
+      if (!used) grantFreeTool(run, 'revive');
       expect(run.room.pickups![0].kind).toBe('revive');
       expect(stepEndless(run)[0]).toMatchObject({ type: 'pickup', kind: 'preview', convertedFrom: 'revive' });
       expect(run.inventory.preview).toBe(1);
@@ -94,7 +96,8 @@ describe('run tools and airborne collectibles', () => {
   test('Preview spends once, survives invalid releases, and ends on the next successful launch', () => {
     const run = createEndlessRun(0);
     expect(activatePreview(run)).toBe(false);
-    run.inventory.preview = 2;
+    grantFreeTool(run, 'preview');
+    grantFreeTool(run, 'preview');
     expect(activatePreview(run)).toBe(true);
     expect(activatePreview(run)).toBe(false);
     expect(run.inventory.preview).toBe(1);
@@ -119,7 +122,7 @@ describe('run tools and airborne collectibles', () => {
   });
 
   test('Teleport can catch in midflight, scores one advancing arrival, and does not farm skipped or older pockets', () => {
-    const run = createEndlessRun(0);
+    const run = createEndlessRun(0, 5);
     run.inventory.teleport = 4;
     expect(launchEndless(run, { x: -24, y: 72 })).toBe(true);
     expect(teleportEndless(run, 'endless-2')).toBe(true);
@@ -149,7 +152,7 @@ describe('run tools and airborne collectibles', () => {
     expect(run.state.position).toEqual(actualPosition);
 
     const unavailable = createEndlessRun(0);
-    unavailable.inventory.teleport = 1;
+    grantFreeTool(unavailable, 'teleport');
     unavailable.room = { ...unavailable.room, pockets: [...unavailable.room.pockets,
       { id: 'endless-88', kind: 'checkpoint', center: { x: 180, y: 595 }, width: 120 },
       { id: 'endless-89', kind: 'checkpoint', center: { x: 20, y: 250 }, width: 120 },
@@ -170,7 +173,7 @@ describe('run tools and airborne collectibles', () => {
     const pickup = { id: 'endless-pickup-2', kind: 'preview' as const, center: { x: 120, y: 200 }, radius: 4 };
     run.room = { ...run.room, pickups: [pickup] };
     run.lastCatchSnapshot = captureEndlessWorld(run);
-    run.inventory.revive = 1;
+    grantFreeTool(run, 'revive');
     // An actually collected object is also present in the saved room, exercising
     // removal on restore rather than only preserving the inventory count.
     run.room = { ...run.room, gravity: 0, bumpers: [], hazards: [{ id: 'thorn', center: { x: 180, y: 200 }, radius: 4 }] };
@@ -185,7 +188,7 @@ describe('run tools and airborne collectibles', () => {
     expect(run.nextPocketIndex).toBe(checkpoint.nextPocketIndex);
     expect(run.room.gravity).toBe(700);
     expect(run.room.hazards).toEqual(checkpoint.room.hazards);
-    expect(run.inventory).toEqual({ preview: 1, revive: 0, teleport: 0 });
+    expect(run.inventory).toEqual({ ...emptyToolInventory(), preview: 1 });
     expect(run.room.pickups).toEqual([]);
     expect(run.state.pickupIds).toContain(pickup.id);
     expect(run.reviveUsed).toBe(true);
@@ -197,11 +200,11 @@ describe('run tools and airborne collectibles', () => {
 
   test('an authorized revive converts a spare free revive and still obeys the once-per-run limit', () => {
     const run = createEndlessRun(0);
-    run.inventory.revive = 1;
+    grantFreeTool(run, 'revive');
     launchEndless(run, { x: -100, y: 0 });
     finish(run);
     expect(reviveEndless(run, true)).toBe(true);
-    expect(run.inventory).toEqual({ preview: 1, teleport: 0, revive: 0 });
+    expect(run.inventory).toEqual({ ...emptyToolInventory(), preview: 1 });
     expect(run.reviveUsed).toBe(true);
   });
 });

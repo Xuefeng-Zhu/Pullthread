@@ -3,6 +3,7 @@ import { chooseInteractiveSection } from './interactiveSections';
 import { INTERACTIVE_MECHANICS } from './interactiveProgression';
 import { worldStageForScore } from './progression';
 import type { LaunchPoint } from './types';
+import { CREATIVE_TOOLS } from '../../commerce/contracts';
 
 /** Generate and retain whole sections; score ranks must never own branch geometry. */
 export function updateInteractiveWindow(run: EndlessRun): void {
@@ -45,9 +46,11 @@ export function updateInteractiveWindow(run: EndlessRun): void {
       doorIds: value.doorIds.map(localId), ...(value.pocketId ? { pocketId: localId(value.pocketId) } : {}),
     }));
     // Leave a full section between gifts while continuing to rotate all three tools.
-    const scheduled = (['preview', 'revive', 'teleport'] as const)[Math.floor(index / 2) % 3];
+    const scheduled = index % 2 === 1 && (run.generationVersion ?? 1) >= 5
+      ? CREATIVE_TOOLS[Math.floor(index / 2) % CREATIVE_TOOLS.length]
+      : (['preview', 'revive', 'teleport'] as const)[Math.floor(index / 2) % 3];
     const kind = scheduled === 'revive' && (run.reviveUsed || run.inventory.revive > 0) ? 'preview' : scheduled;
-    const ownedPickups = index % 2 === 0 ? pattern.pickups.map((pickup) => ({
+    const ownedPickups = index % 2 === 0 || (run.generationVersion ?? 1) >= 5 ? pattern.pickups.map((pickup) => ({
       ...pickup, kind, id: localId(pickup.id), center: translated(pickup.center),
     })) : [];
     const exit = ownedPockets.find((pocket) => pocket.id === localId(pattern.exitPocketId))!;
@@ -82,7 +85,9 @@ export function updateInteractiveWindow(run: EndlessRun): void {
   }
   const reached = progress.sections.filter((section) => section.startRank <= run.highestPocket).at(-1);
   const minimumIndex = (reached?.index ?? 0) - 1;
-  const sourceSectionId = pockets.find((pocket) => pocket.id === run.state.pocketId)?.sectionId;
+  const sourceId = run.state.stitchedPocket?.pocket.id === run.state.pocketId
+    ? run.state.stitchedPocket.originPocketId : run.state.pocketId;
+  const sourceSectionId = pockets.find((pocket) => pocket.id === sourceId)?.sectionId;
   progress.sections = progress.sections.filter((section) => section.index >= minimumIndex || section.id === sourceSectionId);
   const retainedSections = new Set(progress.sections.map((section) => section.id));
   if (minimumIndex <= 0 || sourceSectionId === 'opening') retainedSections.add('opening');

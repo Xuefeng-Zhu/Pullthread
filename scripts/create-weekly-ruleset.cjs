@@ -5,7 +5,7 @@ const esbuild = require('../worker/node_modules/esbuild');
 
 const root = path.resolve(__dirname, '..');
 const id = process.argv[2];
-if (!/^stitched-v4-weekly-[1-9]\d*$/.test(id ?? '')) throw new Error('Pass a versioned stitched-v4-weekly-N ruleset ID.');
+if (!/^stitched-v[456]-weekly-[1-9]\d*$/.test(id ?? '')) throw new Error('Pass a versioned stitched-v4-weekly-N, stitched-v5-weekly-N or stitched-v6-weekly-N ruleset ID.');
 const base = path.join(root, 'worker', 'rulesets', id);
 for (const extension of ['js', 'd.ts', 'sources.json']) {
   if (fs.existsSync(`${base}.${extension}`)) throw new Error(`Ruleset ${id} already exists and cannot be overwritten.`);

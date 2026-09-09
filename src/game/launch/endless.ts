@@ -25,7 +25,10 @@ import type {
 import { chooseChallenge } from './challenges';
 import type { ActiveChallenge, AnchorRange, ChallengeFamily, ChallengePattern } from './challengeTypes';
 import type { ToolKind } from '../../commerce/contracts';
+import { emptyToolInventory } from '../../commerce/contracts';
+import { clearFlightToolEffects, effectivePockets, pruneToolPhaseOffsets } from './toolEffects';
 import { pickupPlacement, scheduledPickupKind } from './pickups';
+import { grantFreeTool, spendFreeTool } from './toolInventory';
 import { captureEndlessWorld, restoreEndlessWorld } from './snapshots';
 import type { SectionFamily } from './sections';
 import { updateSectionWindow } from './sectionWindow';
@@ -81,7 +84,7 @@ export interface SectionProgress {
 
 export interface EndlessRun {
   /** Missing on historical version-one journals. Never upgrade a run mid-flight. */
-  readonly generationVersion?: 1 | 2 | 3 | 4;
+  readonly generationVersion?: 1 | 2 | 3 | 4 | 5 | 6;
   sectionProgress?: SectionProgress;
   readonly seed: number;
   room: LaunchRoom;
@@ -101,6 +104,8 @@ export interface EndlessRun {
   lastPatternId: string;
   challenges: readonly OwnedChallenge[];
   inventory: Record<ToolKind, number>;
+  /** Version six stores at most three free charges, oldest pickup first. */
+  freeToolQueue?: ToolKind[];
   reviveUsed: boolean;
   previewActive: boolean;
   collectedPickupIds: string[];
@@ -109,7 +114,7 @@ export interface EndlessRun {
 
 /** A checkpoint contains world/clock/generator data, never another checkpoint or inventory. */
 export type EndlessWorldSnapshot = Omit<EndlessRun,
-  'inventory' | 'reviveUsed' | 'previewActive' | 'collectedPickupIds' | 'lastCatchSnapshot'>;
+  'inventory' | 'freeToolQueue' | 'reviveUsed' | 'previewActive' | 'collectedPickupIds' | 'lastCatchSnapshot'>;
 
 function pocketId(index: number): string {
   return `endless-${index}`;
@@ -133,11 +138,13 @@ function opening(index: number): ChallengePattern {
 }
 
 export function nextEndlessChallenge(run: EndlessRun): ActiveChallenge | undefined {
+  const sourceId = run.state.stitchedPocket?.pocket.id === run.state.pocketId
+    ? run.state.stitchedPocket.originPocketId : run.state.pocketId;
   if ((run.generationVersion ?? 1) >= 2) {
-    const section = run.sectionProgress?.sections.find((item) => item.connections.some((edge) => edge.from === run.state.pocketId));
+    const section = run.sectionProgress?.sections.find((item) => item.connections.some((edge) => edge.from === sourceId));
     if (section) {
       const hasPickup = run.room.pickups?.some((pickup) => section.pickupIds.includes(pickup.id));
-      const cue = hasPickup || run.generationVersion === 4 || (run.generationVersion === 3 && section.mechanics?.length) ? section.cue : {
+      const cue = hasPickup || (run.generationVersion ?? 1) >= 4 || (run.generationVersion === 3 && section.mechanics?.length) ? section.cue : {
         fork: 'Choose the roomy pockets, or try the narrower star lane.',
         cushion: 'The side cushions can bounce you back toward the pockets.',
         gate: 'Watch the moving thorns. Wait for your route to open.',
@@ -155,12 +162,15 @@ export function nextEndlessChallenge(run: EndlessRun): ActiveChallenge | undefin
 /** Both authored choices are hints, never a restriction on physically legal catches. */
 export function nextEndlessTargets(run: EndlessRun): readonly string[] {
   if ((run.generationVersion ?? 1) < 2) return [run.nextPocketId];
+  const sourceId = run.state.stitchedPocket?.pocket.id === run.state.pocketId
+    ? run.state.stitchedPocket.originPocketId : run.state.pocketId;
   const ids = run.sectionProgress?.sections.flatMap((section) =>
-    section.connections.filter((edge) => edge.from === run.state.pocketId).map((edge) => edge.to)) ?? [];
-  if (!ids.length && run.state.pocketId === 'endless-0') ids.push('endless-1');
-  if (!ids.length && run.state.pocketId === 'endless-1') ids.push('endless-2');
+    section.connections.filter((edge) => edge.from === sourceId).map((edge) => edge.to)) ?? [];
+  if (!ids.length && sourceId === 'endless-0') ids.push('endless-1');
+  if (!ids.length && sourceId === 'endless-1') ids.push('endless-2');
+  if (run.state.stitchedPocket && !run.state.stitchedPocket.spent && run.state.stitchedPocket.pocket.id !== run.state.pocketId) ids.push(run.state.stitchedPocket.pocket.id);
   return [...new Set(ids)].filter((id) => {
-    const pocket = run.room.pockets.find((candidate) => candidate.id === id);
+    const pocket = effectivePockets(run.room, run.state).find((candidate) => candidate.id === id);
     return pocket && !isPocketExpired(run.state, pocket);
   });
 }
@@ -234,7 +244,7 @@ function updateLegacyWindow(run: EndlessRun): void {
 }
 
 function updateWindow(run: EndlessRun): void {
-  if (run.generationVersion === 4) updateInteractiveWindow(run);
+  if ((run.generationVersion ?? 1) >= 4) updateInteractiveWindow(run);
   else if ((run.generationVersion ?? 1) >= 2) updateSectionWindow(run);
   else updateLegacyWindow(run);
 }
@@ -248,7 +258,7 @@ export function createSectionEndlessRun(seed: number): EndlessRun { return creat
 /** Historical stitched worlds retain their original mechanics and selection. */
 export function createWorldEndlessRun(seed: number): EndlessRun { return createEndlessRun(seed, 3); }
 
-export function createEndlessRun(seed: number, generationVersion: 1 | 2 | 3 | 4 = 4): EndlessRun {
+export function createEndlessRun(seed: number, generationVersion: 1 | 2 | 3 | 4 | 5 | 6 = 6): EndlessRun {
   const stableSeed = Number.isFinite(seed) ? seed >>> 0 : 0;
   const room: LaunchRoom = {
     id: 'endless-climb',
@@ -267,7 +277,7 @@ export function createEndlessRun(seed: number, generationVersion: 1 | 2 | 3 | 4 
     hazards: [],
     pickups: [],
     ...(generationVersion >= 3 ? { windZones: [] } : {}),
-    ...(generationVersion === 4 ? { barriers: [], switches: [] } : {}),
+    ...(generationVersion >= 4 ? { barriers: [], switches: [] } : {}),
   };
   const run: EndlessRun = {
     generationVersion,
@@ -286,7 +296,8 @@ export function createEndlessRun(seed: number, generationVersion: 1 | 2 | 3 | 4 
     lastFamily: 'opening',
     lastPatternId: 'opening-0',
     challenges: [],
-    inventory: { preview: 0, teleport: 0, revive: 0 },
+    inventory: emptyToolInventory(),
+    ...(generationVersion >= 6 ? { freeToolQueue: [] } : {}),
     reviveUsed: false,
     previewActive: false,
     collectedPickupIds: [],
@@ -304,8 +315,9 @@ export function launchEndless(run: EndlessRun, pull: LaunchPoint): boolean {
 }
 
 function arrive(run: EndlessRun, id: string): void {
-  const pocket = run.room.pockets.find((candidate) => candidate.id === id)!;
-  const position = pocketPosition(pocket, run.state.tick);
+  const pocket = effectivePockets(run.room, run.state).find((candidate) => candidate.id === id)!;
+  const stitchedArrival = run.state.stitchedPocket?.pocket.id === id;
+  const position = pocketPosition(pocket, run.state.tick, run.state);
   Object.assign(run.state, {
     pocketId: id, phase: 'held', position, previousPosition: { ...position },
     velocity: { x: 0, y: 0 }, flightTicks: 0, sourcePocketImmune: true, failure: undefined,
@@ -317,13 +329,19 @@ function arrive(run: EndlessRun, id: string): void {
   } : candidate) };
   startPocketLifetime(run.state, pocket);
   activateLandingSwitches(run.room, run.state, id);
+  clearFlightToolEffects(run.state);
+  if (!stitchedArrival) {
+    run.state.stitchedPocket = undefined;
+    run.state.stitchUsedSinceAuthored = undefined;
+  }
   if (run.state.frayedFall !== undefined) run.state.frayedFall = false;
-  const index = (run.generationVersion ?? 1) >= 2 ? pocket.ascentRank! : pocketIndex(id);
+  const index = stitchedArrival ? run.highestPocket : (run.generationVersion ?? 1) >= 2 ? pocket.ascentRank! : pocketIndex(id);
   if (index > run.highestPocket) {
     run.pocketsCaught += 1;
     run.highestPocket = index;
   }
-  updateWindow(run);
+  if (!stitchedArrival) updateWindow(run);
+  pruneToolPhaseOffsets(run.room, run.state);
 }
 
 function updateView(run: EndlessRun, cameraFrozen: boolean): void {
@@ -336,7 +354,7 @@ function updateView(run: EndlessRun, cameraFrozen: boolean): void {
     let target = Math.min(run.cameraY, run.state.position.y - followLine);
     if (forgiving) {
       if (run.state.phase === 'held') {
-        const held = run.room.pockets.find((pocket) => pocket.id === run.state.pocketId);
+        const held = effectivePockets(run.room, run.state).find((pocket) => pocket.id === run.state.pocketId);
         const lowestAnchor = held?.orbit ? held.center.y + held.orbit.radius : run.state.position.y;
         target = Math.min(0, lowestAnchor - followLine);
       }
@@ -357,7 +375,7 @@ function updateView(run: EndlessRun, cameraFrozen: boolean): void {
     }
   }
   const bottom = forgiving
-    ? Math.max(...run.room.pockets.map((pocket) => pocket.center.y + (pocket.orbit?.radius ?? 0))) + RECOVERY_FLOOR_CLEARANCE
+    ? Math.max(...effectivePockets(run.room, run.state).map((pocket) => pocket.center.y + (pocket.orbit?.radius ?? 0))) + RECOVERY_FLOOR_CLEARANCE
     : run.cameraY + ENDLESS_HEIGHT;
   if (bottom !== run.room.bounds.bottom) {
     run.room = { ...run.room, bounds: { ...run.room.bounds, bottom } };
@@ -368,9 +386,10 @@ function collect(run: EndlessRun, event: Extract<LaunchEvent, { type: 'pickup' }
   if (run.collectedPickupIds.includes(event.id)) return [];
   run.collectedPickupIds.push(event.id);
   const award = event.kind === 'revive' && (run.reviveUsed || run.inventory.revive > 0) ? 'preview' : event.kind;
-  run.inventory[award] += 1;
+  const replacedKind = grantFreeTool(run, award);
   run.room = { ...run.room, pickups: run.room.pickups?.filter((pickup) => pickup.id !== event.id) };
-  return [{ ...event, kind: award, ...(award !== event.kind ? { convertedFrom: 'revive' as const } : {}) }];
+  return [{ ...event, kind: award, ...(award !== event.kind ? { convertedFrom: 'revive' as const } : {}),
+    ...(replacedKind ? { replacedKind } : {}) }];
 }
 
 export function stepEndless(run: EndlessRun, cameraFrozen = false): LaunchEvent[] {
@@ -379,6 +398,10 @@ export function stepEndless(run: EndlessRun, cameraFrozen = false): LaunchEvent[
   if (events.length) run.state.event = events[events.length - 1];
   const caught = events.some((event) => event.type === 'catch');
   if (caught) arrive(run, run.state.pocketId);
+  else if (events.some((event) => event.type === 'fail' || event.type === 'complete')) {
+    clearFlightToolEffects(run.state);
+    if (run.state.stitchedPocket?.pocket.id !== run.state.pocketId) run.state.stitchedPocket = undefined;
+  }
   updateView(run, cameraFrozen);
   if (caught) run.lastCatchSnapshot = captureEndlessWorld(run);
   return events;
@@ -386,9 +409,7 @@ export function stepEndless(run: EndlessRun, cameraFrozen = false): LaunchEvent[
 
 function spend(run: EndlessRun, kind: ToolKind, paid: boolean): boolean {
   if (paid) return true;
-  if (run.inventory[kind] <= 0) return false;
-  run.inventory[kind] -= 1;
-  return true;
+  return spendFreeTool(run, kind);
 }
 
 export function activatePreview(run: EndlessRun, paid = false): boolean {
@@ -401,8 +422,9 @@ export function activatePreview(run: EndlessRun, paid = false): boolean {
 export function eligibleTeleportPockets(run: EndlessRun): readonly LaunchPocket[] {
   if (run.state.phase === 'failed' || run.state.phase === 'complete') return [];
   const bottom = Math.min(run.cameraY + ENDLESS_HEIGHT, run.room.bounds.bottom ?? Number.POSITIVE_INFINITY);
-  return run.room.pockets.filter((pocket) => {
-    const position = pocketPosition(pocket, run.state.tick);
+  return effectivePockets(run.room, run.state).filter((pocket) => {
+    if (run.state.stitchedPocket?.spent && pocket.id === run.state.stitchedPocket.pocket.id) return false;
+    const position = pocketPosition(pocket, run.state.tick, run.state);
     return !isPocketExpired(run.state, pocket) && pocket.id !== run.state.pocketId && position.y - BUTTON_RADIUS >= run.cameraY
       && position.y + BUTTON_RADIUS <= bottom && position.x - pocket.width / 2 >= 0
       && position.x + pocket.width / 2 <= run.room.bounds.width;
@@ -428,6 +450,7 @@ export function reviveEndless(run: EndlessRun, paid = false): boolean {
   // charge when an externally authorized paid activation was applied.
   run.inventory.preview += run.inventory.revive;
   run.inventory.revive = 0;
+  if (run.freeToolQueue) run.freeToolQueue = run.freeToolQueue.map((kind) => kind === 'revive' ? 'preview' : kind);
   run.state.pickupIds = [...run.collectedPickupIds];
   run.room = { ...run.room, pickups: run.room.pickups?.filter((pickup) => !run.collectedPickupIds.includes(pickup.id)) };
   run.state.event = { type: 'tool', tick: run.state.tick, id: run.state.pocketId, kind: 'revive' };

@@ -66,7 +66,7 @@ export function findNextInput(run: EndlessRun): RouteInput {
 
 /** Search the actual assembled run, including adjacent sections and the scrolling floor. */
 export function findTargetInput(run: EndlessRun, targetId: string): RouteInput {
-  if (run.generationVersion === 4) {
+  if ((run.generationVersion ?? 1) >= 4) {
     const input = solveSectionEdge(run.room, run.state, targetId, { perturbation: 0 });
     const attempt = cloneRun(run);
     replayNext(attempt, input);

@@ -4,15 +4,17 @@ import { AppState } from 'react-native';
 import { useSharedValue } from 'react-native-reanimated';
 
 import type { ToolKind } from '../../commerce/contracts';
+import type { ToolUse } from '../../commerce/toolUse';
 import { TOOL_LABELS } from '../../commerce/toolCatalog';
 import type { FeedbackService } from '../feedback';
 import type { LaunchCanvasMotion } from './LaunchCanvas';
-import { activatePreview, advanceEndless, createEndlessRun, eligibleTeleportPockets, launchEndless, nextEndlessChallenge, nextEndlessTargets, reviveEndless, teleportEndless, type EndlessRun } from './endless';
+import { advanceEndless, createEndlessRun, eligibleTeleportPockets, launchEndless, nextEndlessChallenge, nextEndlessTargets, type EndlessRun } from './endless';
 import { cloneEndlessRun, deserializeEndlessRun, serializeEndlessRun } from './snapshots';
 import { predictEndlessLaunch } from './prediction';
 import { clampPull, createLaunchClock, LAUNCH_HZ, MIN_PULL, pocketPosition, resetLaunchClock } from './simulation';
 import { WORLD_ANNOUNCEMENT_TICKS, worldStageForScore } from './progression';
 import { clampEndlessPull } from './launchInput';
+import { applyEndlessTool, validateToolUse, eligiblePinTargets, eligibleVelcroTargets, getToolPlacement, effectivePockets } from './tools';
 import type { LaunchEvent, LaunchPoint, LaunchState } from './types';
 
 interface WorldPresentation { worldStage: number; worldTransitionTick?: number; worldAnnouncement: boolean }
@@ -22,7 +24,10 @@ function snapshot(state: LaunchState): LaunchState {
     velocity: { ...state.velocity }, checkpoint: { ...state.checkpoint }, pickupIds: [...state.pickupIds],
     ...(state.brokenBarrierIds ? { brokenBarrierIds: [...state.brokenBarrierIds] } : {}),
     ...(state.activatedSwitchIds ? { activatedSwitchIds: [...state.activatedSwitchIds] } : {}),
-    ...(state.pocketExpiryTicks ? { pocketExpiryTicks: { ...state.pocketExpiryTicks } } : {}) };
+    ...(state.pocketExpiryTicks ? { pocketExpiryTicks: { ...state.pocketExpiryTicks } } : {}),
+    ...(state.toolEffects ? { toolEffects: JSON.parse(JSON.stringify(state.toolEffects)) as LaunchState['toolEffects'] } : {}),
+    ...(state.stitchedPocket ? { stitchedPocket: { ...state.stitchedPocket, pocket: { ...state.stitchedPocket.pocket, center: { ...state.stitchedPocket.pocket.center } } } } : {}),
+    ...(state.toolPhaseOffsets ? { toolPhaseOffsets: { ...state.toolPhaseOffsets } } : {}) };
 }
 
 function remainingFraySeconds(run: EndlessRun): number | null {
@@ -35,10 +40,8 @@ function nextTargetExpiry(run: EndlessRun, ids: readonly string[]): number {
   return ids.reduce((expiry, id) => Math.min(expiry, run.state.pocketExpiryTicks?.[id] ?? Infinity), Infinity);
 }
 
-function applyTool(run: EndlessRun, kind: ToolKind, paid: boolean, pocketId?: string): boolean {
-  if (kind === 'preview') return activatePreview(run, paid);
-  if (kind === 'revive') return reviveEndless(run, paid);
-  return pocketId ? teleportEndless(run, pocketId, paid) : false;
+function toolUse(value: ToolUse | ToolKind, pocketId?: string): ToolUse {
+  return typeof value === 'string' ? (value === 'teleport' ? { tool: value, pocketId: pocketId ?? '' } : { tool: value }) as ToolUse : value;
 }
 
 /** Simulation and tool mutations share one run; overlays freeze it immediately. */
@@ -67,12 +70,13 @@ export function useLaunchSession(seed: number, active: boolean, feedback: Feedba
   const [challenge, setChallenge] = useState(() => nextEndlessChallenge(initial));
   const [hasAimed, setHasAimed] = useState(false);
   const [message, setMessage] = useState('');
-  const [tools, setTools] = useState(() => ({ inventory: { ...initial.inventory }, reviveUsed: initial.reviveUsed, previewActive: initial.previewActive }));
+  const [tools, setTools] = useState(() => ({ inventory: { ...initial.inventory }, reviveUsed: initial.reviveUsed, previewActive: initial.previewActive, creativeEnabled: (initial.generationVersion ?? 1) >= 5, freeToolQueue: initial.freeToolQueue ? [...initial.freeToolQueue] : undefined }));
   const [prediction, setPrediction] = useState<ReturnType<typeof predictEndlessLaunch> | null>(null);
   const predictionTick = useRef(-1000);
   const travelerX = useSharedValue(state.position.x);
   const travelerY = useSharedValue(state.position.y);
   const tick = useSharedValue(0);
+  const velocityY = useSharedValue(state.velocity.y);
   const pullX = useSharedValue(0);
   const pullY = useSharedValue(0);
   const cameraY = useSharedValue(0);
@@ -80,8 +84,8 @@ export function useLaunchSession(seed: number, active: boolean, feedback: Feedba
   const impactX = useSharedValue(0);
   const impactY = useSharedValue(0);
   const motion = useMemo<LaunchCanvasMotion & { cameraY: typeof cameraY }>(() => ({
-    travelerX, travelerY, tick, pullX, pullY, cameraY, impactTick, impactX, impactY,
-  }), [travelerX, travelerY, tick, pullX, pullY, cameraY, impactTick, impactX, impactY]);
+    travelerX, travelerY, velocityY, tick, pullX, pullY, cameraY, impactTick, impactX, impactY,
+  }), [travelerX, travelerY, velocityY, tick, pullX, pullY, cameraY, impactTick, impactX, impactY]);
 
   const publishTargets = useCallback(() => {
     const run = runRef.current;
@@ -97,8 +101,8 @@ export function useLaunchSession(seed: number, active: boolean, feedback: Feedba
     const gesture = gestureRef.current;
     const run = runRef.current;
     if (!gesture || aimRef.current === null || run.state.phase !== 'held') return;
-    const pocket = run.room.pockets.find((candidate) => candidate.id === run.state.pocketId);
-    const anchor = pocket ? pocketPosition(pocket, run.state.tick) : run.state.position;
+    const pocket = effectivePockets(run.room, run.state).find((candidate) => candidate.id === run.state.pocketId);
+    const anchor = pocket ? pocketPosition(pocket, run.state.tick, run.state) : run.state.position;
     // Finger translation preserves the initial off-center grab. The intended
     // handle stays under that finger while an orbital anchor continues moving.
     const intendedPull = pocket?.orbit ? {
@@ -113,6 +117,7 @@ export function useLaunchSession(seed: number, active: boolean, feedback: Feedba
     travelerX.set(run.state.position.x + (aimRef.current?.x ?? 0));
     travelerY.set(run.state.position.y + (aimRef.current?.y ?? 0));
     tick.set(run.state.tick);
+    velocityY.set(run.state.velocity.y);
     cameraY.set(run.cameraY);
     pullX.set(aimRef.current?.x ?? 0);
     pullY.set(aimRef.current?.y ?? 0);
@@ -152,13 +157,13 @@ export function useLaunchSession(seed: number, active: boolean, feedback: Feedba
       publishTargets();
       setChallenge(nextEndlessChallenge(run));
     }
-  }, [cameraY, publishTargets, pullX, pullY, tick, travelerX, travelerY]);
+  }, [cameraY, publishTargets, pullX, pullY, tick, travelerX, travelerY, velocityY]);
 
   const publishState = useCallback(() => {
     const run = runRef.current;
     setState(snapshot(run.state));
     setScore({ pockets: run.pocketsCaught, height: run.height });
-    setTools({ inventory: { ...run.inventory }, reviveUsed: run.reviveUsed, previewActive: run.previewActive });
+    setTools({ inventory: { ...run.inventory }, reviveUsed: run.reviveUsed, previewActive: run.previewActive, creativeEnabled: (run.generationVersion ?? 1) >= 5, freeToolQueue: run.freeToolQueue ? [...run.freeToolQueue] : undefined });
     setNextPocketId(run.nextPocketId);
     publishTargets();
     setChallenge(nextEndlessChallenge(run));
@@ -201,10 +206,14 @@ export function useLaunchSession(seed: number, active: boolean, feedback: Feedba
     const cue = event.type === 'break' ? 'threadDraw' : event.type === 'bounce' || event.type === 'switch' ? 'buttonClick' : event.type === 'catch' || event.type === 'pickup' || event.type === 'tool' ? 'stitchComplete'
       : event.type === 'fail' ? 'failure' : 'travelerRelease';
     if (!repeatedBounce) void feedback.play(cue);
-    if (event.type === 'catch') setMessage(current.pocketExpiryTicks?.[current.pocketId] !== undefined
-      ? 'Loose stitches! Launch before the four-second timer runs out.' : 'Nice catch. Keep climbing!');
-    if (event.type === 'pickup') setMessage(event.convertedFrom
-      ? '+1 Preview. Your extra Revive became a Preview.' : `+1 ${TOOL_LABELS[event.kind]}. Ready in your tool tray.`);
+    if (event.type === 'catch') setMessage(previous => previous.startsWith('+1') ? previous
+      : current.pocketExpiryTicks?.[current.pocketId] !== undefined
+        ? 'Loose stitches! Launch before the four-second timer runs out.' : 'Nice catch. Keep climbing!');
+    if (event.type === 'pickup') {
+      const pickup = event.convertedFrom ? '+1 Preview. Your extra Revive became a Preview.' : `+1 ${TOOL_LABELS[event.kind]}.`;
+      setMessage(event.replacedKind ? `${pickup} Replaced your oldest free tool: ${TOOL_LABELS[event.replacedKind]}.`
+        : event.convertedFrom ? pickup : `${pickup} Ready in your tool tray.`);
+    }
     if (event.type === 'fray') setMessage('That pocket unraveled. Find a landing!');
     if (event.type === 'break') setMessage('The cloth is torn. That passage stays open.');
     if (event.type === 'switch') setMessage('Door open. Follow the matching stitches.');
@@ -213,7 +222,7 @@ export function useLaunchSession(seed: number, active: boolean, feedback: Feedba
         : event.reason === 'timeout' ? 'That flight ran out of time.' : 'You fell off the fabric.');
     // Position and impact animation use shared values on the enclosing frame.
     // Avoid a React render for every physical bounce, especially at corners.
-    if (event.type !== 'bounce') publishState();
+    if (event.type !== 'bounce' || event.id === 'tool-bounce') publishState();
   }, [feedback, impactTick, impactX, impactY, publishState]);
 
   useEffect(() => {
@@ -327,15 +336,17 @@ export function useLaunchSession(seed: number, active: boolean, feedback: Feedba
     publishState();
     return true;
   }, [cancelAim, impactTick, publishState]);
-  const preparePaidTool = useCallback((kind: ToolKind, pocketId?: string) => {
+  const preparePaidTool = useCallback((value: ToolUse | ToolKind, pocketId?: string) => {
     const copy = cloneEndlessRun(runRef.current);
-    if (!applyTool(copy, kind, true, pocketId)) throw new Error('This tool cannot be used here.');
+    if (!applyEndlessTool(copy, toolUse(value, pocketId), true)) throw new Error('This tool cannot be used here.');
     return serializeEndlessRun(copy);
   }, []);
-  const useFreeTool = useCallback((kind: ToolKind, pocketId?: string) => {
+  const useFreeTool = useCallback((value: ToolUse | ToolKind, pocketId?: string) => {
+    const use = toolUse(value, pocketId);
+    const kind = use.tool;
     cancelAim();
-    if (!applyTool(runRef.current, kind, false, pocketId)) return false;
-    ranked?.action({ type: 'tool', tool: kind, ...(pocketId ? { pocketId } : {}) });
+    if (!applyEndlessTool(runRef.current, use, false)) return false;
+    ranked?.action({ type: 'tool', ...use });
     if (kind === 'revive') {
       const restoredWorld = { worldStage: (runRef.current.generationVersion ?? 1) >= 3 ? worldStageForScore(runRef.current.pocketsCaught) : 0, worldAnnouncement: false };
       worldRef.current = restoredWorld;
@@ -345,7 +356,7 @@ export function useLaunchSession(seed: number, active: boolean, feedback: Feedba
     resetLaunchClock(clockRef.current);
     predictionTick.current = -1000;
     setMessage(kind === 'preview' ? 'Preview ready. Pull to see your next flight.'
-      : kind === 'revive' ? 'Back at your last pocket. Make this one count!' : 'Soft landing. Keep climbing!');
+      : kind === 'revive' ? 'Back at your last pocket. Make this one count!' : kind === 'teleport' ? 'Soft landing. Keep climbing!' : `${TOOL_LABELS[kind]} ready for your next flight.`);
     void feedback.play('stitchComplete');
     publishState();
     return true;
@@ -357,12 +368,38 @@ export function useLaunchSession(seed: number, active: boolean, feedback: Feedba
     return {
       cameraY: run.cameraY,
       pockets: eligibleTeleportPockets(run).map((pocket) => ({
-        id: pocket.id, ...pocketPosition(pocket, run.state.tick), width: pocket.width,
+        id: pocket.id, ...pocketPosition(pocket, run.state.tick, run.state), width: pocket.width,
       })),
     };
   }, []);
 
-  const availablePockets = room.pockets.filter((pocket) => nextPocketIds.includes(pocket.id));
+  const validateUse = useCallback((use: ToolUse) => validateToolUse(runRef.current, use), []);
+  const placementForTool = useCallback((kind: 'bounce' | 'stitch', position: LaunchPoint, angle = 0) =>
+    getToolPlacement(runRef.current, kind, position, angle), []);
+  const getToolSetup = useCallback((kind: ToolKind) => {
+    const run = runRef.current;
+    const targets = kind === 'pin' ? eligiblePinTargets(run).map((target) => ({
+      id: target.id, ...target.position, width: 48, label: target.label,
+    })) : kind === 'velcro' ? eligibleVelcroTargets(run).map((pocket, index) => ({
+      id: pocket.id, ...pocketPosition(pocket, run.state.tick, run.state), width: pocket.width,
+      label: `Pocket ${index + 1}`,
+    })) : [];
+    const placements: LaunchPoint[] = [];
+    if (kind === 'bounce' || kind === 'stitch') {
+      for (let y = Math.ceil(run.cameraY / 20) * 20; y <= run.cameraY + 560; y += 20) {
+        for (let x = 40; x <= 320; x += 20) {
+          const use = getToolPlacement(run, kind, { x, y });
+          if (use && 'position' in use) placements.push(use.position);
+        }
+      }
+    }
+    return { cameraY: run.cameraY, targets, placements,
+      position: placements.reduce((best, point) => Math.hypot(point.x - run.state.position.x, point.y - run.state.position.y + 180)
+        < Math.hypot(best.x - run.state.position.x, best.y - run.state.position.y + 180) ? point : best,
+      placements[0] ?? { x: 180, y: run.state.position.y - 180 }) };
+  }, []);
+
+  const availablePockets = effectivePockets(room, state).filter((pocket) => nextPocketIds.includes(pocket.id));
   const loosePocketAhead = availablePockets.some((pocket) => pocket.frayTicks);
   // Section-owned pickup IDs share their pocket's section prefix, including restored runs.
   const rewardToolAhead = availablePockets.some((pocket) => pocket.route === 'reward'
@@ -380,5 +417,5 @@ export function useLaunchSession(seed: number, active: boolean, feedback: Feedba
 
   return { state, room, motion, score, ...world, tools, prediction, nextPocketId, nextPocketIds, challenge, routeCue, fraySeconds, hasAimed, message,
     beginAim, updateAim, releaseAim, cancelAim, suspend, resume, getSnapshot, restoreSnapshot, preparePaidTool, useFreeTool,
-    getTeleportPockets, getCameraY, getTeleportTargets };
+    getTeleportPockets, getCameraY, getTeleportTargets, getToolSetup, placementForTool, validateUse };
 }

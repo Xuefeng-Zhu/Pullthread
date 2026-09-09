@@ -40,6 +40,9 @@ import type {
 import { getLaunchViewport } from './viewport';
 import { WorldBackdrop } from './WorldBackdrop';
 import { InteractiveVisuals, OrbitVisual } from './InteractiveVisuals';
+import { LaunchToolVisuals } from './LaunchToolVisuals';
+import { effectivePockets } from './tools';
+import { integrateFlightVertical } from './toolEffects';
 import { TOOL_ICON_PATHS, TOOL_ICON_SIZE, TOOL_ICON_STROKE_WIDTH, TOOL_LABELS } from '../../commerce/toolCatalog';
 import type { predictEndlessLaunch } from './prediction';
 
@@ -48,6 +51,7 @@ export interface LaunchCanvasMotion {
   readonly travelerX: SharedValue<number>;
   readonly travelerY: SharedValue<number>;
   readonly tick: SharedValue<number>;
+  readonly velocityY?: SharedValue<number>;
   readonly pullX: SharedValue<number>;
   readonly pullY: SharedValue<number>;
   readonly impactTick: SharedValue<number>;
@@ -161,9 +165,9 @@ function PocketVisual({
   ], [pocket.center.x, pocket.center.y]);
   const moves = !!(pocket.motion || pocket.orbit);
   const movingX = useDerivedValue(() => moves
-    ? pocketPosition(pocket, tick.value).x : pocket.center.x);
+    ? pocketPosition(pocket, tick.value, state).x : pocket.center.x);
   const movingY = useDerivedValue(() => pocket.orbit
-    ? pocketPosition(pocket, tick.value).y : pocket.center.y);
+    ? pocketPosition(pocket, tick.value, state).y : pocket.center.y);
   const movingTransform = useDerivedValue(() => [
     { translateX: movingX.value }, { translateY: movingY.value },
   ]);
@@ -320,7 +324,8 @@ function BumperVisual({ bumper, motion, highContrast, reducedMotion }: {
   );
 }
 
-function ThornVisual({ hazard, motion, highContrast, reducedMotion }: {
+function ThornVisual({ hazard, motion, state, highContrast, reducedMotion }: {
+  readonly state: LaunchState;
   readonly hazard: LaunchHazard;
   readonly motion: LaunchCanvasMotion;
   readonly highContrast: boolean;
@@ -330,8 +335,8 @@ function ThornVisual({ hazard, motion, highContrast, reducedMotion }: {
   // makes the dangerous surface readable without relying on red alone.
   const outline = useMemo(() => starPath(hazard.radius, 9, 0.69), [hazard.radius]);
   const { tick } = motion;
-  const movingX = useDerivedValue(() => hazard.motion ? hazardPosition(hazard, tick.value).x : hazard.center.x);
-  const movingY = useDerivedValue(() => hazard.motion ? hazardPosition(hazard, tick.value).y : hazard.center.y);
+  const movingX = useDerivedValue(() => hazard.motion ? hazardPosition(hazard, tick.value, state).x : hazard.center.x);
+  const movingY = useDerivedValue(() => hazard.motion ? hazardPosition(hazard, tick.value, state).y : hazard.center.y);
   const transform = useDerivedValue(() => [
     { translateX: movingX.value }, { translateY: movingY.value },
   ]);
@@ -389,7 +394,8 @@ function ThornVisual({ hazard, motion, highContrast, reducedMotion }: {
   );
 }
 
-function AimVisual({ room, pocket, motion, highContrast, extended = false }: {
+function AimVisual({ room, pocket, state, motion, highContrast, extended = false }: {
+  readonly state: LaunchState;
   readonly room: LaunchRoom;
   readonly pocket: LaunchPocket | undefined;
   readonly motion: LaunchCanvasMotion;
@@ -402,7 +408,7 @@ function AimVisual({ room, pocket, motion, highContrast, extended = false }: {
   // An orbit carries tangential momentum through the actual release tick.
   const releaseTick = useDerivedValue(() => pocket?.orbit ? tick.value : 0);
   const velocity = useDerivedValue(() => pocket
-    ? launchVelocity(pocket, releaseTick.value, { x: pullX.value, y: pullY.value })
+    ? launchVelocity(pocket, releaseTick.value, { x: pullX.value, y: pullY.value }, state)
     : { x: -pullX.value * LAUNCH_POWER, y: -pullY.value * LAUNCH_POWER });
   const trajectory = useDerivedValue(() => {
     const path = Skia.PathBuilder.Make();
@@ -411,14 +417,15 @@ function AimVisual({ room, pocket, motion, highContrast, extended = false }: {
     let vx = velocity.value.x;
     let vy = velocity.value.y;
     path.moveTo(x, y);
-    if (room.windZones?.length) {
+    if (room.windZones?.length || state.toolEffects?.sail) {
       const position = { x, y };
       // Match flight's once-per-tick wind kick and exact vertical integration.
       for (let index = 1; index <= 34; index += 1) {
         vx += windAccelerationAt(room.windZones, position) * LAUNCH_STEP_SECONDS;
         position.x += vx * LAUNCH_STEP_SECONDS;
-        position.y += vy * LAUNCH_STEP_SECONDS + 0.5 * room.gravity * LAUNCH_STEP_SECONDS * LAUNCH_STEP_SECONDS;
-        vy += room.gravity * LAUNCH_STEP_SECONDS;
+        const vertical = integrateFlightVertical(vy, LAUNCH_STEP_SECONDS, room.gravity, !!state.toolEffects?.sail);
+        position.y += vertical.distance;
+        vy = vertical.velocity;
         if (index % 2 === 0) path.lineTo(position.x, position.y);
       }
       return path.detach();
@@ -628,7 +635,8 @@ export function LaunchCanvas({
   });
   const travelerOpacity = state.phase === 'failed' ? 0.3 : 1;
   const patch = useMemo(() => starPath((room.patch?.radius ?? 14) + 2, 5, 0.5), [room.patch?.radius]);
-  const heldPocket = room.pockets.find((pocket) => pocket.id === state.pocketId);
+  const pockets = effectivePockets(room, state);
+  const heldPocket = pockets.find((pocket) => pocket.id === state.pocketId);
   const boundarySeam = useMemo(() => Skia.PathBuilder.Make()
     .moveTo(offsetX, 0).lineTo(offsetX, floorY)
     .moveTo(offsetX + width * scale, 0).lineTo(offsetX + width * scale, floorY)
@@ -650,10 +658,10 @@ export function LaunchCanvas({
         ]}>
           <Group transform={cameraTransform}>
             {room.windZones?.map((zone) => <WindVisual key={zone.id} zone={zone} highContrast={highContrast} />)}
-            {room.pockets.filter((pocket) => pocket.orbit).map((pocket) => <OrbitVisual key={`orbit-${pocket.id}`}
-              pocket={pocket} tick={tick} highContrast={highContrast} />)}
+            {pockets.filter((pocket) => pocket.orbit).map((pocket) => <OrbitVisual key={`orbit-${pocket.id}`}
+              pocket={pocket} state={state} tick={tick} highContrast={highContrast} />)}
             <InteractiveVisuals room={room} state={state} tick={tick} highContrast={highContrast} reducedMotion={reducedMotion} />
-            {room.pockets.filter((pocket) => pocket.motion).map((pocket) => (
+            {pockets.filter((pocket) => pocket.motion).map((pocket) => (
               <Line
                 key={`track-${pocket.id}`}
                 p1={vec(pocket.center.x - pocket.motion!.amplitude, pocket.center.y + 40)}
@@ -663,7 +671,7 @@ export function LaunchCanvas({
                 <DashPathEffect intervals={[2, 5]} />
               </Line>
             ))}
-            {room.hazards.map((hazard) => <ThornVisual key={hazard.id} hazard={hazard} motion={motion} highContrast={highContrast} reducedMotion={reducedMotion} />)}
+            {room.hazards.map((hazard) => <ThornVisual key={hazard.id} hazard={hazard} state={state} motion={motion} highContrast={highContrast} reducedMotion={reducedMotion} />)}
             {room.bumpers.map((bumper) => <BumperVisual key={bumper.id} bumper={bumper} motion={motion} highContrast={highContrast} reducedMotion={reducedMotion} />)}
             {room.pickups?.filter((pickup) => !state.pickupIds.includes(pickup.id)).map((pickup) => <PickupVisual key={pickup.id} pickup={pickup} highContrast={highContrast} />)}
             {room.patch && !state.patchCollected ? (
@@ -674,14 +682,15 @@ export function LaunchCanvas({
                 <Circle cx={0} cy={0} r={2.4} color="#FFF6D9" />
               </Group>
             ) : null}
-            {room.pockets.map((pocket) => <PocketVisual key={pocket.id} pocket={pocket} state={state} motion={motion} highContrast={highContrast} reducedMotion={reducedMotion} />)}
-            {state.phase === 'held' ? <AimVisual room={room} pocket={heldPocket} motion={motion} highContrast={highContrast} extended={previewActive && !!prediction} /> : null}
+            {pockets.filter(pocket => !(state.stitchedPocket?.spent && state.stitchedPocket.pocket.id === pocket.id)).map((pocket) => <PocketVisual key={pocket.id} pocket={pocket} state={state} motion={motion} highContrast={highContrast} reducedMotion={reducedMotion} />)}
+            {state.phase === 'held' ? <AimVisual room={room} pocket={heldPocket} state={state} motion={motion} highContrast={highContrast} extended={previewActive && !!prediction} /> : null}
             {state.phase === 'held' && previewActive && prediction && <PredictionVisual prediction={prediction} />}
             <Group opacity={impactOpacity}>
               <Circle cx={motion.impactX} cy={motion.impactY} r={impactRadius} color={palette.frame} style="stroke" strokeWidth={1.5}>
                 <DashPathEffect intervals={[2, 5]} />
               </Circle>
             </Group>
+            <LaunchToolVisuals room={room} state={state} motion={motion} />
             <Group opacity={travelerOpacity}>
               <Traveler appearance={appearance} x={motion.travelerX} y={motion.travelerY} speed={speed} radius={BUTTON_RADIUS} highContrast={highContrast} />
             </Group>

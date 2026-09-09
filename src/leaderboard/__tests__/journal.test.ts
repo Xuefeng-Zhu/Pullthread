@@ -37,6 +37,28 @@ test('paid delivery recovered after a crash records exactly one tool action', as
   await recovered.checkpoint('after'); await recovered.flush();
   expect(upload.mock.calls[0][1].commands).toEqual([{ type: 'tool', tool: 'preview', operationId: 'receipt', at: 0 }]);
 });
+test('creative placement is copied before a pending paid action and preserved by crash recovery', async () => {
+  const { journal, storage, service, upload } = setup();
+  await journal.activate();
+  const position = { x: 150, y: 300 };
+  await journal.prepareTool({ type: 'tool', tool: 'bounce', position, angle: 45, operationId: 'bounce-receipt' }, 'before', 'after');
+  position.x = 999;
+  const recovered = (await RankedJournal.recover(storage, service))!;
+  expect(recovered.reconcileTool('after')).toBe(true);
+  await recovered.checkpoint('after');
+  expect(recovered.reconcileTool('after')).toBe(true);
+  expect(recovered.hasPendingTool).toBe(false);
+  await recovered.flush();
+  expect(upload.mock.calls[0][1].commands).toEqual([{ type: 'tool', tool: 'bounce', position: { x: 150, y: 300 }, angle: 45, operationId: 'bounce-receipt', at: 0 }]);
+});
+test('free placement commands retain their original geometry until upload', async () => {
+  const { journal, upload } = setup();
+  const position = { x: 150, y: 300 };
+  journal.action({ type: 'tool', tool: 'stitch', position });
+  position.x = 999;
+  await journal.checkpoint('after'); await journal.flush();
+  expect(upload.mock.calls[0][1].commands).toEqual([{ type: 'tool', tool: 'stitch', position: { x: 150, y: 300 }, at: 0 }]);
+});
 test('old run writes cannot overwrite the active run pointer', async () => {
   const { journal, storage, service } = setup();
   await journal.activate();

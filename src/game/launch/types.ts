@@ -127,7 +127,7 @@ export type LaunchEvent =
   | { readonly type: 'switch'; readonly tick: number; readonly id: string }
   | { readonly type: 'complete'; readonly tick: number; readonly id: string }
   | { readonly type: 'patch'; readonly tick: number }
-  | { readonly type: 'pickup'; readonly tick: number; readonly id: string; readonly kind: ToolKind; readonly convertedFrom?: 'revive' }
+  | { readonly type: 'pickup'; readonly tick: number; readonly id: string; readonly kind: ToolKind; readonly convertedFrom?: 'revive'; readonly replacedKind?: ToolKind }
   | { readonly type: 'tool'; readonly tick: number; readonly id: string; readonly kind: ToolKind }
   | { readonly type: 'fail'; readonly tick: number; readonly reason: LaunchFailure };
 
@@ -135,6 +135,15 @@ export interface LaunchCheckpoint {
   readonly pocketId: string;
   readonly tick: number;
   readonly patchCollected: boolean;
+}
+
+/** One of each creative tool may be prepared for the next flight. */
+export interface LaunchToolEffects {
+  bounce?: { position: LaunchPoint; angle: number; spent: boolean };
+  pin?: { targetId: string; startedTick: number };
+  velcro?: { targetId: string };
+  sail?: boolean;
+  needle?: { piercedId?: string };
 }
 
 /** Mutable state belongs exclusively to one session; room definitions are never changed. */
@@ -161,6 +170,13 @@ export interface LaunchState {
   pocketExpiryTicks?: Record<string, number>;
   /** Distinguishes a failed unraveling fall without changing legacy failure values. */
   frayedFall?: boolean;
+  toolEffects?: LaunchToolEffects;
+  /** Local phase debt preserves a pinned object's position when it resumes. */
+  toolPhaseOffsets?: Record<string, number>;
+  /** A consumed stitch remains as source geometry through its outgoing flight. */
+  stitchedPocket?: { pocket: LaunchPocket; spent: boolean; originPocketId: string };
+  /** Cleared only by an authored arrival, even after a failed stitched flight. */
+  stitchUsedSinceAuthored?: boolean;
 }
 
 /** Applied only at the exact specified simulation tick while held at pocketId. */

@@ -1,8 +1,15 @@
 import { clampEndlessPull } from '../game/launch/launchInput';
-import { activatePreview, createEndlessRun, launchEndless, reviveEndless, stepEndless, teleportEndless, type EndlessRun } from '../game/launch/endless';
+import { createEndlessRun, launchEndless, stepEndless, type EndlessRun } from '../game/launch/endless';
+import { applyEndlessTool } from '../game/launch/tools';
+import { isCreativeTool } from '../commerce/contracts';
+import { canonicalToolUse, parseToolUse, type ToolUse } from '../commerce/toolUse';
 import { MAX_BATCH_COMMANDS, MAX_BATCH_TICKS, type ReplayBatch, type ReplayCommand } from './contracts';
 export interface ReplayCursor { elapsed: number; aiming: boolean }
-export function createRankedSimulation(seed: number): EndlessRun { return createEndlessRun(seed, 4); }
+export function createRankedSimulation(seed: number): EndlessRun { return createEndlessRun(seed, 6); }
+function commandToolUse(command: Extract<ReplayCommand, { type: 'tool' }>): ToolUse | null {
+  const { type: _type, at: _at, operationId: _operationId, ...use } = command;
+  return parseToolUse(use);
+}
 export function validateBatch(batch: ReplayBatch, elapsed: number): void {
   if (!batch || !Number.isSafeInteger(batch.sequence) || batch.sequence < 0 || batch.from !== elapsed
     || !Number.isSafeInteger(batch.to) || batch.to < elapsed || batch.to - elapsed > MAX_BATCH_TICKS
@@ -16,13 +23,16 @@ export function validateBatch(batch: ReplayBatch, elapsed: number): void {
     if (!['aim', 'cancel', 'launch', 'tool'].includes(command.type)) throw new Error('Unknown replay action.');
     if (command.type === 'launch' && (!Number.isFinite(command.x) || !Number.isFinite(command.y)
       || Math.hypot(command.x, command.y) > 100.02)) throw new Error('Invalid launch.');
-    if (command.type === 'tool' && (!['preview', 'teleport', 'revive'].includes(command.tool)
-      || (command.pocketId !== undefined && (typeof command.pocketId !== 'string' || command.pocketId.length > 160))
-      || (command.operationId !== undefined && (typeof command.operationId !== 'string' || command.operationId.length > 160)))) throw new Error('Invalid tool.');
+    if (command.type === 'tool' && (!commandToolUse(command)
+      || (command.operationId !== undefined && (typeof command.operationId !== 'string' || command.operationId.length === 0 || command.operationId.length > 160)))) throw new Error('Invalid tool.');
   }
 }
 export function toolContext(run: EndlessRun, command: Extract<ReplayCommand, { type: 'tool' }>): string {
-  return `${run.state.tick}:${run.state.pocketId}:${command.tool}:${command.pocketId ?? ''}`;
+  const use = commandToolUse(command);
+  if (!use) throw new Error('Invalid tool.');
+  return isCreativeTool(use.tool)
+    ? `${run.state.tick}:${run.state.pocketId}:${canonicalToolUse(use)}`
+    : `${run.state.tick}:${run.state.pocketId}:${use.tool}:${use.tool === 'teleport' ? use.pocketId : ''}`;
 }
 /** The checkpoint is trusted server state; client snapshots and scores never enter this function. */
 export async function replayBatch(run: EndlessRun, cursor: ReplayCursor, batch: ReplayBatch,
@@ -42,9 +52,7 @@ export async function replayBatch(run: EndlessRun, cursor: ReplayCursor, batch: 
     } else {
       if (command.operationId) await authorize(command, toolContext(run, command));
       const paid = !!command.operationId;
-      const applied = command.tool === 'preview' ? activatePreview(run, paid)
-        : command.tool === 'revive' ? reviveEndless(run, paid)
-          : !!command.pocketId && teleportEndless(run, command.pocketId, paid);
+      const applied = applyEndlessTool(run, commandToolUse(command)!, paid);
       if (!applied) throw new Error('Invalid tool state.');
       cursor.aiming = false;
     }

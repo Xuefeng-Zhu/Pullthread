@@ -2,11 +2,12 @@
 import { describe, expect, test } from '@jest/globals';
 import { createEndlessRun, createLegacyEndlessRun, launchEndless, stepEndless } from '../endless';
 import { cloneEndlessRun, deserializeEndlessRun, serializeEndlessRun } from '../snapshots';
+import { grantFreeTool } from '../toolInventory';
 
 describe('run snapshot recovery', () => {
-  test('round-trips the open world and nonrecursive catch checkpoint through JSON', () => {
-    const run = createEndlessRun(77);
-    run.inventory = { preview: 2, teleport: 1, revive: 1 };
+  test.each([5, 6] as const)('round-trips v%i open world and nonrecursive catch checkpoint through JSON', (version) => {
+    const run = createEndlessRun(77, version);
+    for (const kind of ['preview', 'preview', 'teleport', 'revive'] as const) grantFreeTool(run, kind);
     run.previewActive = true;
     launchEndless(run, { x: -24, y: 72 });
     for (let tick = 0; tick < 20; tick += 1) stepEndless(run);
@@ -15,6 +16,7 @@ describe('run snapshot recovery', () => {
     expect(deserializeEndlessRun(encoded)).toEqual(run);
     expect(run.lastCatchSnapshot).not.toHaveProperty('lastCatchSnapshot');
     expect(run.lastCatchSnapshot).not.toHaveProperty('inventory');
+    expect(run.lastCatchSnapshot).not.toHaveProperty('freeToolQueue');
   });
 
   test('clones every mutable object used by simulation, inventory, prediction and revival', () => {

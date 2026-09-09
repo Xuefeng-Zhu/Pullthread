@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
 import { URL } from 'node:url';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
-import { TOOL_COSTS, type RedeemToolRequest, type ToolKind } from '../../src/commerce/contracts';
+import { CREATIVE_TOOLS, TOOL_COSTS, type RedeemToolRequest, type ToolKind } from '../../src/commerce/contracts';
 import { transactionKey, type VerifiedPurchase } from '../../functions/src/commerce/domain';
 import type { ProviderConfig, ProviderFetch } from '../../functions/src/commerce/revenuecat';
 import { D1CommerceWallet } from '../src/wallet';
@@ -15,7 +15,8 @@ let ledger: D1CommerceWallet;
 before(async () => {
   runtime = new Miniflare(convertV4MiniflareOptions({ modules: true, script: 'export default { fetch() { return new Response("fixture"); } }', compatibilityDate: '2026-09-07', d1Databases: ['DB'] }));
   db = await runtime.getD1Database('DB') as unknown as D1Database;
-  const migration = (await readFile(new URL('../migrations/0001_commerce.sql', import.meta.url), 'utf8')) + '\n' + (await readFile(new URL('../migrations/0002_weekly.sql', import.meta.url), 'utf8')) + '\n' + (await readFile(new URL('../migrations/0003_cosmetics.sql', import.meta.url), 'utf8'));
+  const migration = (await Promise.all(['0001_commerce.sql', '0002_weekly.sql', '0003_cosmetics.sql', '0004_creative_tools.sql']
+    .map(file => readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8')))).join('\n');
   // D1 exec treats each line as a statement; standalone SQL comments are not statements.
   await db.exec(migration.split('\n').filter((line) => line.trim() && !line.trimStart().startsWith('--')).join('\n'));
   ledger = new D1CommerceWallet(db);
@@ -43,6 +44,19 @@ test('concurrent purchase delivery, webhook, and exact retries grant one pack', 
   assert.ok(replies.every((reply) => reply.receipt.status === 'ready'));
   assert.equal(await balance(user), 90);
   assert.deepEqual((await ledger.getRedemption(user, 'sandbox', op.operationId))?.receipt, replies[0].receipt);
+});
+test('each creative tool debits once, preserves its exact context, and refunds once', async () => {
+  for (const tool of CREATIVE_TOOLS) {
+    const user = uid(); await fund(user);
+    const op = request(tool, { contextKey: `0:endless-0:${tool}:exact-placement` });
+    const first = await ledger.redeemTool(user, 'sandbox', op);
+    assert.deepEqual((await ledger.redeemTool(user, 'sandbox', op)).receipt, first.receipt);
+    assert.equal(await balance(user), 100 - TOOL_COSTS[tool]);
+    await assert.rejects(ledger.redeemTool(user, 'sandbox', { ...op, contextKey: 'different-placement' }), /different tool request/);
+    await ledger.resolveTool(user, 'sandbox', op.operationId, 'refund');
+    await ledger.resolveTool(user, 'sandbox', op.operationId, 'refund');
+    assert.equal(await balance(user), 100);
+  }
 });
 test('concurrent debits never overspend and insufficient funds create no receipt', async () => {
   const user = uid(); await fund(user);

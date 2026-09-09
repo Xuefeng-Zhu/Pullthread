@@ -1,6 +1,8 @@
+import { CREATIVE_TOOLS, isToolKind } from '../../commerce/contracts';
 import type { EndlessRun, EndlessWorldSnapshot, OwnedSection } from './endless';
 import { INTRODUCED_MECHANICS, worldStageForScore } from './progression';
 import { INTERACTIVE_MECHANICS } from './interactiveProgression';
+import { FREE_TOOL_CAPACITY } from './toolInventory';
 
 /** Copy arrays and every mutable point/state record; immutable definitions remain plain data. */
 function copyData<T>(value: T): T {
@@ -12,7 +14,7 @@ function copyData<T>(value: T): T {
 }
 
 export function captureEndlessWorld(run: EndlessRun): EndlessWorldSnapshot {
-  const { inventory: _inventory, reviveUsed: _reviveUsed, previewActive: _previewActive,
+  const { inventory: _inventory, freeToolQueue: _freeToolQueue, reviveUsed: _reviveUsed, previewActive: _previewActive,
     collectedPickupIds: _collectedPickupIds, lastCatchSnapshot: _lastCatchSnapshot, ...world } = run;
   return copyData(world);
 }
@@ -53,16 +55,16 @@ function idList(value: unknown): value is string[] {
 const WORLD_MECHANICS = INTRODUCED_MECHANICS;
 const WORLD_SECTION_FIELDS = ['worldStage', 'mechanics', 'introduction', 'windZoneIds'];
 const INTERACTIVE_SECTION_FIELDS = ['barrierIds', 'switchIds'];
-type SectionVersion = 2 | 3 | 4;
+type SectionVersion = 2 | 3 | 4 | 5 | 6;
 
-function validWorldSection(section: Record<string, unknown>, worldStage: number, version: 3 | 4): boolean {
-  const introductions: readonly string[] = version === 4 ? INTERACTIVE_MECHANICS : WORLD_MECHANICS;
+function validWorldSection(section: Record<string, unknown>, worldStage: number, version: 3 | 4 | 5 | 6): boolean {
+  const introductions: readonly string[] = version >= 4 ? INTERACTIVE_MECHANICS : WORLD_MECHANICS;
   const allowed = [...introductions, 'gate', 'fray'];
   if (!nonnegativeInteger(section.worldStage) || section.worldStage > worldStage
     || !idList(section.windZoneIds) || !Array.isArray(section.mechanics) || section.mechanics.length > 2
     || new Set(section.mechanics).size !== section.mechanics.length
     || !section.mechanics.every((mechanic) => allowed.includes(mechanic))) return false;
-  if (version === 4 && (section.windZoneIds.length !== 0 || !idList(section.barrierIds) || !idList(section.switchIds))) return false;
+  if (version >= 4 && (section.windZoneIds.length !== 0 || !idList(section.barrierIds) || !idList(section.switchIds))) return false;
   if (section.introduction !== undefined && (!introductions.includes(String(section.introduction))
     || section.mechanics.length !== 1 || section.mechanics[0] !== section.introduction)) return false;
   const mechanics = section.mechanics;
@@ -93,8 +95,8 @@ function validSections(world: Record<string, unknown>, version: SectionVersion):
     && idList(section.bumperIds) && idList(section.hazardIds) && idList(section.pickupIds)
     && Array.isArray(section.connections) && section.connections.length <= 32
     && section.connections.every((edge) => record(edge) && typeof edge.from === 'string' && typeof edge.to === 'string')
-    && (version >= 3 ? validWorldSection(section, worldStage, version as 3 | 4) : WORLD_SECTION_FIELDS.every((key) => section[key] === undefined))
-    && (version === 4 || INTERACTIVE_SECTION_FIELDS.every((key) => section[key] === undefined)))) return false;
+    && (version >= 3 ? validWorldSection(section, worldStage, version as 3 | 4 | 5 | 6) : WORLD_SECTION_FIELDS.every((key) => section[key] === undefined))
+    && (version >= 4 || INTERACTIVE_SECTION_FIELDS.every((key) => section[key] === undefined)))) return false;
 
   const sections = progress.sections as unknown as OwnedSection[];
   const claimed = { pocketIds: new Set<string>(), bumperIds: new Set<string>(), hazardIds: new Set<string>(), pickupIds: new Set<string>(),
@@ -160,7 +162,7 @@ function validSections(world: Record<string, unknown>, version: SectionVersion):
       if (mechanics.length > 1 && WORLD_MECHANICS.some((mechanic, index) =>
         mechanics.includes(mechanic) && (progress.introductions as number[])[index] < 3)) return false;
     }
-    if (version === 4) {
+    if (version >= 4) {
       const mechanics = section.mechanics!;
       const ownedPockets = section.pocketIds.map((id) => pocketById.get(id)!);
       const ownedBarriers = (world.room.barriers as Record<string, unknown>[]).filter((barrier) => section.barrierIds!.includes(String(barrier.id)));
@@ -198,7 +200,7 @@ function validSections(world: Record<string, unknown>, version: SectionVersion):
     if ([...objectIds[key]].some((id) => !claimed[key].has(id))) return false;
   }
   if (collected.some((id) => !claimed.pickupIds.has(id) || objectIds.pickupIds.has(id))) return false;
-  if (version >= 3 && (version === 4 ? INTERACTIVE_MECHANICS : WORLD_MECHANICS).some((mechanic, index) =>
+  if (version >= 3 && (version >= 4 ? INTERACTIVE_MECHANICS : WORLD_MECHANICS).some((mechanic, index) =>
     sections.filter((section) => section.introduction === mechanic).length > (progress.introductions as number[])[index])) return false;
   const last = sections[sections.length - 1];
   return progress.nextIndex === last.index + 1 && progress.lastFamily === last.family
@@ -222,6 +224,62 @@ function uniqueIds(value: unknown): value is string[] {
   return idList(value) && new Set(value).size === value.length;
 }
 
+/** Validate saved effects, not their original placement: the camera and targets may have moved. */
+function validToolState(room: Record<string, unknown>, state: Record<string, unknown>, version: number): boolean {
+  const fields = ['toolEffects', 'toolPhaseOffsets', 'stitchedPocket', 'stitchUsedSinceAuthored'];
+  if (version < 5) return fields.every((key) => state[key] === undefined);
+  if (state.stitchUsedSinceAuthored !== undefined && typeof state.stitchUsedSinceAuthored !== 'boolean') return false;
+  const pockets = room.pockets as Record<string, unknown>[];
+  const hazards = room.hazards as Record<string, unknown>[];
+  const barriers = (room.barriers ?? []) as Record<string, unknown>[];
+  const moving = (id: string) => pockets.some((pocket) => pocket.id === id && (pocket.motion || pocket.orbit))
+    || hazards.some((hazard) => hazard.id === id && hazard.motion)
+    || barriers.some((barrier) => barrier.id === id && barrier.kind === 'shutter');
+  const exactKeys = (value: Record<string, unknown>, allowed: readonly string[]) => Object.keys(value).every((key) => allowed.includes(key));
+  const integerPoint = (value: unknown) => record(value) && exactKeys(value, ['x', 'y'])
+    && Number.isSafeInteger(value.x) && Number.isSafeInteger(value.y);
+  const offsets = state.toolPhaseOffsets;
+  if (offsets !== undefined && (!record(offsets) || Object.keys(offsets).length > 128
+    || !Object.entries(offsets).every(([id, ticks]) => moving(id) && nonnegativeInteger(ticks)
+      && finite(state.tick) && ticks <= state.tick))) return false;
+  let stitchedId: string | undefined;
+  if (state.stitchedPocket !== undefined) {
+    const stitch = state.stitchedPocket;
+    if (!record(stitch) || !exactKeys(stitch, ['pocket', 'spent', 'originPocketId'])
+      || typeof stitch.spent !== 'boolean' || typeof stitch.originPocketId !== 'string'
+      || !pockets.some((pocket) => pocket.id === stitch.originPocketId) || !record(stitch.pocket)) return false;
+    const pocket = stitch.pocket;
+    if (!exactKeys(pocket, ['id', 'center', 'width', 'kind']) || typeof pocket.id !== 'string'
+      || !pocket.id.startsWith('tool-stitch-') || pocket.id.length > 160
+      || pockets.some((item) => item.id === pocket.id) || !integerPoint(pocket.center)
+      || pocket.width !== 80 || pocket.kind !== 'checkpoint'
+      || (stitch.spent && state.pocketId !== pocket.id)
+      || (stitch.spent && state.phase === 'held')) return false;
+    stitchedId = pocket.id;
+  }
+  const effects = state.toolEffects;
+  if (effects === undefined) return true;
+  if (!record(effects) || !exactKeys(effects, ['bounce', 'pin', 'velcro', 'sail', 'needle'])) return false;
+  if (effects.bounce !== undefined && (!record(effects.bounce)
+    || !exactKeys(effects.bounce, ['position', 'angle', 'spent']) || !integerPoint(effects.bounce.position)
+    || !nonnegativeInteger(effects.bounce.angle) || effects.bounce.angle >= 180
+    || typeof effects.bounce.spent !== 'boolean')) return false;
+  if (effects.pin !== undefined && (!record(effects.pin) || !exactKeys(effects.pin, ['targetId', 'startedTick'])
+    || typeof effects.pin.targetId !== 'string' || !moving(effects.pin.targetId)
+    || !nonnegativeInteger(effects.pin.startedTick) || !finite(state.tick) || effects.pin.startedTick > state.tick
+    || (record(offsets) && Number(offsets[effects.pin.targetId] ?? 0) > effects.pin.startedTick))) return false;
+  if (effects.velcro !== undefined && (!record(effects.velcro) || !exactKeys(effects.velcro, ['targetId'])
+    || typeof effects.velcro.targetId !== 'string'
+    || (!pockets.some((pocket) => pocket.id === (effects.velcro as Record<string, unknown>).targetId)
+      && effects.velcro.targetId !== stitchedId))) return false;
+  if (effects.sail !== undefined && effects.sail !== true) return false;
+  if (effects.needle !== undefined && (!record(effects.needle) || !exactKeys(effects.needle, ['piercedId'])
+    || (effects.needle.piercedId !== undefined && (typeof effects.needle.piercedId !== 'string'
+      || (!hazards.some((hazard) => hazard.id === (effects.needle as Record<string, unknown>).piercedId && hazard.visual !== 'scissors')
+        && !barriers.some((barrier) => barrier.id === (effects.needle as Record<string, unknown>).piercedId && barrier.kind === 'thorns')))))) return false;
+  return true;
+}
+
 function validInteractiveState(room: Record<string, unknown>, state: Record<string, unknown>): boolean {
   if (!Array.isArray(room.barriers) || room.barriers.length > 64 || !room.barriers.every((barrier) => record(barrier)
     && typeof barrier.id === 'string' && finite(barrier.x) && finite(barrier.y)
@@ -243,7 +301,7 @@ function validInteractiveState(room: Record<string, unknown>, state: Record<stri
     && state.activatedSwitchIds.every((id) => switches.some((button) => button.id === id));
 }
 
-function validWorld(value: unknown, version: 1 | 2 | 3 | 4): boolean {
+function validWorld(value: unknown, version: 1 | 2 | 3 | 4 | 5 | 6): boolean {
   if (!record(value) || !record(value.room) || !record(value.state)) return false;
   const { room, state } = value;
   if (version >= 2 ? value.generationVersion !== version : value.generationVersion !== undefined && value.generationVersion !== 1) return false;
@@ -272,9 +330,9 @@ function validWorld(value: unknown, version: 1 | 2 | 3 | 4): boolean {
       && (version < 2 || (typeof pocket.sectionId === 'string' && nonnegativeInteger(pocket.ascentRank)))
       && (pocket.route === undefined || ['safe', 'reward', 'recovery'].includes(String(pocket.route)))
       && (pocket.frayTicks === undefined || (nonnegativeInteger(pocket.frayTicks) && pocket.frayTicks > 0))
-      && (pocket.motion === undefined || (version !== 4 && record(pocket.motion) && finite(pocket.motion.amplitude)
+      && (pocket.motion === undefined || (version < 4 && record(pocket.motion) && finite(pocket.motion.amplitude)
         && finite(pocket.motion.periodTicks) && pocket.motion.periodTicks > 0 && finite(pocket.motion.phaseTicks)))
-      && (pocket.orbit === undefined || (version === 4 && record(pocket.orbit)
+      && (pocket.orbit === undefined || (version >= 4 && record(pocket.orbit)
         && finite(pocket.orbit.radius) && pocket.orbit.radius > 0 && pocket.orbit.radius <= 80
         && finite(pocket.orbit.periodTicks) && pocket.orbit.periodTicks >= 120 && finite(pocket.orbit.phaseTicks)
         && (pocket.orbit.direction === undefined || pocket.orbit.direction === 1 || pocket.orbit.direction === -1))))) return false;
@@ -291,13 +349,13 @@ function validWorld(value: unknown, version: 1 | 2 | 3 | 4): boolean {
         && finite(object.motion.amplitude) && finite(object.motion.phaseTicks)
         && finite(object.motion.periodTicks) && object.motion.periodTicks > 0
         && (object.motion.axis === undefined || ['x', 'y'].includes(String(object.motion.axis)))))
-      && (key !== 'pickups' || ['preview', 'teleport', 'revive'].includes(String(object.kind))))) return false;
+      && (key !== 'pickups' || (version >= 5 ? isToolKind(object.kind) : ['preview', 'teleport', 'revive'].includes(String(object.kind)))))) return false;
     if (version >= 2 && new Set(objects.map((object) => object.id)).size !== objects.length) return false;
   }
   if (version === 3 ? !validWindZones(room.windZones)
-    : version === 4 ? room.windZones !== undefined && (!Array.isArray(room.windZones) || room.windZones.length !== 0)
+    : version >= 4 ? room.windZones !== undefined && (!Array.isArray(room.windZones) || room.windZones.length !== 0)
       : room.windZones !== undefined) return false;
-  if (version === 4 ? !validInteractiveState(room, state)
+  if (version >= 4 ? !validInteractiveState(room, state)
     : room.barriers !== undefined || room.switches !== undefined
       || state.brokenBarrierIds !== undefined || state.activatedSwitchIds !== undefined) return false;
   if (version === 1 && record(value.sectionProgress) && (value.sectionProgress.introductions !== undefined
@@ -309,6 +367,7 @@ function validWorld(value: unknown, version: 1 | 2 | 3 | 4): boolean {
     || Object.keys(state.pocketExpiryTicks).length > 32
     || !Object.entries(state.pocketExpiryTicks).every(([id, expiry]) => nonnegativeInteger(expiry)
       && checkedPockets.some((pocket) => pocket.id === id && finite(pocket.frayTicks))))) return false;
+  if (!validToolState(room, state, version)) return false;
   if (state.frayedFall !== undefined && typeof state.frayedFall !== 'boolean') return false;
   if (version >= 2 && !validSections(value, version as SectionVersion)) return false;
   if (version >= 2) {
@@ -321,7 +380,8 @@ function validWorld(value: unknown, version: 1 | 2 | 3 | 4): boolean {
   }
   return nonnegativeInteger(state.tick) && ['held', 'flying', 'failed', 'complete'].includes(String(state.phase))
     && point(state.position) && point(state.previousPosition) && point(state.velocity)
-    && typeof state.pocketId === 'string' && room.pockets.some((pocket) => pocket.id === state.pocketId)
+    && typeof state.pocketId === 'string' && (room.pockets.some((pocket) => pocket.id === state.pocketId)
+      || (record(state.stitchedPocket) && record(state.stitchedPocket.pocket) && state.stitchedPocket.pocket.id === state.pocketId))
     && nonnegativeInteger(state.flightTicks) && nonnegativeInteger(state.launches)
     && record(state.checkpoint) && typeof state.checkpoint.pocketId === 'string'
     && nonnegativeInteger(state.checkpoint.tick) && idList(state.pickupIds)
@@ -338,16 +398,29 @@ export function deserializeEndlessRun(serialized: string): EndlessRun | null {
       }
       return value;
     });
-    if (!record(payload) || (payload.version !== 1 && payload.version !== 2 && payload.version !== 3 && payload.version !== 4)
+    if (!record(payload) || (payload.version !== 1 && payload.version !== 2 && payload.version !== 3
+      && payload.version !== 4 && payload.version !== 5 && payload.version !== 6)
       || !validWorld(payload.run, payload.version) || !record(payload.run)) return null;
     const run = payload.run;
     const inventory = run.inventory;
     if (!record(inventory) || !['preview', 'teleport', 'revive'].every((kind) => nonnegativeInteger(inventory[kind]))
       || typeof run.reviveUsed !== 'boolean' || typeof run.previewActive !== 'boolean'
       || !idList(run.collectedPickupIds) || !validWorld(run.lastCatchSnapshot, payload.version)) return null;
+    for (const kind of CREATIVE_TOOLS) {
+      if (payload.version < 5 && inventory[kind] === undefined) inventory[kind] = 0;
+      if (!nonnegativeInteger(inventory[kind]) || (payload.version < 5 && inventory[kind] !== 0)) return null;
+    }
+    if (Object.keys(inventory).some((kind) => !isToolKind(kind))) return null;
+    if (payload.version >= 6) {
+      const queue = run.freeToolQueue;
+      if (!Array.isArray(queue) || queue.length > FREE_TOOL_CAPACITY || !queue.every(isToolKind)
+        || Object.entries(inventory).some(([kind, count]) => queue.filter((entry) => entry === kind).length !== count)) return null;
+    } else if (run.freeToolQueue !== undefined) return null;
     const checkpoint = run.lastCatchSnapshot;
-    if (!record(checkpoint) || ['inventory', 'reviveUsed', 'previewActive', 'collectedPickupIds', 'lastCatchSnapshot']
+    if (!record(checkpoint) || ['inventory', 'freeToolQueue', 'reviveUsed', 'previewActive', 'collectedPickupIds', 'lastCatchSnapshot']
       .some((key) => key in checkpoint)) return null;
+    if (payload.version >= 5 && record(checkpoint.state) && record(checkpoint.state.toolEffects)
+      && Object.keys(checkpoint.state.toolEffects).length) return null;
     if (record(run.room) && record(checkpoint.room)
       && run.room.sideWallRestitution !== checkpoint.room.sideWallRestitution) return null;
     if (payload.version >= 2) {
@@ -367,7 +440,7 @@ export function deserializeEndlessRun(serialized: string): EndlessRun | null {
         || (checkpointProgress.introductions as number[]).some((count, index) =>
           count > (progress.introductions as number[])[index])) return null;
     }
-    if (payload.version === 4) {
+    if (payload.version >= 4) {
       const currentState = run.state as Record<string, unknown>;
       const checkpointState = checkpoint.state as Record<string, unknown>;
       // Failed flights may change retained barriers and switches after the last catch.

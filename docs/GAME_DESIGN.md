@@ -42,6 +42,9 @@ marks the wider route and a star
 marks the narrower reward route. Paths rejoin at broad, untimed recovery
 pockets after two or three launches. Free tools appear along the reward route
 in every other newly generated section, rotating Preview, Revive, and Teleport.
+Version-five and newer runs also offer a creative-tool gift in intervening sections,
+rotating Bounce Patch, Safety Pin, Velcro Patch, Silk Sail, Needle Tip, and
+Pocket Stitch. Pin gifts require moving targets; Needle gifts require thorns.
 The opening Preview remains available, and generated gifts in saved runs stay
 in place. Hints mention a tool only while one remains in that section; no
 section requires a tool. New version-four layouts include three cloth corridors,
@@ -74,8 +77,10 @@ Visible sections remain in place. The game retains whole sections independently
 of scoring so the unchosen branch remains available. Obstacles begin after five
 catches. Ordinary sections contain 1–2 barriers/hazards initially, 2–3 after 20,
 3–4 after 40, 4–5 after 60 and 5–6 after 80; teaching sections override density.
-Version-one linear saves, version-two sections and version-three stitched worlds
-continue under their original rules. New runs use generation/save version four.
+Version-one linear saves, version-two sections, version-three stitched worlds,
+version-four interactive saves, and version-five trick-tool saves continue under
+their original rules. New runs use generation/save version six, with the same
+interactive world layouts and a three-charge free-tool inventory.
 Broken panels and activated switches persist with their sections. Revive restores
 the previous catch's exact interaction state.
 
@@ -109,6 +114,43 @@ sections on an optional branch, with a wide stationary untimed alternative and
 recovery afterward. Only then may it combine with previously taught elements.
 Sections contain at most two interactions, counting gates and fraying pockets.
 No stage selector or mandatory tool is added.
+
+## Creative tools
+
+The Tools button opens six optional tools. Players can prepare one of each
+together while held in a pocket, and use Preview to simulate the entire shot.
+Setup pauses play; canceling or adjusting a draft spends nothing. Confirming
+uses a free charge first, or explicitly redeems points. Short pulls and canceled
+gestures keep confirmed tools prepared for the next flight. Tools also apply
+to an automatic fall from fraying stitches.
+
+| Tool | Next-flight behavior | Points |
+| --- | --- | --- |
+| Bounce Patch | Place and rotate a short cushion; it reflects one impact and disappears. | 15 |
+| Safety Pin | Hold a moving pocket, moving hazard, or shutter in its current position or phase; other clocks continue. | 15 |
+| Velcro Patch | Catch a selected pocket from any direction by hitting the strip around its mouth. | 15 |
+| Silk Sail | Automatically slow descent after the apex while retaining sideways motion. | 10 |
+| Needle Tip | Pass through the first thorn object; other thorns, scissors, and shutters remain dangerous. | 20 |
+| Pocket Stitch | Place a temporary pocket in clear fabric for one catch and one outgoing launch. | 20 |
+
+Placement must leave the current pocket's pull area clear. Stitched pockets
+also need safe clearance throughout moving hazards' travel. A pin preserves a
+shutter's selected phase, even when closed, and never extends fraying deadlines.
+Pin release resumes motion continuously. Velcro adds no attraction and cannot
+catch through a wall; it can be attached to a newly stitched pocket.
+
+A stitched catch gives no score or world progression. It becomes the latest
+revive checkpoint, but reviving never restores a spent charge. Another pocket
+cannot be stitched until an authored pocket is reached. Other creative effects
+end at a catch, failure, Land arrival, or restart; a caught stitch remains for
+its outgoing launch. Land asks before discarding prepared, unlaunched tools.
+New runs hold at most three unspent free charges across all tool kinds. Each
+charge occupies one slot, including duplicate kinds. A pickup at capacity
+replaces the oldest held charge. Using a kind consumes its oldest charge;
+prepared effects and point purchases do not occupy free inventory slots.
+The oldest-to-newest queue survives saved runs and revive, which never restores
+spent or replaced charges. Free charges reset on a new run and work offline.
+Older saves retain their original inventory rules until a new run starts.
 
 ## Controls and preferences
 

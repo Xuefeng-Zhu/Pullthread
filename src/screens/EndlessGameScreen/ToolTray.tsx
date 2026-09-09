@@ -3,13 +3,15 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { ToolKind } from '../../commerce/contracts';
 import { TOOL_DESCRIPTIONS, TOOL_LABELS } from '../../commerce/toolCatalog';
+import { FreeToolSlots } from './FreeToolSlots';
 import { ToolIcon } from '../../components/ToolIcon';
 
-export function ToolTray({ inventory, previewActive, reviveUsed, phase, disabled, highContrast, onTool }: {
+export function ToolTray({ inventory, previewActive, reviveUsed, phase, disabled, highContrast, onTool, onTools, preparedCount = 0, preparedTools = [], creativeEnabled = true, freeToolQueue }: {
   inventory: Readonly<Record<ToolKind, number>>; previewActive: boolean; reviveUsed: boolean;
   phase: string; disabled: boolean; highContrast: boolean; onTool: (kind: ToolKind) => void;
+  onTools?: () => void; preparedCount?: number; preparedTools?: readonly ToolKind[]; creativeEnabled?: boolean; freeToolQueue?: readonly ToolKind[];
 }) {
-  return <View testID="launch-tool-tray" style={styles.tray}>
+  return <View testID="launch-tool-tray" style={styles.wrapper}><View style={styles.tray}>
     {(['preview', 'teleport', 'revive'] as const).map((kind) => {
       const unavailable = disabled || (kind === 'preview' && (phase !== 'held' || previewActive))
         || (kind === 'revive' && (phase !== 'failed' || reviveUsed)) || (kind === 'teleport' && phase === 'failed');
@@ -30,10 +32,22 @@ export function ToolTray({ inventory, previewActive, reviveUsed, phase, disabled
         </View>}
       </Pressable>;
     })}
+    <Pressable testID="tool-box" accessibilityRole="button" accessibilityLabel={`Tools, ${preparedCount} prepared`}
+      accessibilityHint={creativeEnabled ? 'Prepare a trick shot tool while holding a pocket.' : 'New tools are available when you start a new run.'}
+      accessibilityState={{ disabled: disabled || phase !== 'held' || !creativeEnabled }} disabled={disabled || phase !== 'held' || !creativeEnabled}
+      onPress={onTools} style={[styles.tool, highContrast && styles.contrast, (disabled || phase !== 'held' || !creativeEnabled) && styles.disabled]}>
+      <Ionicons name="construct-outline" size={25} color="#244b45" />
+      {preparedCount > 0 && <View style={[styles.badge, styles.readyBadge]}><Text style={[styles.count, { color: '#fff8e7' }]}>{preparedCount}</Text></View>}
+    </Pressable>
+  </View>
+    {freeToolQueue && <FreeToolSlots queue={freeToolQueue} highContrast={highContrast} />}
+    {preparedTools.length > 0 && <Text testID="prepared-tools" numberOfLines={2} accessibilityLiveRegion="polite" style={styles.preparedText}>{phase === 'held' ? 'Ready: ' : 'In flight: '}{preparedTools.map(kind => TOOL_LABELS[kind]).join(' · ')}</Text>}
   </View>;
 }
 
 const styles = StyleSheet.create({
+  wrapper: { alignItems: 'flex-end' },
+  preparedText: { fontFamily: 'NunitoSans_800ExtraBold', fontSize: 11, lineHeight: 16, color: '#244b45', textAlign: 'right', marginTop: 6, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: '#fff8e7', borderRadius: 10 },
   tray: { flexDirection: 'row', gap: 8, alignSelf: 'flex-end', paddingTop: 3 },
   tool: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center',
     borderRadius: 24, backgroundColor: '#fff8e7', borderWidth: 1, borderColor: '#c3b695' },

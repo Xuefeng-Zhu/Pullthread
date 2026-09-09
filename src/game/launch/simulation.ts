@@ -1,4 +1,6 @@
-import { barrierIsActive, sweepCircleRectangle, type RectangleContact } from './interactivePhysics';
+import { barrierIsActive, sweepCircleCapsule, sweepCircleRectangle, type RectangleContact } from './interactivePhysics';
+import { BOUNCE_PATCH_LENGTH, BOUNCE_PATCH_THICKNESS, BOUNCE_PATCH_RESTITUTION, effectivePockets, effectiveToolTick,
+  integrateFlightVertical, VELCRO_CAPTURE_HEIGHT } from './toolEffects';
 import type {
   LaunchClock,
   LaunchEvent,
@@ -12,6 +14,7 @@ import type {
   LaunchWindZone,
 } from './types';
 export { barrierIsActive, shutterPhase } from './interactivePhysics';
+export { integrateFlightVertical } from './toolEffects';
 
 export const LAUNCH_HZ = 120;
 export const LAUNCH_STEP_SECONDS = 1 / LAUNCH_HZ;
@@ -28,8 +31,9 @@ const BARRIER_RESTING_NORMAL_SPEED = 90;
 /** A slow foreground frame cannot accumulate a seconds-long simulation backlog. */
 export const MAX_FRAME_SECONDS = 0.1;
 
-export function pocketPosition(pocket: LaunchPocket, tick: number): LaunchPoint {
+export function pocketPosition(pocket: LaunchPocket, tick: number, state?: LaunchState): LaunchPoint {
   'worklet';
+  tick = effectiveToolTick(pocket.id, tick, state);
   if (pocket.orbit) {
     const orbit = pocket.orbit;
     const angle = ((tick * (orbit.direction ?? 1) + orbit.phaseTicks) / orbit.periodTicks) * Math.PI * 2;
@@ -48,8 +52,10 @@ export function pocketPosition(pocket: LaunchPocket, tick: number): LaunchPoint 
 }
 
 /** Only an orbit carries momentum into a launch; historical sway stays unchanged. */
-export function pocketVelocity(pocket: LaunchPocket, tick: number): LaunchPoint {
+export function pocketVelocity(pocket: LaunchPocket, tick: number, state?: LaunchState): LaunchPoint {
   'worklet';
+  if (state?.toolEffects?.pin?.targetId === pocket.id) return { x: 0, y: 0 };
+  tick = effectiveToolTick(pocket.id, tick, state);
   if (!pocket.orbit) return { x: 0, y: 0 };
   const orbit = pocket.orbit;
   const angle = ((tick * (orbit.direction ?? 1) + orbit.phaseTicks) / orbit.periodTicks) * Math.PI * 2;
@@ -57,9 +63,9 @@ export function pocketVelocity(pocket: LaunchPocket, tick: number): LaunchPoint 
   return { x: -Math.sin(angle) * speed, y: Math.cos(angle) * speed };
 }
 
-export function launchVelocity(pocket: LaunchPocket, tick: number, pull: LaunchPoint): LaunchPoint {
+export function launchVelocity(pocket: LaunchPocket, tick: number, pull: LaunchPoint, state?: LaunchState): LaunchPoint {
   'worklet';
-  const carried = pocketVelocity(pocket, tick);
+  const carried = pocketVelocity(pocket, tick, state);
   const velocity = { x: -pull.x * LAUNCH_POWER + carried.x, y: -pull.y * LAUNCH_POWER + carried.y };
   const magnitude = Math.hypot(velocity.x, velocity.y);
   if (pocket.orbit && magnitude > 850) return { x: velocity.x * 850 / magnitude, y: velocity.y * 850 / magnitude };
@@ -90,8 +96,9 @@ export function windAccelerationAt(zones: readonly LaunchWindZone[] | undefined,
 }
 
 /** Rendering and swept collisions share this deterministic obstacle clock. */
-export function hazardPosition(hazard: LaunchHazard, tick: number): LaunchPoint {
+export function hazardPosition(hazard: LaunchHazard, tick: number, state?: LaunchState): LaunchPoint {
   'worklet';
+  tick = effectiveToolTick(hazard.id, tick, state);
   const { motion } = hazard;
   const offset = motion && motion.periodTicks > 0
     ? Math.sin(((tick + motion.phaseTicks) / motion.periodTicks) * Math.PI * 2) * motion.amplitude
@@ -129,8 +136,8 @@ export function clampPull(pull: LaunchPoint): LaunchPoint {
   return { x: x * scale, y: y * scale };
 }
 
-function findPocket(room: LaunchRoom, id: string): LaunchPocket {
-  const pocket = room.pockets.find((candidate) => candidate.id === id);
+function findPocket(room: LaunchRoom, id: string, state?: LaunchState): LaunchPocket {
+  const pocket = (state ? effectivePockets(room, state) : room.pockets).find((candidate) => candidate.id === id);
   if (!pocket) throw new Error(`Launch room ${room.id} has no pocket ${id}`);
   return pocket;
 }
@@ -167,12 +174,13 @@ export function launch(room: LaunchRoom, state: LaunchState, input: LaunchInput)
   ) return false;
   const pull = clampPull(input.pull);
   if (Math.hypot(pull.x, pull.y) < MIN_PULL) return false;
-  const pocket = findPocket(room, state.pocketId);
+  const pocket = findPocket(room, state.pocketId, state);
   if (isPocketExpired(state, pocket)) return false;
-  const anchor = pocketPosition(pocket, state.tick);
+  const anchor = pocketPosition(pocket, state.tick, state);
   state.position = { x: anchor.x + pull.x, y: anchor.y + pull.y };
   state.previousPosition = { ...state.position };
-  state.velocity = launchVelocity(pocket, state.tick, pull);
+  state.velocity = launchVelocity(pocket, state.tick, pull, state);
+  if (state.stitchedPocket?.pocket.id === state.pocketId) state.stitchedPocket.spent = true;
   state.phase = 'flying';
   state.flightTicks = 0;
   state.launches += 1;
@@ -187,7 +195,7 @@ export function retryFromCheckpoint(room: LaunchRoom, state: LaunchState): void 
   state.tick = state.checkpoint.tick;
   state.pocketId = state.checkpoint.pocketId;
   state.patchCollected = state.checkpoint.patchCollected;
-  state.position = pocketPosition(findPocket(room, state.pocketId), state.tick);
+  state.position = pocketPosition(findPocket(room, state.pocketId, state), state.tick, state);
   state.previousPosition = { ...state.position };
   state.velocity = { x: 0, y: 0 };
   state.phase = 'held';
@@ -219,7 +227,8 @@ type Contact =
   | { time: number; kind: 'bumper'; index: number; key: string }
   | { time: number; kind: 'wall'; side: 'left' | 'right'; key: string }
   | { time: number; kind: 'pocket'; index: number; key: string }
-  | { time: number; kind: 'hazard'; index: number; key: string }
+  | { time: number; kind: 'hazard'; index: number; key: string; needleEligible?: boolean }
+  | { time: number; kind: 'toolBounce'; key: string; hit: RectangleContact }
   | { time: number; kind: 'patch'; key: string }
   | { time: number; kind: 'pickup'; index: number; key: string }
   | { time: number; kind: 'bounds'; key: string }
@@ -228,7 +237,7 @@ type Contact =
 
 /** Stable tie breaking makes authoring order irrelevant at exactly simultaneous contacts. */
 function contactPriority(contact: Contact): number {
-  return { hazard: 0, bounds: 1, pocket: 2, bumper: 3, wall: 3, patch: 4, pickup: 5, barrier: 3, switch: 1.5 }[contact.kind];
+  return { hazard: 0, bounds: 1, pocket: 2, bumper: 3, toolBounce: 3, wall: 3, patch: 4, pickup: 5, barrier: 3, switch: 1.5 }[contact.kind];
 }
 
 function findContact(room: LaunchRoom, state: LaunchState, start: LaunchPoint, end: LaunchPoint, tickStart: number, tickEnd: number): Contact | undefined {
@@ -243,10 +252,11 @@ function findContact(room: LaunchRoom, state: LaunchState, start: LaunchPoint, e
     ) earliest = candidate;
   }
   room.hazards.forEach((hazard, index) => {
+    if (state.toolEffects?.needle?.piercedId === hazard.id) return;
     // Solve in the hazard's moving reference frame, including the fractional
     // remainder after an earlier bumper bounce during this same tick.
-    const from = hazardPosition(hazard, tickStart);
-    const to = hazardPosition(hazard, tickEnd);
+    const from = hazardPosition(hazard, tickStart, state);
+    const to = hazardPosition(hazard, tickEnd, state);
     const time = hazard.motion
       ? circleContact(
         { x: start.x - from.x, y: start.y - from.y },
@@ -255,8 +265,13 @@ function findContact(room: LaunchRoom, state: LaunchState, start: LaunchPoint, e
         hazard.radius + BUTTON_RADIUS,
       )
       : circleContact(start, end, hazard.center, hazard.radius + BUTTON_RADIUS);
-    if (time !== undefined) consider({ kind: 'hazard', index, time, key: hazard.id });
+    if (time !== undefined) consider({ kind: 'hazard', index, time, key: hazard.id, needleEligible: hazard.visual !== 'scissors' });
   });
+  const patch = state.toolEffects?.bounce;
+  if (patch && !patch.spent) {
+    const hit = sweepCircleCapsule(start, end, { ...patch, length: BOUNCE_PATCH_LENGTH, thickness: BOUNCE_PATCH_THICKNESS }, BUTTON_RADIUS);
+    if (hit) consider({ kind: 'toolBounce', key: 'tool-bounce', time: hit.time, hit });
+  }
   room.bumpers.forEach((bumper, index) => {
     const time = circleContact(start, end, bumper.center, bumper.radius + BUTTON_RADIUS);
     if (time === undefined) return;
@@ -267,6 +282,7 @@ function findContact(room: LaunchRoom, state: LaunchState, start: LaunchPoint, e
     consider({ kind: 'bumper', index, time, key: bumper.id });
   });
   room.barriers?.forEach((barrier, index) => {
+    if (state.toolEffects?.needle?.piercedId === barrier.id) return;
     if (!barrierIsActive(barrier, room, state, tickEnd)) return;
     const hit = sweepCircleRectangle(start, end, barrier, BUTTON_RADIUS);
     if (!hit) return;
@@ -274,7 +290,7 @@ function findContact(room: LaunchRoom, state: LaunchState, start: LaunchPoint, e
     const outward = (end.x - start.x) * hit.normal.x + (end.y - start.y) * hit.normal.y >= 0;
     const penetrated = Math.hypot(start.x - hit.position.x, start.y - hit.position.y) > 1e-7;
     if (!lethal && hit.time === 0 && outward && !penetrated) return;
-    if (lethal) consider({ kind: 'hazard', index: -1, time: hit.time, key: barrier.id });
+    if (lethal) consider({ kind: 'hazard', index: -1, time: hit.time, key: barrier.id, needleEligible: barrier.kind === 'thorns' });
     else consider({ kind: 'barrier', index, time: hit.time, key: barrier.id, hit });
   });
   room.switches?.forEach((sensor, index) => {
@@ -282,12 +298,20 @@ function findContact(room: LaunchRoom, state: LaunchState, start: LaunchPoint, e
     const time = circleContact(start, end, sensor.center, sensor.radius + BUTTON_RADIUS);
     if (time !== undefined) consider({ kind: 'switch', index, time, key: sensor.id });
   });
-  room.pockets.forEach((pocket, index) => {
+  effectivePockets(room, state).forEach((pocket, index) => {
+    if (state.stitchedPocket?.spent && pocket.id === state.stitchedPocket.pocket.id) return;
     if (isPocketExpired(state, pocket, tickEnd)) return;
     if (pocket.id === state.pocketId && state.sourcePocketImmune) return;
+    if (state.toolEffects?.velcro?.targetId === pocket.id) {
+      const before = pocketPosition(pocket, tickStart, state), after = pocketPosition(pocket, tickEnd, state);
+      const hit = sweepCircleCapsule({ x: start.x - before.x, y: start.y - before.y },
+        { x: end.x - after.x, y: end.y - after.y },
+        { position: { x: 0, y: 0 }, angle: 0, length: pocket.width, thickness: VELCRO_CAPTURE_HEIGHT }, 0, true);
+      if (hit) consider({ kind: 'pocket', index, time: hit.time, key: pocket.id });
+    }
     if (pocket.orbit) {
-      const mouthStart = pocketPosition(pocket, tickStart);
-      const mouthEnd = pocketPosition(pocket, tickEnd);
+      const mouthStart = pocketPosition(pocket, tickStart, state);
+      const mouthEnd = pocketPosition(pocket, tickEnd, state);
       const before = start.y - mouthStart.y, after = end.y - mouthEnd.y;
       if (before > 0 || after < 0 || after <= before) return;
       const time = -before / (after - before);
@@ -298,7 +322,7 @@ function findContact(room: LaunchRoom, state: LaunchState, start: LaunchPoint, e
     } else if (end.y > start.y) {
       const time = (pocket.center.y - start.y) / (end.y - start.y);
       if (time < 0 || time > 1) return;
-      const mouth = pocketPosition(pocket, tickStart + (tickEnd - tickStart) * time);
+      const mouth = pocketPosition(pocket, tickStart + (tickEnd - tickStart) * time, state);
       const x = start.x + (end.x - start.x) * time;
       if (Math.abs(x - mouth.x) <= pocket.width / 2 - BUTTON_RADIUS * 0.35) consider({ kind: 'pocket', index, time, key: pocket.id });
     }
@@ -367,8 +391,8 @@ export function stepLaunch(room: LaunchRoom, state: LaunchState): LaunchEvent[] 
   state.tick += 1;
   state.previousPosition = { ...state.position };
   if (state.phase === 'held') {
-    const pocket = findPocket(room, state.pocketId);
-    state.position = pocketPosition(pocket, state.tick);
+    const pocket = findPocket(room, state.pocketId, state);
+    state.position = pocketPosition(pocket, state.tick, state);
     if (isPocketExpired(state, pocket)) {
       state.phase = 'flying';
       state.velocity = { x: 0, y: 0 };
@@ -386,22 +410,31 @@ export function stepLaunch(room: LaunchRoom, state: LaunchState): LaunchEvent[] 
   let remaining = LAUNCH_STEP_SECONDS;
   let elapsed = 0;
   for (let count = 0; count < MAX_CONTACTS_PER_STEP && remaining > EPSILON; count += 1) {
-    const source = pocketPosition(findPocket(room, state.pocketId), previousTick);
-    const sourceWidth = findPocket(room, state.pocketId).width;
+    const source = pocketPosition(findPocket(room, state.pocketId, state), previousTick, state);
+    const sourceWidth = findPocket(room, state.pocketId, state).width;
     if (
       state.sourcePocketImmune &&
       (state.position.y < source.y - BUTTON_RADIUS ||
         Math.abs(state.position.x - source.x) > sourceWidth / 2 + BUTTON_RADIUS)
     ) state.sourcePocketImmune = false;
     const start = state.position;
+    const vertical = integrateFlightVertical(state.velocity.y, remaining, room.gravity, state.toolEffects?.sail);
     const end = {
       x: start.x + state.velocity.x * remaining,
-      y: start.y + state.velocity.y * remaining + (room.gravity * remaining * remaining) / 2,
+      y: state.toolEffects?.sail ? start.y + vertical.distance
+        : start.y + state.velocity.y * remaining + (room.gravity * remaining * remaining) / 2,
     };
     let contact = findContact(room, state, start, end, previousTick + elapsed * LAUNCH_HZ, state.tick);
     // Collect in swept order up to the next physical contact, without splitting
     // the ballistic segment: optional tools must not nudge an otherwise identical shot.
-    while (contact?.kind === 'pickup' || contact?.kind === 'switch') {
+    while (contact?.kind === 'pickup' || contact?.kind === 'switch'
+      || (contact?.kind === 'hazard' && contact.needleEligible && state.toolEffects?.needle && !state.toolEffects.needle.piercedId)) {
+      if (contact.kind === 'hazard') {
+        state.toolEffects!.needle!.piercedId = contact.key;
+        events.push({ type: 'tool', tick: state.tick, id: contact.key, kind: 'needle' });
+        contact = findContact(room, state, start, end, previousTick + elapsed * LAUNCH_HZ, state.tick);
+        continue;
+      }
       if (contact.kind === 'switch') {
         const sensor = room.switches![contact.index];
         state.activatedSwitchIds = [...state.activatedSwitchIds ?? [], sensor.id];
@@ -416,15 +449,17 @@ export function stepLaunch(room: LaunchRoom, state: LaunchState): LaunchEvent[] 
     }
     const fraction = contact?.time ?? 1;
     const duration = remaining * fraction;
+    const elapsedVertical = integrateFlightVertical(state.velocity.y, duration, room.gravity, state.toolEffects?.sail);
     state.position = {
       x: start.x + (end.x - start.x) * fraction,
       // A horizontal wall changes no vertical physics. Integrate the exact
       // elapsed ballistic time instead of splitting the full-step chord.
       y: contact?.kind === 'wall'
-        ? start.y + state.velocity.y * duration + (room.gravity * duration * duration) / 2
+        ? state.toolEffects?.sail ? start.y + elapsedVertical.distance
+          : start.y + state.velocity.y * duration + (room.gravity * duration * duration) / 2
         : start.y + (end.y - start.y) * fraction,
     };
-    state.velocity.y += room.gravity * duration;
+    state.velocity.y = elapsedVertical.velocity;
     remaining -= duration;
     elapsed += duration;
     if (!contact) break;
@@ -447,11 +482,11 @@ export function stepLaunch(room: LaunchRoom, state: LaunchState): LaunchEvent[] 
       continue;
     }
     if (contact.kind === 'pocket') {
-      const pocket = room.pockets[contact.index];
+      const pocket = effectivePockets(room, state)[contact.index];
       state.pocketId = pocket.id;
       startPocketLifetime(state, pocket);
       if (state.frayedFall !== undefined) state.frayedFall = false;
-      state.position = pocketPosition(pocket, state.tick);
+      state.position = pocketPosition(pocket, state.tick, state);
       events.push(...activateLandingSwitches(room, state, pocket.id));
       state.velocity = { x: 0, y: 0 };
       state.flightTicks = 0;
@@ -465,6 +500,18 @@ export function stepLaunch(room: LaunchRoom, state: LaunchState): LaunchEvent[] 
         events.push({ type: 'catch', tick: state.tick, id: pocket.id });
       }
       break;
+    }
+    if (contact.kind === 'toolBounce') {
+      const normal = contact.hit.normal;
+      const incoming = state.velocity.x * normal.x + state.velocity.y * normal.y;
+      if (incoming < 0) {
+        state.velocity.x -= (1 + BOUNCE_PATCH_RESTITUTION) * incoming * normal.x;
+        state.velocity.y -= (1 + BOUNCE_PATCH_RESTITUTION) * incoming * normal.y;
+      }
+      state.toolEffects!.bounce!.spent = true;
+      state.position = { x: contact.hit.position.x + normal.x * 0.001, y: contact.hit.position.y + normal.y * 0.001 };
+      events.push({ type: 'bounce', tick: state.tick, id: contact.key });
+      continue;
     }
     if (contact.kind === 'barrier') {
       const barrier = room.barriers![contact.index];

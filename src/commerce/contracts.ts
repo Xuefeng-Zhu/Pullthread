@@ -1,9 +1,22 @@
 /** Shared catalog and wire contracts. Wallet authority lives on the server. */
-export type ToolKind = 'preview' | 'teleport' | 'revive';
+export const CREATIVE_TOOLS = ['bounce', 'pin', 'velcro', 'sail', 'needle', 'stitch'] as const;
+export type CreativeToolKind = typeof CREATIVE_TOOLS[number];
+export type ToolKind = 'preview' | 'teleport' | 'revive' | CreativeToolKind;
+export const TOOL_KINDS = ['preview', 'teleport', 'revive', ...CREATIVE_TOOLS] as const;
+export function isToolKind(value: unknown): value is ToolKind {
+  return typeof value === 'string' && (TOOL_KINDS as readonly string[]).includes(value);
+}
+export function isCreativeTool(value: unknown): value is CreativeToolKind {
+  return typeof value === 'string' && (CREATIVE_TOOLS as readonly string[]).includes(value);
+}
+export function emptyToolInventory(): Record<ToolKind, number> {
+  return { preview: 0, teleport: 0, revive: 0, bounce: 0, pin: 0, velcro: 0, sail: 0, needle: 0, stitch: 0 };
+}
 export type CommerceEnvironment = 'sandbox' | 'production';
 
 export const TOOL_COSTS: Readonly<Record<ToolKind, number>> = {
   preview: 10, teleport: 25, revive: 50,
+  bounce: 15, pin: 15, velcro: 15, sail: 10, needle: 20, stitch: 20,
 };
 export const POINT_PACKS = [
   { productId: 'pullthread_points_100', points: 100 },

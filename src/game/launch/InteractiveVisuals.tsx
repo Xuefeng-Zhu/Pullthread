@@ -25,14 +25,15 @@ function switchGlyph(id: string) {
   return SWITCH_GLYPHS[hash % SWITCH_GLYPHS.length];
 }
 
-export function OrbitVisual({ pocket, tick, highContrast }: {
+export function OrbitVisual({ pocket, state, tick, highContrast }: {
+  readonly state: LaunchState;
   readonly pocket: LaunchPocket;
   readonly tick: SharedValue<number>;
   readonly highContrast: boolean;
 }) {
   const radius = pocket.orbit!.radius;
   const ink = highContrast ? '#394F54' : '#798F8D';
-  const endpoint = useDerivedValue(() => pocketPosition(pocket, tick.value));
+  const endpoint = useDerivedValue(() => pocketPosition(pocket, tick.value, state));
   const direction = pocket.orbit?.direction ?? 1;
   return <Group>
     <Circle cx={pocket.center.x} cy={pocket.center.y} r={radius} color={highContrast ? '#C9D6CE' : '#D2C6AC'} style="stroke" strokeWidth={5} />
@@ -61,7 +62,7 @@ function BarrierVisual({ barrier, room, state, tick, highContrast, reducedMotion
   const active = useDerivedValue(() => barrierIsActive(barrier, room, state, tick.value));
   const activeOpacity = useDerivedValue(() => active.value ? 1 : 0);
   const openOpacity = useDerivedValue(() => active.value ? 0 : 1);
-  const warningOpacity = useDerivedValue(() => kind === 'shutter' && shutterPhase(barrier, tick.value) === 'warning' ? 1 : 0);
+  const warningOpacity = useDerivedValue(() => kind === 'shutter' && shutterPhase(barrier, tick.value, state) === 'warning' ? 1 : 0);
   const ink = kind === 'thorns' ? highContrast ? '#510F27' : '#723448'
     : kind === 'tearable' ? highContrast ? '#573040' : '#8E586E'
       : kind === 'shutter' ? highContrast ? '#493658' : '#71617C'

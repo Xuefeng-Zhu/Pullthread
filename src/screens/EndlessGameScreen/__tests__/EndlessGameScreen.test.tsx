@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ExpoFeedbackService } from '../../../game/feedback';
 import * as endless from '../../../game/launch/endless';
+import { grantFreeTool } from '../../../game/launch/toolInventory';
 import type { ActiveChallenge } from '../../../game/launch/challengeTypes';
 import { LaunchCanvas } from '../../../game/launch/LaunchCanvas';
 import type { LaunchPoint } from '../../../game/launch/types';
@@ -614,7 +615,7 @@ describe('endless Pull & Launch screen', () => {
 
   test('free Preview stays armed after a cancelled pull without opening checkout', async () => {
     const run = endless.createEndlessRun(0);
-    run.inventory.preview = 1;
+    grantFreeTool(run, 'preview');
     jest.spyOn(endless, 'createEndlessRun').mockReturnValueOnce(run);
     const view = await render(<EndlessGameScreen {...harness()} />);
     await measure(view);
@@ -634,7 +635,7 @@ describe('endless Pull & Launch screen', () => {
   test('landing selection freezes the run, cancellation is free, and a chosen pocket scores once', async () => {
     const readback = rejectMotionReadbacks();
     const run = endless.createEndlessRun(0);
-    run.inventory.teleport = 1;
+    grantFreeTool(run, 'teleport');
     jest.spyOn(endless, 'createEndlessRun').mockReturnValueOnce(run);
     const view = await render(<EndlessGameScreen {...harness()} />);
     await measure(view);
@@ -658,7 +659,7 @@ describe('endless Pull & Launch screen', () => {
 
   test('one free Revive returns from death and Play again clears earned tools', async () => {
     const run = endless.createEndlessRun(0);
-    run.inventory.revive = 1;
+    grantFreeTool(run, 'revive');
     jest.spyOn(endless, 'createEndlessRun').mockReturnValueOnce(run);
     const view = await render(<EndlessGameScreen {...harness()} />);
     await measure(view);
@@ -760,4 +761,26 @@ describe('endless Pull & Launch screen', () => {
     expect(view.queryByTestId('launch-challenge-cue')).toBeNull();
     await view.unmount();
   });
+
+  test('creative setup keeps actions reachable with enlarged text in a compact viewport', async () => {
+    jest.mocked(useWindowDimensions).mockReturnValue({ width: 320, height: 568, scale: 2, fontScale: 2 });
+    const view = await render(<EndlessGameScreen {...harness()} />);
+    await measure(view, 320, 568);
+    await fireEvent.press(view.getByTestId('tool-box'));
+    await fireEvent.press(view.getByTestId('toolbox-bounce'));
+    const footer = within(view.getByTestId('tool-setup-footer'));
+    const details = within(view.getByTestId('tool-setup-details'));
+    expect(view.queryByTestId('launch-hud')).toBeNull();
+    expect(view.queryByTestId('launch-tool-tray')).toBeNull();
+    expect(footer.getByTestId('tool-setup-cancel')).toBeTruthy();
+    expect(footer.queryByTestId('tool-setup-confirm') ?? footer.getByTestId('tool-setup-points')).toBeTruthy();
+    expect(details.queryByTestId('tool-setup-cancel')).toBeNull();
+    expect(details.getByTestId('tool-x-decrease')).toBeTruthy();
+    expect(details.getByTestId('tool-angle-increase')).toBeTruthy();
+    await fireEvent.press(footer.getByTestId('tool-setup-cancel'));
+    expect(view.getByTestId('launch-hud')).toBeTruthy();
+    expect(latestCanvas().state.toolEffects?.bounce).toBeUndefined();
+    await view.unmount();
+  });
+
 });

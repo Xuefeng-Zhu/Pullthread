@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { POINT_PACKS, TOOL_COSTS, type CommerceEnvironment, type RedeemToolRequest, type ToolReceipt } from '../../../src/commerce/contracts';
+import { isToolKind, POINT_PACKS, TOOL_COSTS, type CommerceEnvironment, type RedeemToolRequest, type ToolReceipt } from '../../../src/commerce/contracts';
 
 export class CommerceError extends Error {
   constructor(readonly code: 'invalid-argument' | 'failed-precondition' | 'permission-denied' | 'not-found' | 'already-exists' | 'resource-exhausted' | 'unavailable', message: string, readonly details?: { reason: 'insufficient_points'; operationId: string }) { super(message); }
@@ -20,7 +20,7 @@ export function parseRedemption(value: unknown): RedeemToolRequest {
   const data = object(value);
   const operationId = identifier(data.operationId, 'operation ID');
   const runId = identifier(data.runId, 'run ID');
-  if (data.tool !== 'preview' && data.tool !== 'teleport' && data.tool !== 'revive') throw new CommerceError('invalid-argument', 'Unknown tool.');
+  if (!isToolKind(data.tool)) throw new CommerceError('invalid-argument', 'Unknown tool.');
   if (data.expectedCost !== TOOL_COSTS[data.tool]) throw new CommerceError('failed-precondition', 'The tool price changed. Refresh before buying.');
   if (typeof data.contextKey !== 'string' || data.contextKey.length < 1 || data.contextKey.length > 512) throw new CommerceError('invalid-argument', 'Invalid tool context.');
   return { operationId, runId, tool: data.tool, expectedCost: TOOL_COSTS[data.tool], contextKey: data.contextKey };
