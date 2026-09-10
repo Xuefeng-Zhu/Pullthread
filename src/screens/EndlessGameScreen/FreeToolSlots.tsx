@@ -5,8 +5,9 @@ import { ToolIcon } from '../../components/ToolIcon';
 import { FREE_TOOL_CAPACITY } from '../../game/launch/toolInventory';
 
 /** Queue order is the pickup order; prepared effects are displayed separately. */
-export function FreeToolSlots({ queue, highContrast = false, testID = 'free-tool-slots', onTool, isUnavailable, ordered = true }: {
+export function FreeToolSlots({ queue, highContrast = false, testID = 'free-tool-slots', toolTestIDPrefix, onTool, isUnavailable, ordered = true }: {
   queue: readonly ToolKind[]; highContrast?: boolean; testID?: string;
+  toolTestIDPrefix?: string;
   onTool?: (kind: ToolKind) => void; isUnavailable?: (kind: ToolKind) => boolean; ordered?: boolean;
 }) {
   const full = queue.length === FREE_TOOL_CAPACITY;
@@ -21,7 +22,7 @@ export function FreeToolSlots({ queue, highContrast = false, testID = 'free-tool
       const slotStyle: StyleProp<ViewStyle> = [styles.slot, !!onTool && styles.interactiveSlot, !kind && styles.empty,
         highContrast && styles.contrast, full && ordered && index === 0 && styles.oldest];
       return <View key={index} testID={`${testID}-${index}`}>
-        {kind && onTool ? <Pressable testID={`tool-${kind}`} accessibilityRole="button"
+        {kind && onTool ? <Pressable testID={toolTestIDPrefix ? `${toolTestIDPrefix}-${kind}` : `tool-${kind}`} accessibilityRole="button"
           accessibilityLabel={`${TOOL_LABELS[kind]}, free pickup ${index + 1}${ordered && full && index === 0 ? ', oldest, replaced by the next pickup' : ''}`}
           accessibilityHint={TOOL_DESCRIPTIONS[kind]} accessibilityState={{ disabled: unavailable }} disabled={unavailable}
           onPress={() => onTool(kind)} style={({ pressed }) => [slotStyle, unavailable && styles.disabled, pressed && styles.pressed]}>

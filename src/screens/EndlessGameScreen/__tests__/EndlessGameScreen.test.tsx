@@ -184,7 +184,7 @@ describe('endless Pull & Launch screen', () => {
     ]));
   }
 
-  test('starts one endless run without course or checkpoint-reset controls and can pause and resume', async () => {
+  test('starts one endless run without course, checkpoint-reset, or pause controls', async () => {
     const props = harness();
     const view = await render(<EndlessGameScreen {...props} />);
     expect(view.getByTestId('launch-run-screen')).toBeTruthy();
@@ -193,19 +193,11 @@ describe('endless Pull & Launch screen', () => {
     }
     await measure(view);
     await runFrames(3);
-    await fireEvent.press(view.getByTestId('launch-pause-button'));
-    expect(view.getByTestId('launch-paused')).toBeTruthy();
-    expect(within(view.getByTestId('launch-paused')).getByTestId('launch-resume-button')).toBeTruthy();
-    expect(within(view.getByTestId('launch-paused')).getByTestId('launch-points-tools')).toBeTruthy();
-    expect(within(view.getByTestId('launch-paused')).queryByText('Button Studio')).toBeNull();
-    expect(within(view.getByTestId('launch-paused')).queryByText('Weekly leaderboard')).toBeNull();
-    const pausedTick = latestCanvas().motion.tick.value;
-    await runFrames(90);
-    expect(latestCanvas().motion.tick.value).toBe(pausedTick);
-    await fireEvent.press(view.getByTestId('launch-resume-button'));
+    expect(view.queryByTestId('launch-pause-button')).toBeNull();
     expect(view.queryByTestId('launch-paused')).toBeNull();
-    await runFrames(3);
-    expect(latestCanvas().motion.tick.value).toBeGreaterThan(pausedTick);
+    expect(view.getByTestId('launch-score-card')).toBeTruthy();
+    expect(view.queryByTestId('launch-points-button')).toBeNull();
+    expect(view.queryByTestId('launch-points-balance')).toBeNull();
     await fireEvent.press(view.getByTestId('launch-settings-button'));
     expect(props.navigation.navigate).toHaveBeenCalledWith('Settings');
     await view.unmount();
@@ -509,9 +501,6 @@ describe('endless Pull & Launch screen', () => {
     expect(view.getByText('Moonlit Quilt')).toBeTruthy();
     expect(latestCanvas()).toMatchObject({ worldStage: 4, worldTransitionTick: 60 });
     expect(view.getByTestId('launch-playfield').props.accessibilityLabel).toContain('Moonlit Quilt');
-    await fireEvent.press(view.getByTestId('launch-pause-button'));
-    expect(view.queryByTestId('launch-world-announcement')).toBeNull();
-    await fireEvent.press(view.getByTestId('launch-resume-button'));
     fraySeconds = 2;
     await view.rerender(<EndlessGameScreen {...props} />);
     expect(view.queryByTestId('launch-world-announcement')).toBeNull();
@@ -549,15 +538,11 @@ describe('endless Pull & Launch screen', () => {
     await view.unmount();
   });
 
-  test('pausing and opening Settings hide a cue without dismissing it', async () => {
+  test('opening Settings hides a cue without dismissing it', async () => {
     overrideChallenge(() => timingChallenge);
     const props = harness();
     const view = await render(<EndlessGameScreen {...props} />);
     await measure(view);
-    expect(view.getByTestId('launch-challenge-cue')).toBeTruthy();
-    await fireEvent.press(view.getByTestId('launch-pause-button'));
-    expect(view.queryByTestId('launch-challenge-cue')).toBeNull();
-    await fireEvent.press(view.getByTestId('launch-resume-button'));
     expect(view.getByTestId('launch-challenge-cue')).toBeTruthy();
     jest.mocked(useIsFocused).mockReturnValue(false);
     await view.rerender(<EndlessGameScreen {...props} />);
@@ -606,7 +591,9 @@ describe('endless Pull & Launch screen', () => {
     await measure(view);
     await drag({ x: -24, y: 72 }, { quick: false, cancelled: true });
     expect(view.queryByTestId('launch-challenge-cue')).toBeNull();
-    await fireEvent.press(view.getByTestId('launch-pause-button'));
+    await drag({ x: 70, y: 0 });
+    await runFrames(180);
+    expect(view.getByTestId('launch-game-over')).toBeTruthy();
     await fireEvent.press(view.getByTestId('launch-restart-button'));
     expect(view.getByTestId('launch-challenge-cue')).toBeTruthy();
     expect(view.getByTestId('launch-score').props.children).toBe(0);
@@ -684,8 +671,12 @@ describe('endless Pull & Launch screen', () => {
     await measure(view);
     await drag({ x: -24, y: 72 });
     await runFrames(3);
-    await fireEvent.press(view.getByTestId('launch-points-button'));
+    await fireEvent.press(view.getByTestId('tool-box'));
+    await fireEvent.press(view.getByTestId('toolbox-teleport'));
+    await fireEvent.press(view.getAllByLabelText(/Land in visible pocket/)[0]);
+    await fireEvent.press(view.getByTestId('tool-get-points'));
     expect(view.getByTestId('points-shop')).toBeTruthy();
+    expect(view.getByTestId('points-shop-balance').props.children).toEqual([0, ' points']);
     expect(view.getByText('Points shop unavailable')).toBeTruthy();
     const tick = latestCanvas().motion.tick.value;
     await runFrames(100);
@@ -727,11 +718,6 @@ describe('endless Pull & Launch screen', () => {
     expect(within(view.getByTestId('launch-challenge-cue')).getByText('Loose pocket · 4 seconds to launch')).toBeTruthy();
     await runFrames(122);
     expect(view.getByTestId('launch-status').props.children).toBe('Loose pocket · 2 seconds to launch');
-    await fireEvent.press(view.getByTestId('launch-pause-button'));
-    const tick = latestCanvas().motion.tick.value;
-    await runFrames(300);
-    expect(latestCanvas().motion.tick.value).toBe(tick);
-    await fireEvent.press(view.getByTestId('launch-resume-button'));
     await runFrames(120);
     expect(latestCanvas().state.phase).toBe('flying');
     expect(view.queryByTestId('launch-challenge-cue')).toBeNull();

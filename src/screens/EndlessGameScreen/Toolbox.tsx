@@ -23,9 +23,10 @@ export function Toolbox({ inventory, prepared, freeToolQueue, availability, onCh
   return <View testID="toolbox" style={styles.toolbox} accessibilityViewIsModal>
     <View style={styles.heading}><Text accessibilityRole="header" style={styles.title}>Tools</Text>
       <Pressable testID="toolbox-close" accessibilityRole="button" onPress={onClose} style={styles.button}><Text style={styles.buttonText}>Close</Text></Pressable></View>
-    <Text style={styles.copy}>Use a free pickup or spend points. Combine different trick shot tools before you pull.</Text>
+    <Text style={styles.copy}>Tap any available pickup, or choose any tool below. Combine different trick shot tools before you pull.</Text>
     {freeToolQueue && <>
-      <FreeToolSlots queue={freeToolQueue} testID="toolbox-free-slots" />
+      <FreeToolSlots queue={freeToolQueue} testID="toolbox-free-slots" toolTestIDPrefix="toolbox-free"
+        onTool={onChoose} isUnavailable={kind => isToolUnavailable(kind, availability)} />
       <Text style={styles.small}>Oldest on the left. When full, a pickup replaces your oldest free tool.</Text>
     </>}
     <ScrollView testID="toolbox-scroll" contentContainerStyle={styles.cards}>
@@ -153,8 +154,8 @@ const styles = StyleSheet.create({
   prepared: { backgroundColor: '#dce9cf', borderColor: '#28594b' },
   unavailable: { opacity: 0.64 },
   cardTitle: { fontFamily: 'NunitoSans_800ExtraBold', fontSize: 15, color: '#244b45' },
-  cardCopy: { fontFamily: 'NunitoSans_600SemiBold', fontSize: 13, lineHeight: 18, color: '#49635b' },
-  price: { fontFamily: 'NunitoSans_800ExtraBold', fontSize: 13, color: '#28594b', marginVertical: 8 },
+  cardCopy: { flexGrow: 1, fontFamily: 'NunitoSans_600SemiBold', fontSize: 13, lineHeight: 18, color: '#49635b' },
+  price: { fontFamily: 'NunitoSans_800ExtraBold', fontSize: 13, color: '#28594b', marginTop: 8, marginBottom: 8 },
   button: { minHeight: 48, paddingHorizontal: 14, justifyContent: 'center', alignItems: 'center', borderRadius: 14, backgroundColor: '#e8dfc9', flexShrink: 1 },
   buttonText: { fontFamily: 'NunitoSans_800ExtraBold', fontSize: 14, color: '#244b45' },
   primary: { backgroundColor: '#28594b', flexGrow: 1 }, primaryText: { fontFamily: 'NunitoSans_800ExtraBold', fontSize: 14, color: '#fff8e7' },

@@ -52,7 +52,7 @@ function Action({ label, onPress, testID, primary = false, disabled = false }: {
 }
 
 function IconAction({ label, icon, onPress, testID, disabled = false }: {
-  label: string; icon: 'pause' | 'settings-outline'; onPress: () => void; testID: string; disabled?: boolean;
+  label: string; icon: 'settings-outline'; onPress: () => void; testID: string; disabled?: boolean;
 }) {
   return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={label}
     disabled={disabled} onPress={onPress} style={({ pressed }) => [styles.iconAction, disabled && styles.disabled, pressed && styles.pressed]}>
@@ -72,7 +72,6 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
   const focused = useIsFocused();
   const insets = useSafeAreaInsets();
   const { fontScale = 1 } = useWindowDimensions();
-  const [paused, setPaused] = useState(false);
   const [weeklyOpen, setWeeklyOpen] = useState(false);
   const [studioOpen, setStudioOpen] = useState(false);
   const appearance = useCollectionStore(s => s.appearance);
@@ -102,7 +101,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
   const feedback = useMemo(() => new ExpoFeedbackService(), []);
   useEffect(() => { feedback.setPreferences({ soundEnabled: sound, hapticsEnabled: haptics }); }, [feedback, sound, haptics]);
   useEffect(() => () => feedback.dispose(), [feedback]);
-  const session = useLaunchSession(seed, focused && !paused && !studioOpen && !weeklyOpen && !toolLayer && !toolBusy, feedback, ranked);
+  const session = useLaunchSession(seed, focused && !studioOpen && !weeklyOpen && !toolLayer && !toolBusy, feedback, ranked);
   const { state, room, motion, score, beginAim, updateAim, releaseAim, cancelAim } = session;
   const { cue: challengeCue, beginCuePull, updateCuePull, cancelCuePull } = useChallengeCue(session.challenge, state.pocketId, hints && !session.worldAnnouncement && session.fraySeconds == null);
   const { scale, offsetX, offsetY } = getLaunchViewport(area, room.bounds, insets.bottom);
@@ -117,7 +116,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
     const listener = AppState.addEventListener('change', save);
     return () => { clearInterval(timer); listener.remove(); save(); };
   }, [ranked, getSnapshot]);
-  useEffect(() => { if (ranked) void ranked.checkpoint(getSnapshot()).then(() => ranked.flush()); }, [ranked, getSnapshot, state.phase, paused, weeklyOpen]);
+  useEffect(() => { if (ranked) void ranked.checkpoint(getSnapshot()).then(() => ranked.flush()); }, [ranked, getSnapshot, state.phase, weeklyOpen]);
   useEffect(() => {
     let mounted = true;
     void leaderboardService.standings().then(async (board) => {
@@ -134,10 +133,10 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
   }, []);
   useEffect(() => {
     const notice = pendingAwardNotice.current;
-    if (notice && awardNotice && (paused || state.phase === 'failed')) {
+    if (notice && awardNotice && state.phase === 'failed') {
       void AsyncStorage.setItem(notice.key, String(notice.week)).then(() => { if (pendingAwardNotice.current === notice) pendingAwardNotice.current = null; }).catch(() => undefined);
     }
-  }, [awardNotice, paused, state.phase]);
+  }, [awardNotice, state.phase]);
   const failedTool = useCallback((error: unknown) => {
     suspend();
     setToolError(error instanceof Error ? error.message : 'Your tool could not be checked. Try again.');
@@ -216,7 +215,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
       return;
     }
     if (session.tools.inventory[kind] > 0) {
-      if (consumeFreeTool(kind)) { setToolLayer(null); setPaused(false); resume(); return; }
+      if (consumeFreeTool(kind)) { setToolLayer(null); resume(); return; }
     }
     setToolLayer({ type: 'tool', kind });
   }, [resume, suspend, toolBusy, consumeFreeTool, getTeleportTargets, session]);
@@ -251,7 +250,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
       if (result.result) useCommerceStore.getState().acceptWallet(result.result.wallet);
       if (result.snapshot) ranked?.reconcileTool(result.snapshot);
       if (result.snapshot && !restoreSnapshot(result.snapshot, kind !== 'revive')) throw new Error('Your saved tool needs recovery.');
-      setToolLayer(null); setPaused(false); resume();
+      setToolLayer(null); resume();
       void feedback.play('stitchComplete');
     } catch (error) {
       if (isInsufficientPointsError(error, operationId)) {
@@ -265,7 +264,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
   const confirmCreativeTool = (use: ToolUse) => {
     if (toolBusy || toolLock.current || !session.validateUse(use)) return;
     if (session.tools.inventory[use.tool] > 0 && consumeFreeTool(use)) {
-      setToolLayer(null); setPaused(false); resume();
+      setToolLayer(null); resume();
     } else void buyTool(use);
   };
   const openToolbox = () => {
@@ -299,9 +298,9 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
   // Resizing changes the finger-to-world mapping. Discard a pull instead of
   // releasing it through a different projection; the flight itself is preserved.
   useEffect(() => { cancelGesture(); }, [cancelGesture, offsetX, offsetY, scale]);
-  useEffect(() => { if (!focused || paused || toolLayer || toolBusy || state.phase !== 'held') cancelGesture(); }, [cancelGesture, focused, paused, state.phase, toolBusy, toolLayer]);
+  useEffect(() => { if (!focused || toolLayer || toolBusy || state.phase !== 'held') cancelGesture(); }, [cancelGesture, focused, state.phase, toolBusy, toolLayer]);
   const gesture = useMemo(() => Gesture.Pan().withTestId('launch-pull-gesture').runOnJS(true).minDistance(0).maxPointers(1)
-    .enabled(focused && !paused && !toolLayer && !toolBusy && state.phase === 'held')
+    .enabled(focused && !toolLayer && !toolBusy && state.phase === 'held')
     .onBegin((event) => {
       const accepted = beginAim({ x: (event.x - offsetX) / scale, y: (event.y - offsetY) / scale + getCameraY() }, Math.max(52, 24 / scale));
       beginCuePull(accepted);
@@ -315,7 +314,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
     })
     .onFinalize(() => cancelGesture()),
   [beginAim, beginCuePull, cancelGesture, focused,
-    getCameraY, offsetX, offsetY, paused, releaseAim, scale, state.phase, toolBusy, toolLayer, updatePull]);
+    getCameraY, offsetX, offsetY, releaseAim, scale, state.phase, toolBusy, toolLayer, updatePull]);
   useEffect(() => { onScore(score.pockets); }, [onScore, score.pockets]);
   const measure = (event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;
@@ -326,13 +325,12 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
   const recoveryCue = room.sideWallRestitution !== undefined && score.pockets === 1 && state.launches === 1
     ? 'The padded sides bounce you back. A lower pocket can save a fall.' : undefined;
   const worldName = worldForStage(session.worldStage).name;
-  const showWorldAnnouncement = session.worldAnnouncement && !pocketCountdown && focused && !paused && !toolLayer && !toolBusy && !dead;
+  const showWorldAnnouncement = session.worldAnnouncement && !pocketCountdown && focused && !toolLayer && !toolBusy && !dead;
   const choiceCue = pocketCountdown || challengeCue || session.routeCue || recoveryCue;
-  const status = dead ? session.message : paused ? 'Your run is paused.'
-    : state.phase === 'flying' ? session.message || 'Find your next landing…'
+  const status = dead ? session.message : state.phase === 'flying' ? session.message || 'Find your next landing…'
       : pocketCountdown || session.routeCue || recoveryCue || session.message || 'Pull back. Keep climbing.';
-  const showCue = hints && !session.hasAimed && score.pockets === 0 && state.phase === 'held' && !paused && !toolLayer;
-  const showChallengeCue = !showWorldAnnouncement && !showCue && (hints || !!pocketCountdown) && focused && !paused && state.phase === 'held'
+  const showCue = hints && !session.hasAimed && score.pockets === 0 && state.phase === 'held' && !toolLayer;
+  const showChallengeCue = !showWorldAnnouncement && !showCue && (hints || !!pocketCountdown) && focused && state.phase === 'held'
     && !toolLayer && choiceCue;
   const trayTop = insets.top + hudHeight + 20;
   const cueTop = trayTop + trayHeight + 8;
@@ -361,28 +359,24 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
     {toolLayer?.type !== 'setup' && <View testID="launch-hud" pointerEvents="box-none"
       onLayout={(event) => setHudHeight(event.nativeEvent.layout.height)}
       style={[styles.hud, { top: insets.top + 12, left: insets.left + 12, right: insets.right + 12 }]}>
-      <Pressable testID="launch-points-button" accessibilityRole="button" accessibilityLabel={`Points shop. ${commerce.wallet?.points ?? 0} points`}
-        disabled={toolBusy || !!toolLayer} onPress={openShop} style={[styles.walletBadge, highContrast && styles.contrastSurface]}>
-      <View style={styles.scoreBadge}>
-        <View style={styles.metric}>
-          <Text style={styles.metricLabel}>POCKETS</Text>
-          <Text testID="launch-score" accessibilityLabel={`${score.pockets} pockets reached`} style={styles.metricValue}>{score.pockets}</Text>
-        </View>
-        <View style={styles.metricDivider} />
-        <View style={styles.metric}>
-          <Text style={styles.metricLabel}>BEST</Text>
-          <Text testID="launch-best" accessibilityLabel={`Best ${best} pockets`} style={styles.bestValue}>{best}</Text>
+      <View testID="launch-score-card" style={[styles.scorePanel, highContrast && styles.contrastSurface]}>
+        <View style={styles.scoreBadge}>
+          <View style={styles.metric}>
+            <Text style={styles.metricLabel}>POCKETS</Text>
+            <Text testID="launch-score" accessibilityLabel={`${score.pockets} pockets reached`} style={styles.metricValue}>{score.pockets}</Text>
+          </View>
+          <View style={styles.metricDivider} />
+          <View style={styles.metric}>
+            <Text style={styles.metricLabel}>BEST</Text>
+            <Text testID="launch-best" accessibilityLabel={`Best ${best} pockets`} style={styles.bestValue}>{best}</Text>
+          </View>
         </View>
       </View>
-      <Text testID="launch-points-balance" style={styles.pointsLabel}>✧ {commerce.wallet?.points ?? 0} points <Text style={styles.pointsPlus}>＋</Text></Text>
-      </Pressable>
       <View pointerEvents="box-none" style={styles.hudActions}>
-        {!dead && !paused && <IconAction label="Pause" icon="pause" testID="launch-pause-button" disabled={toolBusy || !!toolLayer}
-          onPress={() => { cancelGesture(); setPaused(true); }} />}
         <IconAction label="Settings" icon="settings-outline" testID="launch-settings-button" disabled={toolBusy || !!toolLayer} onPress={() => void openSettings()} />
       </View>
     </View>}
-    {!paused && toolLayer?.type !== 'setup' && <View pointerEvents="box-none" onLayout={(event) => setTrayHeight(event.nativeEvent.layout.height)}
+    {toolLayer?.type !== 'setup' && <View pointerEvents="box-none" onLayout={(event) => setTrayHeight(event.nativeEvent.layout.height)}
       style={[styles.toolTray, { top: trayTop, left: insets.left + 12, right: insets.right + 12 }]}>
       <ToolTray inventory={session.tools.inventory} previewActive={session.tools.previewActive}
         reviveUsed={session.tools.reviveUsed} phase={state.phase} disabled={toolBusy || !!toolLayer}
@@ -406,34 +400,31 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
         {choiceCue}
       </Text>
     </View>}
-    {!showWorldAnnouncement && !showCue && !showChallengeCue && !toolLayer && !paused && !dead
+    {!showWorldAnnouncement && !showCue && !showChallengeCue && !toolLayer && !dead
       && (toolNotice || session.tools.previewActive || session.message.startsWith('+1')) && <View pointerEvents="none" style={[styles.cue, { top: cueTop }]}>
       <Text style={styles.hint}>{toolNotice || (session.tools.previewActive ? session.prediction?.horizon
         ? 'Preview ends at 8 seconds · … means the flight continues' : 'Preview ready · pull to see your flight' : session.message)}</Text>
     </View>}
     <Text testID="launch-status" accessibilityLiveRegion="polite" style={styles.screenReaderStatus}>{status}</Text>
 
-    {(dead || paused) && !toolLayer && <View style={[styles.modalLayer, { paddingTop: cueTop + 12, paddingBottom: insets.bottom + 16 }]}>
+    {dead && !toolLayer && <View style={[styles.modalLayer, { paddingTop: cueTop + 12, paddingBottom: insets.bottom + 16 }]}>
       <ScrollView style={styles.dialogScroller} contentContainerStyle={styles.dialogScroll}>
-      <View testID={dead ? 'launch-game-over' : 'launch-paused'} style={styles.overlay}>
+      <View testID="launch-game-over" style={styles.overlay}>
         <Text style={styles.overlayEyebrow}>PULLTHREAD</Text>
-        <Text accessibilityRole="header" style={styles.overlayTitle}>{dead ? 'Run over' : 'Paused'}</Text>
-        <Text style={styles.overlayCopy}>{dead ? session.message : 'Your next little leap can wait.'}</Text>
-        {dead && <Text style={styles.result}>{score.pockets} {score.pockets === 1 ? 'pocket' : 'pockets'} reached · best {best}</Text>}
-        {dead && !session.tools.reviveUsed && <Pressable testID="launch-revive-button" accessibilityRole="button"
+        <Text accessibilityRole="header" style={styles.overlayTitle}>Run over</Text>
+        <Text style={styles.overlayCopy}>{session.message}</Text>
+        <Text style={styles.result}>{score.pockets} {score.pockets === 1 ? 'pocket' : 'pockets'} reached · best {best}</Text>
+        {!session.tools.reviveUsed && <Pressable testID="launch-revive-button" accessibilityRole="button"
           disabled={toolBusy} onPress={() => chooseTool('revive')} style={styles.reviveButton}>
           <ToolIcon kind="revive" size={20} color="#28594b" />
           <Text style={styles.actionText}>{session.tools.inventory.revive > 0 ? 'Use free Revive' : `Revive · ${TOOL_COSTS.revive} points`}</Text>
         </Pressable>}
-        {dead && session.tools.reviveUsed && <Text style={styles.overlayCopy}>Revive used this run.</Text>}
+        {session.tools.reviveUsed && <Text style={styles.overlayCopy}>Revive used this run.</Text>}
         {!!awardNotice && <Text accessibilityLiveRegion="polite" style={styles.result}>{awardNotice}</Text>}
         <Pressable accessibilityRole="button" testID="launch-points-tools" onPress={openShop} disabled={toolBusy}
           style={styles.reviveButton}><Text style={styles.actionText}>Points & tools</Text></Pressable>
         <View style={styles.controls}>
-          {dead ? <Action label="Play again" testID="launch-restart-button" disabled={toolBusy} primary onPress={() => void restartRun()} /> : <>
-            <Action label="New run" testID="launch-restart-button" disabled={toolBusy} onPress={() => void restartRun()} />
-            <Action label="Resume" testID="launch-resume-button" primary onPress={() => setPaused(false)} />
-          </>}
+          <Action label="Play again" testID="launch-restart-button" disabled={toolBusy} primary onPress={() => void restartRun()} />
         </View>
       </View>
       </ScrollView>
@@ -539,10 +530,8 @@ const styles = StyleSheet.create({
   playArea: { ...StyleSheet.absoluteFill },
   canvasFrame: { overflow: 'hidden' },
   hud: { position: 'absolute', zIndex: 2, flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
-  walletBadge: { borderRadius: 18, borderWidth: 1, borderColor: '#c3b695', backgroundColor: 'rgba(255,248,231,0.95)', flexShrink: 1, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 5 },
+  scorePanel: { borderRadius: 18, borderWidth: 1, borderColor: '#c3b695', backgroundColor: 'rgba(255,248,231,0.95)', flexShrink: 1, paddingHorizontal: 12, paddingVertical: 8 },
   scoreBadge: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  pointsLabel: { fontFamily: 'NunitoSans_800ExtraBold', color: '#715416', fontSize: 10, textAlign: 'center', marginTop: 3 },
-  pointsPlus: { color: '#28594b' },
   toolTray: { position: 'absolute', zIndex: 2 },
   contrastSurface: { backgroundColor: '#fffdf5', borderColor: '#244b45' },
   metric: { alignItems: 'center', flexShrink: 1 },

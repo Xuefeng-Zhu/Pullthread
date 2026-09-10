@@ -50,7 +50,7 @@ export function PointsShop({ onClose, onCustomize, onLeaderboard }: {
     </View>
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={styles.balance}><Ionicons name="sparkles-outline" size={24} color="#875e14" />
-        <Text testID="points-shop-balance" style={styles.balanceText}>{commerce.wallet?.points ?? '—'} points</Text>
+        <Text testID="points-shop-balance" style={styles.balanceText}>{commerce.wallet?.points ?? 0} points</Text>
         {commerce.mode === 'mock' && <Text style={styles.demo}>DEMO</Text>}
       </View>
       {(onCustomize || onLeaderboard) && <View style={styles.destinations}>

@@ -189,8 +189,7 @@ describe('paid tools in the playable screen', () => {
     await fireEvent.press(view.getByTestId('tool-box'));
     expect(view.getByTestId('toolbox-free-slots').props.accessibilityLabel).toContain('Free tools, 3 of 3.');
     expect(view.getByText('Oldest on the left. When full, a pickup replaces your oldest free tool.')).toBeTruthy();
-    await fireEvent.press(view.getByTestId('toolbox-close'));
-    await fireEvent.press(view.getByTestId('tool-sail'));
+    await fireEvent.press(view.getByTestId('toolbox-free-sail'));
     expect(view.getByText('Use free tool')).toBeTruthy();
     await fireEvent.press(view.getByTestId('tool-setup-confirm'));
     expect(canvas().state.toolEffects?.sail).toBe(true);
