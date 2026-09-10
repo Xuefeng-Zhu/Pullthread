@@ -674,7 +674,8 @@ describe('endless Pull & Launch screen', () => {
     await fireEvent.press(view.getByTestId('launch-restart-button'));
     await measure(view);
     expect(latestCanvas().state.phase).toBe('held');
-    expect(view.getByTestId('tool-revive').props.accessibilityLabel).toContain('0 free');
+    expect(view.queryByTestId('tool-revive')).toBeNull();
+    expect(view.getByTestId('free-tool-slots').props.accessibilityLabel).toContain('Free tools, 0 of 3.');
     await view.unmount();
   });
 

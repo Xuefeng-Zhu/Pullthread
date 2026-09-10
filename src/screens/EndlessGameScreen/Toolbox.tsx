@@ -1,12 +1,13 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { CREATIVE_TOOLS, TOOL_COSTS, type CreativeToolKind, type ToolKind } from '../../commerce/contracts';
+import { TOOL_KINDS, TOOL_COSTS, isCreativeTool, type CreativeToolKind, type ToolKind } from '../../commerce/contracts';
 import type { ToolUse } from '../../commerce/toolUse';
 import { TOOL_DESCRIPTIONS, TOOL_LABELS } from '../../commerce/toolCatalog';
 import { ToolIcon } from '../../components/ToolIcon';
 import { FreeToolSlots } from './FreeToolSlots';
 import type { LaunchPoint } from '../../game/launch/types';
+import { isToolUnavailable, type ToolAvailability } from './toolAvailability';
 
 export interface ToolSetupData {
   cameraY: number;
@@ -15,28 +16,33 @@ export interface ToolSetupData {
   position: LaunchPoint;
 }
 
-export function Toolbox({ inventory, prepared, freeToolQueue, onChoose, onClose }: {
+export function Toolbox({ inventory, prepared, freeToolQueue, availability, onChoose, onClose }: {
   inventory: Readonly<Record<ToolKind, number>>; prepared: readonly ToolKind[]; freeToolQueue?: readonly ToolKind[];
-  onChoose: (kind: CreativeToolKind) => void; onClose: () => void;
+  availability: ToolAvailability; onChoose: (kind: ToolKind) => void; onClose: () => void;
 }) {
   return <View testID="toolbox" style={styles.toolbox} accessibilityViewIsModal>
-    <View style={styles.heading}><Text accessibilityRole="header" style={styles.title}>Make a trick shot</Text>
+    <View style={styles.heading}><Text accessibilityRole="header" style={styles.title}>Tools</Text>
       <Pressable testID="toolbox-close" accessibilityRole="button" onPress={onClose} style={styles.button}><Text style={styles.buttonText}>Close</Text></Pressable></View>
-    <Text style={styles.copy}>Combine different tools before you pull. Each lasts for your next flight.</Text>
+    <Text style={styles.copy}>Use a free pickup or spend points. Combine different trick shot tools before you pull.</Text>
     {freeToolQueue && <>
       <FreeToolSlots queue={freeToolQueue} testID="toolbox-free-slots" />
       <Text style={styles.small}>Oldest on the left. When full, a pickup replaces your oldest free tool.</Text>
     </>}
     <ScrollView testID="toolbox-scroll" contentContainerStyle={styles.cards}>
-      {CREATIVE_TOOLS.map((kind) => <Pressable key={kind} testID={`toolbox-${kind}`} disabled={prepared.includes(kind)}
-        accessibilityRole="button" accessibilityState={{ disabled: prepared.includes(kind) }}
-        accessibilityLabel={`${TOOL_LABELS[kind]}, ${inventory[kind] ?? 0} free, ${TOOL_COSTS[kind]} points${prepared.includes(kind) ? ', prepared' : ''}`}
-        onPress={() => onChoose(kind)} style={[styles.card, prepared.includes(kind) && styles.prepared]}>
+      {TOOL_KINDS.filter(kind => availability.creativeEnabled !== false || !isCreativeTool(kind)).map((kind) => {
+        const ready = prepared.includes(kind) || kind === 'preview' && availability.previewActive;
+        const unavailable = isToolUnavailable(kind, availability);
+        const status = ready ? '✓ Prepared' : kind === 'revive' && availability.reviveUsed ? 'Used this run'
+          : kind === 'revive' && availability.phase !== 'failed' ? 'After falling' : undefined;
+        return <Pressable key={kind} testID={`toolbox-${kind}`} disabled={unavailable}
+        accessibilityRole="button" accessibilityState={{ disabled: unavailable }}
+        accessibilityLabel={`${TOOL_LABELS[kind]}, ${inventory[kind] ?? 0} free, ${TOOL_COSTS[kind]} points${status ? `, ${status}` : ''}`}
+        onPress={() => onChoose(kind)} style={[styles.card, ready && styles.prepared, unavailable && styles.unavailable]}>
         <ToolIcon kind={kind} size={30} />
         <Text style={styles.cardTitle}>{TOOL_LABELS[kind]}</Text>
         <Text style={styles.cardCopy}>{TOOL_DESCRIPTIONS[kind]}</Text>
-        <Text style={styles.price}>{prepared.includes(kind) ? '✓ Prepared' : `${inventory[kind] ?? 0} free · ${TOOL_COSTS[kind]} points`}</Text>
-      </Pressable>)}
+        <Text style={styles.price}>{`${inventory[kind] ?? 0} free · ${TOOL_COSTS[kind]} points`}{status ? ` · ${status}` : ''}</Text>
+      </Pressable>; })}
     </ScrollView>
   </View>;
 }
@@ -145,6 +151,7 @@ const styles = StyleSheet.create({
   cards: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingBottom: 12 },
   card: { width: '48%', flexGrow: 1, padding: 12, borderRadius: 16, borderWidth: 1, borderColor: '#c3b695', backgroundColor: '#f4ecd8', gap: 7 },
   prepared: { backgroundColor: '#dce9cf', borderColor: '#28594b' },
+  unavailable: { opacity: 0.64 },
   cardTitle: { fontFamily: 'NunitoSans_800ExtraBold', fontSize: 15, color: '#244b45' },
   cardCopy: { fontFamily: 'NunitoSans_600SemiBold', fontSize: 13, lineHeight: 18, color: '#49635b' },
   price: { fontFamily: 'NunitoSans_800ExtraBold', fontSize: 13, color: '#28594b', marginVertical: 8 },

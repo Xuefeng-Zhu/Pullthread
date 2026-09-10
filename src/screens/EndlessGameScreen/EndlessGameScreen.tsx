@@ -216,7 +216,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
       return;
     }
     if (session.tools.inventory[kind] > 0) {
-      if (consumeFreeTool(kind)) { setPaused(false); resume(); return; }
+      if (consumeFreeTool(kind)) { setToolLayer(null); setPaused(false); resume(); return; }
     }
     setToolLayer({ type: 'tool', kind });
   }, [resume, suspend, toolBusy, consumeFreeTool, getTeleportTargets, session]);
@@ -269,7 +269,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
     } else void buyTool(use);
   };
   const openToolbox = () => {
-    if (toolBusy || state.phase !== 'held') return;
+    if (toolBusy) return;
     suspend(); setToolError(''); setToolLayer({ type: 'toolbox' });
   };
   const recoverTool = useCallback(async () => {
@@ -459,7 +459,9 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
       }} />}
     {toolLayer && toolLayer.type !== 'land' && toolLayer.type !== 'setup' && <View style={[styles.shopLayer,
       { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 12, paddingLeft: insets.left + 14, paddingRight: insets.right + 14 }]}>
-      {toolLayer.type === 'toolbox' ? <Toolbox inventory={session.tools.inventory} prepared={preparedTools} freeToolQueue={session.tools.freeToolQueue} onChoose={chooseTool} onClose={closeTools} /> : toolLayer.type === 'shop' ? <PointsShop onClose={closeTools}
+      {toolLayer.type === 'toolbox' ? <Toolbox inventory={session.tools.inventory} prepared={preparedTools} freeToolQueue={session.tools.freeToolQueue}
+        availability={{ phase: state.phase, previewActive: session.tools.previewActive, reviveUsed: session.tools.reviveUsed, preparedTools, creativeEnabled: session.tools.creativeEnabled }}
+        onChoose={chooseTool} onClose={closeTools} /> : toolLayer.type === 'shop' ? <PointsShop onClose={closeTools}
         onCustomize={() => setStudioOpen(true)} onLeaderboard={() => setWeeklyOpen(true)} /> : <ScrollView contentContainerStyle={styles.dialogScroll} style={styles.dialogScroller}>
         <View testID={toolLayer.type === 'recovery' ? 'tool-recovery' : 'tool-confirmation'} style={styles.overlay} accessibilityViewIsModal>
           {toolLayer.type === 'tool' ? <>

@@ -67,6 +67,11 @@ async function mount(width = 390, height = 844): Promise<ScreenView> {
   return view;
 }
 
+async function selectToolboxTool(view: ScreenView, tool: 'preview' | 'teleport') {
+  await fireEvent.press(view.getByTestId('tool-box'));
+  await fireEvent.press(view.getByTestId(`toolbox-${tool}`));
+}
+
 function pressHandler(view: ScreenView, id: string): () => void {
   // Match fireEvent's handler lookup but batch both taps before a rerender.
   let fiber = view.getByTestId(id).unstable_fiber;
@@ -78,7 +83,7 @@ function pressHandler(view: ScreenView, id: string): () => void {
 describe('paid tools in the playable screen', () => {
   test('Preview confirmation can be cancelled without debiting or arming the tool', async () => {
     const view = await mount();
-    await fireEvent.press(view.getByTestId('tool-preview'));
+    await selectToolboxTool(view, 'preview');
     expect(view.getByTestId('tool-confirmation')).toBeTruthy();
     expect(canvas().previewActive).toBe(false);
     await fireEvent.press(view.getByTestId('tool-confirm-cancel'));
@@ -89,7 +94,7 @@ describe('paid tools in the playable screen', () => {
 
   test('confirmed paid Preview delivers once after acknowledgement despite same-frame double taps', async () => {
     const view = await mount();
-    await fireEvent.press(view.getByTestId('tool-preview'));
+    await selectToolboxTool(view, 'preview');
     const press = pressHandler(view, 'tool-confirm-buy');
     await act(async () => { press(); press(); });
     expect(service.redeemTool).toHaveBeenCalledTimes(1);
@@ -104,7 +109,7 @@ describe('paid tools in the playable screen', () => {
     // A newer verified wallet may have spent the previously displayed points.
     service.getWallet.mockResolvedValue({ points: 0, revision: 2, environment: 'sandbox' });
     const view = await mount();
-    await fireEvent.press(view.getByTestId('tool-preview'));
+    await selectToolboxTool(view, 'preview');
     await fireEvent.press(view.getByTestId('tool-get-points'));
     await fireEvent.press(view.getByTestId('points-guest-disclosure'));
     await fireEvent.press(view.getByTestId('buy-pullthread_points_100'));
@@ -120,7 +125,7 @@ describe('paid tools in the playable screen', () => {
     const original = service.redeemTool.getMockImplementation()!;
     service.redeemTool.mockImplementationOnce(async (input) => { await original(input); throw new Error('connection lost'); });
     const view = await mount();
-    await fireEvent.press(view.getByTestId('tool-preview'));
+    await selectToolboxTool(view, 'preview');
     await fireEvent.press(view.getByTestId('tool-confirm-buy'));
     expect(view.getByTestId('tool-recovery')).toBeTruthy();
     expect(canvas().previewActive).toBe(false);
@@ -133,11 +138,13 @@ describe('paid tools in the playable screen', () => {
     expect(mockStore.getState().wallet).toEqual({ points: 75, revision: 10, environment: 'sandbox' });
   });
 
-  test('the compact toolbox shows all six tools and a cancelled setup never spends points', async () => {
+  test('the single pickup row has no fixed tool shortcuts and the toolbox shows all nine tools', async () => {
     const view = await mount(320, 568);
+    for (const kind of ['preview', 'teleport', 'revive']) expect(view.queryByTestId(`tool-${kind}`)).toBeNull();
+    for (let slot = 0; slot < 3; slot++) expect(view.getByTestId(`free-tool-slots-${slot}`)).toBeTruthy();
     await fireEvent.press(view.getByTestId('tool-box'));
     expect(view.getByTestId('toolbox-scroll')).toBeTruthy();
-    for (const kind of ['bounce', 'pin', 'velcro', 'sail', 'needle', 'stitch']) expect(view.getByTestId(`toolbox-${kind}`)).toBeTruthy();
+    for (const kind of ['preview', 'teleport', 'revive', 'bounce', 'pin', 'velcro', 'sail', 'needle', 'stitch']) expect(view.getByTestId(`toolbox-${kind}`)).toBeTruthy();
     await fireEvent.press(view.getByTestId('toolbox-sail'));
     expect(view.getByTestId('tool-setup-sail')).toBeTruthy();
     expect(view.queryByTestId('launch-hud')).toBeNull();
@@ -161,7 +168,7 @@ describe('paid tools in the playable screen', () => {
     await fireEvent.press(view.getByTestId('tool-box'));
     expect(view.getByTestId('toolbox-sail').props.accessibilityState.disabled).toBe(true);
     await fireEvent.press(view.getByTestId('toolbox-close'));
-    await fireEvent.press(view.getByTestId('tool-preview'));
+    await selectToolboxTool(view, 'preview');
     await fireEvent.press(view.getByTestId('tool-confirm-buy'));
     expect(canvas().previewActive).toBe(true);
     expect(canvas().state.toolEffects).toMatchObject({ sail: true, needle: {} });
@@ -178,11 +185,12 @@ describe('paid tools in the playable screen', () => {
     });
     const view = await mount();
     expect(view.getByTestId('free-tool-slots').props.accessibilityLabel).toBe('Free tools, 3 of 3. Oldest to newest: Preview, Silk Sail, Needle Tip. The next pickup replaces Preview.');
-    for (let slot = 0; slot < 3; slot++) expect(view.getByTestId(`free-tool-slots-${slot}`)).toBeTruthy();
+    for (const kind of ['preview', 'sail', 'needle']) expect(view.getByTestId(`tool-${kind}`)).toBeTruthy();
     await fireEvent.press(view.getByTestId('tool-box'));
     expect(view.getByTestId('toolbox-free-slots').props.accessibilityLabel).toContain('Free tools, 3 of 3.');
     expect(view.getByText('Oldest on the left. When full, a pickup replaces your oldest free tool.')).toBeTruthy();
-    await fireEvent.press(view.getByTestId('toolbox-sail'));
+    await fireEvent.press(view.getByTestId('toolbox-close'));
+    await fireEvent.press(view.getByTestId('tool-sail'));
     expect(view.getByText('Use free tool')).toBeTruthy();
     await fireEvent.press(view.getByTestId('tool-setup-confirm'));
     expect(canvas().state.toolEffects?.sail).toBe(true);
@@ -202,7 +210,8 @@ describe('paid tools in the playable screen', () => {
       return run;
     });
     const view = await mount(320, 568);
-    expect(view.queryByTestId('free-tool-slots')).toBeNull();
+    expect(view.getByTestId('free-tool-slots')).toBeTruthy();
+    expect(view.getAllByTestId('tool-sail').length).toBeGreaterThan(0);
     await fireEvent.press(view.getByTestId('tool-box'));
     expect(view.queryByTestId('toolbox-free-slots')).toBeNull();
     expect(view.queryByText('Oldest on the left. When full, a pickup replaces your oldest free tool.')).toBeNull();
@@ -231,7 +240,7 @@ describe('paid tools in the playable screen', () => {
     await fireEvent.press(view.getByTestId('tool-box'));
     await fireEvent.press(view.getByTestId('toolbox-sail'));
     await fireEvent.press(view.getByTestId('tool-setup-confirm'));
-    await fireEvent.press(view.getByTestId('tool-teleport'));
+    await selectToolboxTool(view, 'teleport');
     await fireEvent.press(view.getAllByLabelText(/Land in visible pocket/)[0]);
     expect(view.getByTestId('land-discard-warning')).toBeTruthy();
     expect(canvas().state.toolEffects?.sail).toBe(true);
@@ -262,9 +271,9 @@ describe('paid tools in the playable screen', () => {
 
   test('Preview alone survives Land without a creative-tool discard warning', async () => {
     const view = await mount();
-    await fireEvent.press(view.getByTestId('tool-preview'));
+    await selectToolboxTool(view, 'preview');
     await fireEvent.press(view.getByTestId('tool-confirm-buy'));
-    await fireEvent.press(view.getByTestId('tool-teleport'));
+    await selectToolboxTool(view, 'teleport');
     await fireEvent.press(view.getAllByLabelText(/Land in visible pocket/)[0]);
     expect(view.queryByTestId('land-discard-warning')).toBeNull();
     await fireEvent.press(view.getByTestId('tool-confirm-buy'));
