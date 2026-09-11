@@ -24,7 +24,7 @@ Machine-local test logs: `/private/tmp/pullthread-tools-jest-final.log`, `/priva
 
 ## Store and device acceptance
 
-Live checkout is disabled by default. No `.env` with RevenueCat/Firebase app configuration was present during implementation. [COMMERCE_SETUP.md](COMMERCE_SETUP.md) describes the `points` offering, consumable products, callable functions, webhook, secrets, environment gates, and remaining native-store acceptance checks. `.env.example` contains public configuration names only. No backend was deployed and no App Store / Google Play product was published.
+Live checkout is disabled by default in source-controlled example configuration. The current connected web sandbox status is tracked in [IPHONE_SHOP_SETUP_STATUS.md](IPHONE_SHOP_SETUP_STATUS.md): the Worker and D1 are deployed, RevenueCat Billing is connected in Stripe Test mode, and the local browser opens sandbox checkout. No sandbox payment or App Store / Google Play product has been verified.
 
 The signed **iOS Release build succeeded**, with RevenueCat's native dependency restored. Strict signature verification passed, and its production runtime hashes match the verified checkout. The installable app and verification record are at `/private/tmp/pullthread-tools-native-artifact/20260906T230103Z/Pullthread.app` and `verification.json` in that same directory. On September 6, 2026, the update was installed on Frank iPhone17 and launched successfully after unlocking; a subsequent device process check confirmed Pullthread remained running. Existing app data was preserved. Physical touch feel, sound/haptics, actual Apple sandbox checkout, and Google Play license-tester checkout remain unverified; no Android SDK or test device was available locally.
 

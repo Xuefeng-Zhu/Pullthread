@@ -13,7 +13,8 @@ Endless flight is the whole game. The climb and earned tools work offline,
 without an account or purchase. Your best pocket count is saved locally.
 Optional points purchases retain their separate commerce configuration.
 The points backend uses Cloudflare Workers and D1, with Firebase guest identity
-and RevenueCat store verification. See [commerce setup](docs/COMMERCE_SETUP.md).
+and RevenueCat verification for native stores and Web Billing. See
+[commerce setup](docs/COMMERCE_SETUP.md).
 
 ## Playing
 

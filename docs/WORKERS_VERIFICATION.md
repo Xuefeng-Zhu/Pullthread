@@ -1,4 +1,4 @@
-# Cloudflare commerce verification — September 7, 2026
+# Cloudflare commerce verification — September 11, 2026
 
 The Workers/D1 backend and native transport are implemented and verified locally.
 The Worker and D1 database are now deployed, with live HTTP health/auth checks.
@@ -24,20 +24,21 @@ The existing gameplay redesign and installed iPhone build are preserved.
   envelopes, and preserves operation IDs and interrupted-tool recovery. Errors
   never cause a silent switch to another ledger.
 - `worker/wrangler.jsonc`, the D1 migration, package lockfile, and CI job provide
-  reproducible local checks. Provider secrets and the commerce environment gate
-  are unset. Public app configuration selects Workers but keeps purchases off.
+  reproducible local checks. RevenueCat Web Billing secrets are installed and
+  the sandbox commerce gate is enabled. Production remains disabled.
 
 ## Checks performed
 
 | Layer | Evidence |
 | --- | --- |
-| App suite | 51 suites, 723 tests passed. Includes transport, native identity, commerce journal and gameplay regression coverage. |
-| Worker suite | 57 tests passed against Node and actual Miniflare/Workerd/D1. Includes signed-token rejection cases, schema startup, atomic rollback, concurrent credit/debit/refund, alias ownership, bulk query bounds and reconciliation backlogs. |
+| App suite | 76 suites, 1,373 tests passed. Includes web/native transport, identity, commerce journal, music, tools and gameplay regression coverage. |
+| Worker suite | 76 tests passed against Node and actual Miniflare/Workerd/D1. Includes signed-token rejection cases, schema startup, atomic rollback, RevenueCat Billing, concurrent credit/debit/refund, alias ownership, bulk query bounds and reconciliation backlogs. |
 | Full local integration | Native HTTP adapter → bundled Worker → fixture signing keys/provider → real D1. Verified exact string transaction ID, lost debit response, receipt recovery without another debit, tool refund, store refund, and stale owned-provider response rejection. |
 | Retained Firebase backend | 15 unit tests and 35 emulator tests passed. Historical contracts and Firestore rules remain intact. |
 | Static/build checks | Root lint, root/Worker type checking, and diff whitespace checks passed. Expo production export succeeded for web, iOS and Android. Wrangler dry-run bundle succeeded: 68.92 KiB, 18.10 KiB gzip. |
 | Local HTTP | `http://127.0.0.1:8787/health`: 200, D1 ready, commerce unconfigured. Missing-auth wallet/webhook: 401. Cross-origin request: 403. |
-| Deployed HTTP | The public Worker health endpoint returns 200 with D1 ready and commerce unconfigured. Missing-auth wallet/webhook calls return 401; cross-origin calls return 403. |
+| Deployed HTTP | The public Worker health endpoint returns 200 with D1 ready and commerce configured for sandbox. RevenueCat's authorized test webhook returns 200. Missing-auth wallet/webhook calls return 401; cross-origin calls return 403. |
+| Connected web catalog | RevenueCat Billing is connected to Stripe Test mode. The local browser loads all three localized sandbox prices, opens the 100-point sandbox checkout, and returns cleanly on cancellation. No payment was submitted. |
 
 The integrated runtime test caught and verified the fix for Workerd's unsupported
 `redirect: 'error'` option. Worker outbound requests now use manual redirects and
@@ -59,20 +60,23 @@ confirmed no existing Pullthread Worker or D1 database before creation.
 - Worker: `pullthread-commerce`.
 - URL: https://pullthread-commerce.pullthread-commerce-worker.workers.dev
 - Health: https://pullthread-commerce.pullthread-commerce-worker.workers.dev/health
-- Version: `9e6a3c3d-f466-4b4a-ba57-33441f2efafe`.
+- Version: `c7f1c790-64d8-43b1-9419-a554f55467eb`.
 - D1 database: `pullthread-commerce`, ID `d1d6331e-e9a8-4aec-b20b-f79637758489`, region WNAM.
-- Migration: `0001_commerce.sql`, all ten schema commands applied successfully.
+- Migrations: `0001_commerce.sql` through `0005_web_billing.sql` applied successfully.
 
 Wrangler received account/user read, Workers script write, D1 write, and
 background access. No paid plan was activated. The app's gitignored local
-configuration now contains the public Worker URL; its purchase gate stays off.
+configuration now contains the public Worker URL and RevenueCat web public key;
+its sandbox purchase gate is enabled.
 
 ## Remaining connected acceptance
 
 Apple/RevenueCat product and credential setup is still incomplete. No new
-purchase-enabled iPhone build was installed. Complete the steps in
-[the iPhone setup record](IPHONE_SHOP_SETUP_STATUS.md), then verify a real Apple
-sandbox checkout, refund delivery and interrupted purchase/tool recovery.
+purchase-enabled iPhone build was installed. Web checkout opens in provider
+sandbox, but payment, wallet credit, refund delivery, and interrupted
+purchase/tool recovery still need connected acceptance. Complete the steps in
+[the iPhone setup record](IPHONE_SHOP_SETUP_STATUS.md), then verify Apple sandbox
+checkout separately.
 Local provider fixtures do not prove these connected services or free-tier CPU
 and daily-quota behavior. Any existing paid Firestore ledger requires a complete
 data cutover before changing its clients; this change does not migrate cloud data.

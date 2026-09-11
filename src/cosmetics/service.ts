@@ -1,12 +1,14 @@
 import { readCommerceConfig, resolveCommerceBackend } from '../services/commerce/config';
+import type { NativeRuntimeLoader } from '../services/commerce/nativeService';
 import { readWallet } from '../services/commerce/validation';
 import { partById, type CosmeticAccount, type CosmeticService } from './catalog';
 
-export function createCosmeticService(): CosmeticService {
+export function createCosmeticService(load?: NativeRuntimeLoader): CosmeticService {
   const config = readCommerceConfig();
+  const loadRuntime = load ?? (async () => (await import('../services/commerce/nativeRuntime')).loadNativeRuntime(config, 'cosmetics'));
   const runtime = async () => {
-    if (config.mock || !['ios', 'android'].includes(config.platform) || !config.environment || !config.firebase.apiKey || resolveCommerceBackend(config).provider !== 'workers') throw new Error('Purchases are available in the connected mobile app.');
-    return (await import('../services/commerce/nativeRuntime')).loadNativeRuntime(config, 'cosmetics');
+    if (config.mock || !['ios', 'android', 'web'].includes(config.platform) || !config.environment || !config.firebase.apiKey || resolveCommerceBackend(config).provider !== 'workers') throw new Error('Button purchases are unavailable in this build.');
+    return loadRuntime();
   };
   const call = async (endpoint: string, payload: Record<string, unknown>): Promise<CosmeticAccount> => {
     const native = await runtime();

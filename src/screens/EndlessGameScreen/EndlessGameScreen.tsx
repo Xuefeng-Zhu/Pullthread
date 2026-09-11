@@ -63,7 +63,7 @@ function IconAction({ label, icon, onPress, testID, disabled = false, compact = 
   </Pressable>;
 }
 
-type ToolLayer = { type: 'shop' } | { type: 'toolbox' }
+type ToolLayer = { type: 'shop'; initialScreen: 'hub' | 'store' } | { type: 'toolbox' }
   | { type: 'setup'; kind: CreativeToolKind; data: ToolSetupData; draft?: ToolUse }
   | { type: 'tool'; kind: ToolKind; pocketId?: string; use?: ToolUse; discardsPrepared?: boolean }
   | { type: 'land'; cameraY: number; pockets: readonly { id: string; x: number; y: number; width: number }[] }
@@ -186,9 +186,9 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
     }
     setToolLayer(null); setToolError(''); resume();
   }, [resume, toolBusy]);
-  const openShop = useCallback(() => {
+  const openShop = useCallback((initialScreen: 'hub' | 'store') => {
     returnToRecovery.current = toolLayer?.type === 'recovery';
-    suspend(); setToolLayer({ type: 'shop' });
+    suspend(); setToolLayer({ type: 'shop', initialScreen });
     void useCommerceStore.getState().initialize();
   }, [suspend, toolLayer]);
   const restartRun = useCallback(async () => {
@@ -366,7 +366,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
         { top: insets.top + 12, left: insets.left + hudInset, right: insets.right + hudInset }]}>
       <Pressable testID="launch-score-card" accessibilityRole="button"
         accessibilityLabel={`Points and tools. ${score.pockets} pockets reached. Best ${best} pockets`}
-        disabled={toolBusy || !!toolLayer} onPress={openShop}
+        disabled={toolBusy || !!toolLayer} onPress={() => openShop('hub')}
         style={({ pressed }) => [styles.scorePanel, compactHud && styles.scorePanelCompact,
           microHud && styles.scorePanelMicro, highContrast && styles.contrastSurface,
           (toolBusy || !!toolLayer) && styles.disabled, pressed && styles.pressed]}>
@@ -433,7 +433,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
         </Pressable>}
         {session.tools.reviveUsed && <Text style={styles.overlayCopy}>Revive used this run.</Text>}
         {!!awardNotice && <Text accessibilityLiveRegion="polite" style={styles.result}>{awardNotice}</Text>}
-        <Pressable accessibilityRole="button" testID="launch-points-tools" onPress={openShop} disabled={toolBusy}
+        <Pressable accessibilityRole="button" testID="launch-points-tools" onPress={() => openShop('hub')} disabled={toolBusy}
           style={styles.reviveButton}><Text style={styles.actionText}>Points & tools</Text></Pressable>
         <View style={styles.controls}>
           <Action label="Play again" testID="launch-restart-button" disabled={toolBusy} primary onPress={() => void restartRun()} />
@@ -458,13 +458,13 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
       free={session.tools.inventory[toolLayer.kind]} points={commerce.wallet?.points ?? 0} commerceReady={commerce.status === 'ready'}
       busy={toolBusy} error={toolError} validate={session.validateUse} placement={session.placementForTool}
       onConfirm={confirmCreativeTool} onCancel={closeTools} onGetPoints={(draft) => {
-        returnToSetup.current = { ...toolLayer, draft }; openShop();
+        returnToSetup.current = { ...toolLayer, draft }; openShop('store');
       }} />}
     {toolLayer && toolLayer.type !== 'land' && toolLayer.type !== 'setup' && <View style={[styles.shopLayer,
       { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 12, paddingLeft: insets.left + 14, paddingRight: insets.right + 14 }]}>
       {toolLayer.type === 'toolbox' ? <Toolbox inventory={session.tools.inventory} prepared={preparedTools} freeToolQueue={session.tools.freeToolQueue}
         availability={{ phase: state.phase, previewActive: session.tools.previewActive, reviveUsed: session.tools.reviveUsed, preparedTools, creativeEnabled: session.tools.creativeEnabled }}
-        onChoose={chooseTool} onClose={closeTools} /> : toolLayer.type === 'shop' ? <PointsShop onClose={closeTools}
+        onChoose={chooseTool} onClose={closeTools} /> : toolLayer.type === 'shop' ? <PointsShop initialScreen={toolLayer.initialScreen} onClose={closeTools}
         onCustomize={() => setStudioOpen(true)} onLeaderboard={() => setWeeklyOpen(true)} /> : <ScrollView contentContainerStyle={styles.dialogScroll} style={styles.dialogScroller}>
         <View testID={toolLayer.type === 'recovery' ? 'tool-recovery' : 'tool-confirmation'} style={styles.overlay} accessibilityViewIsModal>
           {toolLayer.type === 'tool' ? <>
@@ -483,14 +483,14 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
                 : commerce.status === 'ready' && (commerce.wallet?.points ?? 0) >= TOOL_COSTS[toolLayer.kind]
                 ? <Action label={`Use ${TOOL_COSTS[toolLayer.kind]} points`} testID="tool-confirm-buy" primary disabled={toolBusy}
                   onPress={() => void buyTool(toolLayer.use ?? toolLayer.kind, toolLayer.pocketId)} />
-                : <Action label="Get points" testID="tool-get-points" primary disabled={toolBusy} onPress={openShop} />}
+                : <Action label="Get points" testID="tool-get-points" primary disabled={toolBusy} onPress={() => openShop('store')} />}
             </View>
           </> : <>
             <Text accessibilityRole="header" style={styles.overlayTitle}>Keep your tool</Text>
             <Text style={styles.overlayCopy}>{toolError || 'Checking your saved tool and points.'}</Text>
             <Text style={[styles.overlayCopy, { marginTop: 10 }]}>Your run is paused. Retrying uses the same purchase request.</Text>
             <View style={styles.controls}>
-              <Action label="Get points" testID="tool-recovery-shop" disabled={toolBusy} onPress={openShop} />
+              <Action label="Get points" testID="tool-recovery-shop" disabled={toolBusy} onPress={() => openShop('store')} />
               <Action label="Try again" testID="tool-recovery-retry" primary disabled={toolBusy} onPress={() => void recoverTool()} />
             </View>
           </>}

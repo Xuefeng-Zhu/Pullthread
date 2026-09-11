@@ -28,7 +28,8 @@ export function readCommerceConfig(): CommerceConfig {
     backendUrl: process.env.EXPO_PUBLIC_COMMERCE_BACKEND_URL,
     environment: environment === 'sandbox' || environment === 'production' ? environment : undefined,
     revenueCatKey: Platform.OS === 'ios' ? process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY
-      : process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY,
+      : Platform.OS === 'android' ? process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY
+        : Platform.OS === 'web' ? process.env.EXPO_PUBLIC_REVENUECAT_WEB_API_KEY : undefined,
     firebase: {
       apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
       authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,

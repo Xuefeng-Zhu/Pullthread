@@ -12,11 +12,12 @@
   "vars": {
     "FIREBASE_PROJECT_ID": "pullthread-xuefeng-zhu",
     "REVENUECAT_PROJECT_ID": "f8ab5b69",
-    "REVENUECAT_APP_IDS": "",
-    "COMMERCE_ENABLED_ENVIRONMENTS": "",
+    "REVENUECAT_APP_IDS": "app518bafad2a",
+    "COMMERCE_ENABLED_ENVIRONMENTS": "sandbox",
     "LEADERBOARD_ENABLED_ENVIRONMENTS": "sandbox",
     "COSMETICS_ENABLED_ENVIRONMENTS": "sandbox",
-    "LEADERBOARD_PRIZES_ENABLED": ""
+    "LEADERBOARD_PRIZES_ENABLED": "",
+    "WEB_ALLOWED_ORIGINS": "http://localhost:8081,http://127.0.0.1:8081"
   },
   "d1_databases": [
     {

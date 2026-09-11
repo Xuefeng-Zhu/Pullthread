@@ -1,7 +1,9 @@
-# iPhone shop setup status — September 7, 2026
+# Shop setup status — September 11, 2026
 
-The current installed iPhone build and production web preview still have
-commerce disabled. No new purchase-enabled build has been installed.
+The current installed iPhone build still has commerce disabled. The local web
+configuration now targets the connected RevenueCat Billing sandbox. It loads
+the provider offering and opens sandbox checkout, but no test payment has been
+submitted yet.
 
 ## Verified account state
 
@@ -17,23 +19,36 @@ commerce disabled. No new purchase-enabled build has been installed.
 - Prepared its App Store form for `com.xuefengzhu.pullthread`. RevenueCat refused
   to save without the Apple in-app purchase Key ID and Issuer ID; the app
   connection is not created yet. No Apple key was read, created, or uploaded.
+- RevenueCat Billing is connected to the existing Stripe account in **Test**
+  mode. The web app is `Pullthread (RevenueCat Billing)`, RevenueCat app ID
+  `app518bafad2a`.
+- Created the three consumable Web Billing products with identifiers
+  `pullthread_points_100`, `pullthread_points_550`, and
+  `pullthread_points_1200`, priced at USD $0.99, $4.99, and $9.99.
+- Created the default `points` offering with packages `points_100`,
+  `points_550`, and `points_1200` attached to the matching products.
+- Created a scoped RevenueCat V2 key for the Worker with read-only access to
+  customer purchases and project products. It is not stored in the repository.
+- Added a RevenueCat webhook for this web app, limited to sandbox non-renewing
+  purchases and cancellations. RevenueCat's test delivery returned HTTP 200.
 
 ## Local preparation
 
 Retrieved the existing app's public Firebase SDK settings with the Firebase CLI
 and placed them in gitignored `.env.local`. The mode is native, environment is
-sandbox, and the enabled flag stays zero. The RevenueCat iOS key remains empty
-until the app connection is configured. No secret values are stored in this
-report. The public Worker URL is now configured locally; the purchase gate stays off.
+sandbox, the web RevenueCat public key is configured, and the local commerce
+gate is enabled. The RevenueCat iOS key remains empty until the App Store app
+connection is configured. No secret values are stored in this report. The
+public Worker URL is configured locally.
 
 ## Workers migration and remaining setup
 
-The selected backend is now **Cloudflare Workers + D1**. Firebase stays on
+The selected backend is **Cloudflare Workers + D1**. Firebase stays on
 Spark for guest authentication. A Blaze upgrade is no longer a setup step.
 
-- The local Worker and D1 schema run successfully. Its health endpoint reports
-  the database ready and commerce unconfigured. Unauthenticated wallet/webhook
-  calls return 401; cross-origin browser calls return 403.
+- The local Worker and D1 schema run successfully. The web-billing migration
+  preserves existing transaction lots and expands verified stores to RevenueCat
+  Billing, Stripe, and Paddle. Browser calls require an exact configured origin.
 - The native HTTP adapter, real bundled Workerd runtime, JWT verification,
   provider fixtures, and D1 passed an integrated purchase/debit/recovery/refund
   scenario. Firebase and RevenueCat were simulated in this check; it is not a
@@ -42,24 +57,34 @@ Spark for guest authentication. A Blaze upgrade is no longer a setup step.
   recovery contract. Existing Functions builds remain supported.
 - Wrangler authorization is complete with account/user read, Workers script
   write, D1 write, and background access. The Worker and new D1 database are
-  deployed. All ten schema commands succeeded, and the
+  deployed. Migration `0005_web_billing.sql` executed all eleven commands and
+  Worker version `c7f1c790-64d8-43b1-9419-a554f55467eb` is live with the web
+  app allowlisted and the sandbox commerce gate enabled.
+  The configured localhost browser preflight returns HTTP 204, and the
   [live health endpoint](https://pullthread-commerce.pullthread-commerce-worker.workers.dev/health)
-  reports D1 ready and commerce unconfigured. Protected routes reject missing
-  authentication. No paid Cloudflare plan was activated.
+  reports D1 ready and commerce configured for sandbox. Protected routes reject
+  missing authentication. No paid Cloudflare plan was activated.
+- The local browser loads the three provider prices, requires the browser-wallet
+  disclosure, and opens RevenueCat's Stripe-backed sandbox checkout for the
+  100-point pack. Cancelling returns cleanly to the offers without a balance
+  error. The payment was not submitted, so wallet credit and refund delivery
+  remain unverified.
 - No Firebase ledger data has been migrated. Any existing paid environment needs
   a complete ledger cutover before switching clients; see [COMMERCE_SETUP.md](COMMERCE_SETUP.md).
 
 Remaining steps:
 
-1. Sign in to [App Store Connect](https://appstoreconnect.apple.com/apps).
-2. Complete the [RevenueCat iPhone connection](https://app.revenuecat.com/projects/f8ab5b69/new-app/app_store)
+1. Complete a RevenueCat Billing sandbox payment for each pack, then validate
+   wallet credit, paid tool use, refresh recovery, duplicate delivery, and refund.
+2. Sign in to [App Store Connect](https://appstoreconnect.apple.com/apps), then
+   complete the [RevenueCat iPhone connection](https://app.revenuecat.com/projects/f8ab5b69/new-app/app_store)
    with the appropriate Apple purchase credentials. Confirm the three consumable
    point packs and the `points` offering described in [COMMERCE_SETUP.md](COMMERCE_SETUP.md).
-3. Configure Worker secrets, allow the sandbox environment, and set the RevenueCat
-   public iOS key. The Worker URL is configured. Enable the client in a sandbox build.
-4. Rebuild/install the iPhone app and validate an Apple sandbox checkout,
-   wallet credit, paid tool use, and interrupted purchase recovery before
-   claiming the shop works. Real-money production activation is separate.
+3. Add the iOS app ID to the Worker allowlist and set its public SDK key after
+   the Apple connection exists.
+4. Validate an Apple sandbox checkout, wallet
+   credit, paid tool use, interrupted purchase recovery, and refund delivery
+   before claiming either shop works. Real-money production activation is separate.
 
 The existing mock service is a development-only demo, not live purchase proof.
 The native adapter audit found no definite code defect explaining this screen;

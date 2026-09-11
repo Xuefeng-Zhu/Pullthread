@@ -22,6 +22,27 @@ function json(value: unknown, status = 200): Response {
   } });
 }
 
+function withCors(response: Response, origin: string | undefined, preflight = false): Response {
+  if (!origin) return response;
+  const headers = new Headers(response.headers);
+  headers.set('Access-Control-Allow-Origin', origin);
+  headers.set('Vary', 'Origin');
+  if (preflight) {
+    headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+    headers.set('Access-Control-Max-Age', '600');
+  }
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+function browserOrigin(env: Env, request: Request, url: URL): string | undefined {
+  const origin = request.headers.get('origin');
+  if (!origin || origin === url.origin) return undefined;
+  const allowed = (env.WEB_ALLOWED_ORIGINS ?? '').split(',').map((item) => item.trim()).filter(Boolean);
+  if (!allowed.includes(origin)) throw new RequestError(403, 'PERMISSION_DENIED', 'This browser origin is not allowed.');
+  return origin;
+}
+
 async function boundedJson(request: Request, limit: number): Promise<unknown> {
   if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
     throw new RequestError(415, 'INVALID_ARGUMENT', 'Send an application/json request.');
@@ -78,20 +99,32 @@ interface Dependencies {
 /** Dependencies are compile-time test seams; the deployed handler always verifies real tokens. */
 export function createCommerceHandler(dependencies: Dependencies = {}) {
   return async (request: Request, env: Env): Promise<Response> => {
+    let corsOrigin: string | undefined;
     try {
       const url = new URL(request.url);
-      const origin = request.headers.get('origin');
-      if (origin && origin !== url.origin) throw new RequestError(403, 'PERMISSION_DENIED', 'Browser cross-origin requests are not enabled.');
+      corsOrigin = browserOrigin(env, request, url);
       if (url.pathname === '/health' && request.method === 'GET') {
         await env.DB.prepare('SELECT 1 FROM commerce_wallets LIMIT 1').first();
         const config = providerConfiguration(env);
         const enabled = config.enabledEnvironments.filter((selected) => {
           try { requireConfiguration(config, selected); return true; } catch { return false; }
         });
-        return json({ ok: true, service: 'pullthread-commerce', version: 1, db: 'ready',
-          commerce: enabled.length ? 'configured' : 'unconfigured', commerceEnabled: enabled });
+        return withCors(json({ ok: true, service: 'pullthread-commerce', version: 1, db: 'ready',
+          commerce: enabled.length ? 'configured' : 'unconfigured', commerceEnabled: enabled }), corsOrigin);
       }
       if (!paths.has(url.pathname)) throw new RequestError(404, 'NOT_FOUND', 'Unknown endpoint.');
+      if (request.method === 'OPTIONS') {
+        if (!corsOrigin) throw new RequestError(405, 'INVALID_ARGUMENT', 'Use POST for this endpoint.');
+        if (url.pathname === '/commerceRevenueCatWebhook' || request.headers.get('access-control-request-method') !== 'POST') {
+          throw new RequestError(403, 'PERMISSION_DENIED', 'This browser request is not allowed.');
+        }
+        const requestedHeaders = (request.headers.get('access-control-request-headers') ?? '')
+          .split(',').map((header) => header.trim().toLowerCase()).filter(Boolean);
+        if (requestedHeaders.some((header) => header !== 'authorization' && header !== 'content-type')) {
+          throw new RequestError(403, 'PERMISSION_DENIED', 'This browser request is not allowed.');
+        }
+        return withCors(new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } }), corsOrigin, true);
+      }
       if (request.method !== 'POST') throw new RequestError(405, 'INVALID_ARGUMENT', 'Use POST for this endpoint.');
       const config = providerConfiguration(env);
       if (url.pathname === '/commerceRevenueCatWebhook') {
@@ -100,7 +133,7 @@ export function createCommerceHandler(dependencies: Dependencies = {}) {
         }
         const body = await boundedJson(request, MAX_WEBHOOK_BODY_BYTES);
         await receivePurchaseWebhook(dependencies.wallet?.(env) ?? new D1CommerceWallet(env.DB), config, body, dependencies.providerFetch);
-        return json({ result: { received: true } });
+        return withCors(json({ result: { received: true } }), corsOrigin);
       }
       const uid = await (dependencies.verifyToken ?? verifyFirebaseIdToken)(bearerToken(request), env.FIREBASE_PROJECT_ID);
       const envelope = object(await boundedJson(request, MAX_CALLABLE_BODY_BYTES));
@@ -114,7 +147,7 @@ export function createCommerceHandler(dependencies: Dependencies = {}) {
         const cosmetics = new D1CommerceWallet(env.DB);
         const result = url.pathname === '/cosmeticAccount' ? await cosmetics.cosmeticAccount(uid, selected)
           : await cosmetics.purchaseCosmetic(uid, selected, { operationId: data.operationId as string, itemId: data.itemId as string, expectedPrice: data.expectedPrice as number });
-        return json({ result: { ...result, catalog: COSMETIC_CATALOG } });
+        return withCors(json({ result: { ...result, catalog: COSMETIC_CATALOG } }), corsOrigin);
       }
       if (url.pathname.startsWith('/weekly')) {
         if (!enabled(env.LEADERBOARD_ENABLED_ENVIRONMENTS, selected)) throw new CommerceError('unavailable', 'Weekly competition is not open yet.');
@@ -122,7 +155,7 @@ export function createCommerceHandler(dependencies: Dependencies = {}) {
         const result = url.pathname === '/weeklyRegister' ? await weekly.register(uid, selected, data.requestId as string, data.ruleset)
           : url.pathname === '/weeklyUpload' ? await weekly.upload(uid, selected, data.runId as string, data.batch as ReplayBatch)
             : await weekly.standings(uid, selected);
-        return json({ result });
+        return withCors(json({ result }), corsOrigin);
       }
       const rewardAccess = enabled(env.LEADERBOARD_ENABLED_ENVIRONMENTS, selected);
       if (!rewardAccess) requireConfiguration(config, selected);
@@ -140,8 +173,8 @@ export function createCommerceHandler(dependencies: Dependencies = {}) {
         case '/commerceGetRedemption': result = await wallet.getRedemption(uid, selected, data.operationId as string); break;
         case '/commerceResolveTool': result = await wallet.resolveTool(uid, selected, data.operationId as string, data.action as 'applied' | 'refund'); break;
       }
-      return json({ result });
-    } catch (error) { return failure(error); }
+      return withCors(json({ result }), corsOrigin);
+    } catch (error) { return withCors(failure(error), corsOrigin); }
   };
 }
 

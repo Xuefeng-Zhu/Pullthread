@@ -211,13 +211,29 @@ test('both declared and undeclared oversized bodies are rejected without wallet 
   assert.deepEqual(calls, []);
 });
 
-test('native-only routes reject cross-origin browser requests and unsupported methods', async () => {
+test('browser routes require an exact origin allowlist and a narrow authenticated preflight', async () => {
   const { handler, calls } = walletSpy();
   assert.equal((await handler(request('/commerceSyncWallet', await token(), undefined, { Origin: 'https://other.example' }), configured())).status, 403);
   assert.equal((await handler(new Request('https://commerce.example/commerceSyncWallet', { method: 'OPTIONS' }), configured())).status, 405);
+  const env = configured({ WEB_ALLOWED_ORIGINS: 'https://play.example,http://localhost:8081' });
+  const preflight = await handler(new Request('https://commerce.example/commerceSyncWallet', { method: 'OPTIONS', headers: {
+    Origin: 'https://play.example', 'Access-Control-Request-Method': 'POST',
+    'Access-Control-Request-Headers': 'authorization, content-type',
+  } }), env);
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get('access-control-allow-origin'), 'https://play.example');
+  assert.equal(preflight.headers.get('access-control-allow-methods'), 'POST, OPTIONS');
+  const bearer = await token();
+  const browser = await handler(request('/commerceSyncWallet', bearer, undefined, { Origin: 'https://play.example' }), env);
+  assert.equal(browser.status, 200);
+  assert.equal(browser.headers.get('access-control-allow-origin'), 'https://play.example');
+  const forbiddenHeader = await handler(new Request('https://commerce.example/commerceSyncWallet', { method: 'OPTIONS', headers: {
+    Origin: 'https://play.example', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'x-forged',
+  } }), env);
+  assert.equal(forbiddenHeader.status, 403);
   assert.equal((await handler(new Request('https://commerce.example/commerceSyncWallet'), configured())).status, 405);
   assert.equal((await handler(request('/unknown', await token()), configured())).status, 404);
-  assert.deepEqual(calls, []);
+  assert.equal(calls.filter((call) => call.name === 'getWallet').length, 1);
 });
 
 test('wallet errors retain machine-readable insufficient-points details; unknown errors are redacted', async () => {

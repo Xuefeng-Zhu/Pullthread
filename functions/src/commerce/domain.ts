@@ -33,7 +33,7 @@ export function hash(value: string): string { return createHash('sha256').update
 export interface VerifiedPurchase {
   readonly transactionId: string;
   readonly productId: string;
-  readonly store: 'app_store' | 'play_store';
+  readonly store: 'app_store' | 'play_store' | 'rc_billing' | 'stripe' | 'paddle';
   readonly environment: CommerceEnvironment;
   readonly purchasedAt: number;
   readonly quantity: number;
@@ -44,7 +44,9 @@ export function packPoints(purchase: VerifiedPurchase): number {
   if (!pack || !Number.isSafeInteger(purchase.quantity) || purchase.quantity < 1 || purchase.quantity > 100
     || !Number.isSafeInteger(purchase.purchasedAt) || purchase.purchasedAt < 0
     || typeof purchase.transactionId !== 'string' || purchase.transactionId.length < 1 || purchase.transactionId.length > 512
-    || !['app_store', 'play_store'].includes(purchase.store)) throw new CommerceError('invalid-argument', 'Invalid verified point purchase.');
+    || !['app_store', 'play_store', 'rc_billing', 'stripe', 'paddle'].includes(purchase.store)) {
+    throw new CommerceError('invalid-argument', 'Invalid verified point purchase.');
+  }
   environment(purchase.environment);
   return pack.points * purchase.quantity;
 }

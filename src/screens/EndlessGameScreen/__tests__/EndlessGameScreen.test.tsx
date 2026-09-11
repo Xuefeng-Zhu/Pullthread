@@ -694,6 +694,8 @@ describe('endless Pull & Launch screen', () => {
     await fireEvent.press(view.getByTestId('tool-get-points'));
     expect(view.getByTestId('points-shop')).toBeTruthy();
     expect(view.getByTestId('points-shop-balance').props.children).toEqual([0, ' points']);
+    expect(view.getByText('Point Shop')).toBeTruthy();
+    expect(view.queryByTestId('points-shop-open-store')).toBeNull();
     expect(view.getByText('Points shop unavailable')).toBeTruthy();
     const tick = latestCanvas().motion.tick.value;
     await runFrames(100);

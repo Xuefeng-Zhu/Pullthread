@@ -40,6 +40,13 @@ describe('commerce service gates and native verification', () => {
     expect(getCommerceService()).toBe(getCommerceService());
   });
 
+  test('a configured RevenueCat Billing web build uses the real web service', () => {
+    const load = jest.fn<NativeRuntimeLoader>().mockResolvedValue(provider());
+    const service = createCommerceService({ ...config, platform: 'web', revenueCatKey: 'rcb_web_public' }, load);
+    expect(service.mode).toBe('web');
+    expect(service.environment).toBe('sandbox');
+  });
+
   test('concurrent initialization shares authentication/configuration and uses only native prices', async () => {
     const runtime = provider();
     runtime.getProducts.mockResolvedValue([

@@ -12,7 +12,8 @@ export interface NativeCommerceRuntime {
 }
 export type NativeRuntimeLoader = () => Promise<NativeCommerceRuntime>;
 
-export function createNativeCommerceService(config: CommerceConfig, load: NativeRuntimeLoader): CommerceService {
+export function createNativeCommerceService(config: CommerceConfig, load: NativeRuntimeLoader,
+  mode: Extract<CommerceService['mode'], 'native' | 'web'> = 'native'): CommerceService {
   const environment = config.environment!;
   let runtime: NativeCommerceRuntime;
   let initialization: Promise<string> | undefined;
@@ -50,7 +51,7 @@ export function createNativeCommerceService(config: CommerceConfig, load: Native
     return walletFlight;
   };
   const service: CommerceService = {
-    mode: 'native', environment,
+    mode, environment,
     getAccountId: async () => {
       const original = await initialize();
       if (await runtime.authenticate() !== original) throw new CommerceError('Your guest account changed. Restart before using points.', 'account');

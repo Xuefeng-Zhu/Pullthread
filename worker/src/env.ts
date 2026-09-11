@@ -13,6 +13,8 @@ export interface Env {
   COMMERCE_ENABLED_ENVIRONMENTS?: string;
   REVENUECAT_API_KEY?: string;
   REVENUECAT_WEBHOOK_AUTHORIZATION?: string;
+  /** Exact comma-separated browser origins allowed to call authenticated routes. */
+  WEB_ALLOWED_ORIGINS?: string;
 }
 
 export function providerConfiguration(env: Env): ProviderConfig {

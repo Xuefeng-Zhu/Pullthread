@@ -31,7 +31,7 @@ export function ButtonStudio({ onClose, highContrast = false }: { onClose(): voi
   const action = (label: string, onPress: () => void, disabled = false) => <Pressable accessibilityRole="button" disabled={disabled} onPress={onPress} style={[styles.action, disabled && styles.disabled]}><Text style={styles.actionText}>{label}</Text></Pressable>;
   return <Modal visible animationType="none" onRequestClose={() => { if (!collection.busy) onClose(); }}>
     <View style={[styles.page, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 12 }, highContrast && { borderColor: '#172a24', borderWidth: 3 }]}>
-      {shop ? <PointsShop onClose={() => { setShop(false); void collection.initialize(); }} /> : <ScrollView contentContainerStyle={styles.content}>
+      {shop ? <PointsShop initialScreen="store" onClose={() => { setShop(false); void collection.initialize(); }} /> : <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.header}><View style={{ flex: 1 }}><Text style={styles.eyebrow}>YOUR LITTLE SIGNATURE</Text><Text accessibilityRole="header" style={styles.title}>Button Studio</Text></View>{action('Close', onClose, collection.busy)}</View>
         <View style={styles.preview}><Sample look={look} highContrast={highContrast} /><Text style={styles.caption}>Made for your next leap.</Text><Text style={styles.balance}>{points ?? '—'} points</Text></View>
         <Text style={styles.copy}>Mix a color, a rim, and a little stitched detail. Yours to keep, with the same familiar flight.</Text>

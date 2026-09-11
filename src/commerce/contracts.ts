@@ -61,7 +61,7 @@ export interface RedemptionResult {
 export type ResolveToolAction = 'applied' | 'refund';
 
 export interface CommerceService {
-  readonly mode: 'native' | 'unavailable' | 'mock';
+  readonly mode: 'native' | 'web' | 'unavailable' | 'mock';
   readonly environment: CommerceEnvironment;
   readonly unavailableReason?: string;
   getAccountId(): Promise<string>;

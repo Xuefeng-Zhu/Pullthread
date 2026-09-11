@@ -17,7 +17,11 @@ test('preview never spends, purchase is explicit, and Get points preserves the d
   expect(buy).not.toHaveBeenCalled();
   await fireEvent.press(screen.getByText('Buy color · 25 points')); expect(buy).toHaveBeenCalledWith('color-coral');
   await fireEvent.press(screen.getByText('Get points'));
-  await fireEvent.press(screen.getByTestId('points-shop-close'));
+  expect(screen.getByText('Point Shop')).toBeTruthy();
+  expect(screen.queryByTestId('points-shop-open-store')).toBeNull();
+  await fireEvent.press(screen.getByTestId('points-shop-back'));
+  expect(screen.queryByText('Points & tools')).toBeNull();
+  expect(screen.getByText('Button Studio')).toBeTruthy();
   expect(screen.getByText('Buy color · 25 points')).toBeTruthy();
 });
 test('owned combination equips with no purchase and close returns to origin', async () => {

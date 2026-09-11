@@ -11,6 +11,7 @@ The original color, rim and plain face are free. Coral, Sky, Lavender, Sunflower
 - Migration `0003_cosmetics.sql` adds account/environment-scoped ownership and purchase records. The existing wallet revision assertion commits allocations, debit and ownership together. Concurrent purchases of an already owned part cost zero. Tool receipts and store purchase products are unchanged.
 - The client durably records intent before requesting a purchase. Unknown outcomes retry that same operation before another purchase. Only an operation-bound insufficient-funds refusal clears an unsuccessful intent. Ownership never unlocks optimistically.
 - Verified ownership and equipped parts are cached separately for each guest UID and environment. Cached owned parts can be equipped offline; new purchases need connectivity. Unknown and unowned selections fall back per category to original parts. Mock commerce cannot make connected cosmetic purchases.
+- Connected sandbox builds use the same authenticated Worker wallet on iOS, Android, and web. Browser purchases spend points already verified for that browser guest profile; clearing site data or changing browsers can change that identity and its collection.
 - Cosmetics remain outside run snapshots and replay commands. The frozen weekly physics manifest still matches. Collision radius, inventories, scoring, revive and historical runs are unchanged by customization.
 - Unlocks belong to the existing guest identity. The current reinstall/device-change recovery limitations remain. Store refunds remove unspent purchased points under the existing policy; already unlocked cosmetics remain owned.
 
@@ -31,3 +32,7 @@ Final native package: `/private/tmp/pullthread-cosmetics-native/20260908T002728Z
 ### Device delivery update — September 7, 2026, 18:50 Pacific
 
 The same verified final artifact was successfully installed and launched on Frank iPhone17 (`com.xuefengzhu.pullthread`). CoreDevice reported the device paired, connected, and using **wired** transport during delivery. This confirms installation and launch, not wireless delivery, physical play, visual acceptance, or a funded live purchase.
+
+### Web purchase update — September 11, 2026
+
+Button Studio now permits cosmetic redemptions through the existing authenticated web runtime and Worker endpoints. The platform gate has regression coverage, and browser verification confirms that the funded sandbox collection loads through the web service.

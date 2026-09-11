@@ -15,7 +15,7 @@ let ledger: D1CommerceWallet;
 before(async () => {
   runtime = new Miniflare(convertV4MiniflareOptions({ modules: true, script: 'export default { fetch() { return new Response("fixture"); } }', compatibilityDate: '2026-09-07', d1Databases: ['DB'] }));
   db = await runtime.getD1Database('DB') as unknown as D1Database;
-  const migration = (await Promise.all(['0001_commerce.sql', '0002_weekly.sql', '0003_cosmetics.sql', '0004_creative_tools.sql']
+  const migration = (await Promise.all(['0001_commerce.sql', '0002_weekly.sql', '0003_cosmetics.sql', '0004_creative_tools.sql', '0005_web_billing.sql']
     .map(file => readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8')))).join('\n');
   // D1 exec treats each line as a statement; standalone SQL comments are not statements.
   await db.exec(migration.split('\n').filter((line) => line.trim() && !line.trimStart().startsWith('--')).join('\n'));
@@ -30,9 +30,9 @@ function request(tool: ToolKind = 'preview', changes: Partial<RedeemToolRequest>
 async function fund(user: string, id = user, changes: Partial<VerifiedPurchase> = {}) { return ledger.applyVerifiedPurchase(user, purchase(id, changes)); }
 const balance = async (user: string) => (await ledger.getWallet(user, 'sandbox')).points;
 function providerResponse(data: unknown): Awaited<ReturnType<ProviderFetch>> { return { ok: true, status: 200, json: async <T>() => data as T }; }
-function provider(user: string, tx: string, refunded = false): ProviderFetch { return async (url) => providerResponse(url.includes('/products/')
+function provider(user: string, tx: string, refunded = false, store: VerifiedPurchase['store'] = 'app_store'): ProviderFetch { return async (url) => providerResponse(url.includes('/products/')
   ? { id: 'prod_fixture', store_identifier: 'pullthread_points_100', type: 'consumable', app_id: 'app_fixture' }
-  : { items: [{ customer_id: user, original_customer_id: user, product_id: 'prod_fixture', purchased_at: 100, quantity: 1, status: refunded ? 'refunded' : 'owned', environment: 'sandbox', store: 'app_store', store_purchase_identifier: tx, ownership: 'purchased' }], next_page: null }); }
+  : { items: [{ customer_id: user, original_customer_id: user, product_id: 'prod_fixture', purchased_at: 100, quantity: 1, status: refunded ? 'refunded' : 'owned', environment: 'sandbox', store, store_purchase_identifier: tx, ownership: 'purchased' }], next_page: null }); }
 
 test('concurrent purchase delivery, webhook, and exact retries grant one pack', async () => {
   const user = uid();
@@ -132,6 +132,18 @@ test('same store transaction cannot move to another UID while environments stay 
   assert.equal(await balance(other), 0); assert.equal((await ledger.getWallet(user, 'production')).points, 0);
   await fund(other, user, { environment: 'production' }); assert.equal((await ledger.getWallet(other, 'production')).points, 100);
 });
+test('RevenueCat Billing transactions reconcile, refund, and remain isolated from native store IDs', async () => {
+  const user = uid(); const transactionId = `web_${user}`;
+  const web = await syncWallet(ledger, config, user, 'sandbox', {
+    transactionId, productId: 'pullthread_points_100',
+  }, provider(user, transactionId, false, 'rc_billing'));
+  assert.equal(web.purchase?.verified, true);
+  assert.equal(web.wallet.points, 100);
+  await fund(user, transactionId, { store: 'app_store' });
+  assert.equal(await balance(user), 200);
+  const refunded = await syncWallet(ledger, config, user, 'sandbox', undefined, provider(user, transactionId, true, 'rc_billing'));
+  assert.equal(refunded.wallet.points, 100);
+});
 test('sync returns exact provider verification after spending, and client transaction queries never grant credit', async () => {
   const user = uid(); const query = { transactionId: user, productId: 'pullthread_points_100' };
   const first = await syncWallet(ledger, config, user, 'sandbox', query, provider(user, user)); assert.equal(first.purchase?.verified, true);
@@ -147,6 +159,20 @@ test('trusted webhook uses established customer mapping, global owner for refund
   await ledger.bindCustomer(user); await receivePurchaseWebhook(ledger, config, body('NON_RENEWING_PURCHASE')); assert.equal(await balance(user), 100);
   await receivePurchaseWebhook(ledger, config, body('CANCELLATION', other)); assert.equal(await balance(user), 0); assert.equal(await balance(other), 0);
   await receivePurchaseWebhook(ledger, config, body('NON_RENEWING_PURCHASE')); assert.equal(await balance(user), 0);
+});
+
+test('trusted RevenueCat Billing webhooks use the same customer mapping and refund tombstones', async () => {
+  const user = uid();
+  const body = (type: 'NON_RENEWING_PURCHASE' | 'CANCELLATION') => ({ api_version: '1.0', event: {
+    id: `web_event_${type}`, type, event_timestamp_ms: 300, app_id: 'app_fixture', app_user_id: user,
+    original_app_user_id: user, product_id: 'pullthread_points_100', transaction_id: `webhook_${user}`,
+    quantity: 1, purchased_at_ms: 100, environment: 'SANDBOX', store: 'RC_BILLING',
+  } });
+  await ledger.bindCustomer(user);
+  await receivePurchaseWebhook(ledger, config, body('NON_RENEWING_PURCHASE'));
+  assert.equal(await balance(user), 100);
+  await receivePurchaseWebhook(ledger, config, body('CANCELLATION'));
+  assert.equal(await balance(user), 0);
 });
 
 test('refunding an unused revive atomically releases its slot; an old refund retry cannot erase a new reservation', async () => {

@@ -8,12 +8,14 @@ import { useCommerceStore } from '../../store/useCommerceStore';
 
 const DISCLOSURE_KEY = 'pullthread.points-guest-disclosure.v1';
 
-export function PointsShop({ onClose, onCustomize, onLeaderboard }: {
+export function PointsShop({ onClose, onCustomize, onLeaderboard, initialScreen = 'hub' }: {
   onClose: () => void;
   onCustomize?: () => void;
   onLeaderboard?: () => void;
+  initialScreen?: 'hub' | 'store';
 }) {
   const commerce = useCommerceStore();
+  const [screen, setScreen] = useState<'hub' | 'store'>(initialScreen);
   const [accepted, setAccepted] = useState(false);
   const [checking, setChecking] = useState(true);
   const purchaseLock = useRef(false);
@@ -39,10 +41,25 @@ export function PointsShop({ onClose, onCustomize, onLeaderboard }: {
     } finally { purchaseLock.current = false; setPurchasing(false); }
   };
   const enabled = commerce.status === 'ready';
+  const openStore = () => {
+    setLocalError('');
+    setScreen('store');
+  };
 
   return <View testID="points-shop" style={styles.sheet} accessibilityViewIsModal>
     <View style={styles.header}>
-      <View><Text style={styles.eyebrow}>A LITTLE HELP FOR THE CLIMB</Text><Text accessibilityRole="header" style={styles.title}>Points & tools</Text></View>
+      <View style={styles.headerTitleRow}>
+        {screen === 'store' && <Pressable accessibilityRole="button"
+          accessibilityLabel={initialScreen === 'store' ? 'Back to previous screen' : 'Back to points and tools'}
+          testID="points-shop-back" onPress={() => { if (initialScreen === 'store') onClose(); else setScreen('hub'); }}
+          disabled={busy} style={styles.back}>
+          <Ionicons name="arrow-back" size={21} color="#244b45" />
+        </Pressable>}
+        <View style={styles.headerCopy}>
+          <Text style={styles.eyebrow}>{screen === 'hub' ? 'A LITTLE HELP FOR THE CLIMB' : 'CHOOSE A POINT PACK'}</Text>
+          <Text accessibilityRole="header" style={styles.title}>{screen === 'hub' ? 'Points & tools' : 'Point Shop'}</Text>
+        </View>
+      </View>
       <Pressable accessibilityRole="button" accessibilityLabel="Close points shop" testID="points-shop-close"
         onPress={() => { if (!purchaseLock.current && !commerce.busy) onClose(); }} disabled={busy} style={styles.close}>
         <Ionicons name="close" size={23} color="#244b45" />
@@ -53,6 +70,16 @@ export function PointsShop({ onClose, onCustomize, onLeaderboard }: {
         <Text testID="points-shop-balance" style={styles.balanceText}>{commerce.wallet?.points ?? 0} points</Text>
         {commerce.mode === 'mock' && <Text style={styles.demo}>DEMO</Text>}
       </View>
+      {screen === 'hub' ? <>
+      <Pressable testID="points-shop-open-store" accessibilityRole="button" accessibilityLabel="Open Point Shop"
+        disabled={busy} onPress={openStore} style={({ pressed }) => [styles.storeEntry, busy && styles.disabled, pressed && styles.pressed]}>
+        <View style={styles.storeEntryIcon}><Ionicons name="sparkles" size={20} color="#fff8e7" /></View>
+        <View style={styles.destinationCopy}>
+          <Text style={styles.storeEntryTitle}>Get points</Text>
+          <Text style={styles.storeEntryCopy}>{commerce.status === 'ready' ? 'Choose a one-time point pack.' : 'View availability and purchase options.'}</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color="#fff8e7" />
+      </Pressable>
       {(onCustomize || onLeaderboard) && <View style={styles.destinations}>
         <Text style={styles.sectionLabel}>PLAY & PERSONALIZE</Text>
         {onCustomize && <Pressable testID="points-button-studio" accessibilityRole="button"
@@ -73,17 +100,24 @@ export function PointsShop({ onClose, onCustomize, onLeaderboard }: {
       <Text style={styles.copy}>Catch stitched tokens to earn free tools for this run. Points let you buy an extra use when you need it.</Text>
       <Text style={styles.prices}>Preview {TOOL_COSTS.preview} · Land {TOOL_COSTS.teleport} · Revive {TOOL_COSTS.revive} points</Text>
       <Text style={styles.prices}>Trick shot tools {TOOL_COSTS.sail}–{TOOL_COSTS.stitch} points · find all six in Tools</Text>
+      <Text style={styles.footnote}>Points carry over between runs. Free tools reset on a new run. Buying points never activates a tool automatically.</Text>
+      </> : <>
+      <Text style={styles.copy}>Choose a one-time pack. Your balance updates only after the store verifies the purchase.</Text>
       {commerce.mode === 'mock' && <Text style={styles.notice}>Demo wallet. No real purchases or money.</Text>}
       {commerce.status === 'loading' && <ActivityIndicator color="#28594b" accessibilityLabel="Loading points shop" />}
       {!enabled && commerce.status !== 'loading' && <View style={styles.noticeBox}>
         <Text style={styles.noticeTitle}>Points shop unavailable</Text>
-        <Text style={styles.copy}>{commerce.error || 'Points purchases will be available in a configured iPhone or Android build. Free pickups and tools are ready to play.'}</Text>
+        <Text style={styles.copy}>{commerce.error || 'Points purchases will be available when this build is connected to its store. Free pickups and tools are ready to play.'}</Text>
       </View>}
       {enabled && <>
         <Pressable testID="points-guest-disclosure" accessibilityRole="checkbox" accessibilityState={{ checked: accepted }}
           disabled={busy} onPress={() => setAccepted((value) => !value)} style={styles.disclosure}>
           <Ionicons name={accepted ? 'checkbox' : 'square-outline'} size={25} color="#28594b" />
-          <Text style={styles.disclosureText}>I understand: my points stay on this installation. Deleting the app or changing phones can lose this guest wallet. Restore purchases cannot recover spent or consumable points.</Text>
+          <Text style={styles.disclosureText}>
+            {commerce.mode === 'web'
+              ? 'I understand: my points stay with this browser profile. Clearing site data or changing browsers can lose this guest wallet. Restore purchases cannot recover spent or consumable points.'
+              : 'I understand: my points stay on this installation. Deleting the app or changing phones can lose this guest wallet. Restore purchases cannot recover spent or consumable points.'}
+          </Text>
         </Pressable>
         {commerce.offers.map((offer) => <Pressable key={offer.productId} testID={`buy-${offer.productId}`}
           accessibilityRole="button" accessibilityLabel={`Buy ${offer.points} points for ${offer.priceLabel}`}
@@ -99,10 +133,11 @@ export function PointsShop({ onClose, onCustomize, onLeaderboard }: {
       {commerce.error && enabled && <Text testID="points-shop-error" accessibilityLiveRegion="polite" style={styles.error}>{commerce.error}</Text>}
       {!!localError && <Text testID="points-shop-local-error" accessibilityLiveRegion="polite" style={styles.error}>{localError}</Text>}
       <Pressable testID="points-shop-refresh" accessibilityRole="button" disabled={busy}
-        onPress={() => { void commerce.initialize(); }} style={styles.refresh}>
+        onPress={() => { setLocalError(''); void commerce.initialize(); }} style={styles.refresh}>
         <Text style={styles.refreshText}>Refresh points & purchases</Text>
       </Pressable>
       <Text style={styles.footnote}>Points carry over between runs. Free tools reset on a new run. Buying points never activates a tool automatically.</Text>
+      </>}
     </ScrollView>
   </View>;
 }
@@ -110,13 +145,20 @@ export function PointsShop({ onClose, onCustomize, onLeaderboard }: {
 const styles = StyleSheet.create({
   sheet: { width: '100%', maxWidth: 420, maxHeight: '100%', flexShrink: 1, backgroundColor: '#fff8e7', borderRadius: 24, borderWidth: 2, borderColor: '#bba980', overflow: 'hidden' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 18, paddingBottom: 12, gap: 4 },
+  headerTitleRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  headerCopy: { flex: 1 },
   eyebrow: { color: '#73745a', fontFamily: 'NunitoSans_800ExtraBold', fontSize: 8, letterSpacing: 1 },
   title: { color: '#244b45', fontFamily: 'Fraunces_600SemiBold', fontSize: 26, marginTop: 3 },
+  back: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: '#eee5ce' },
   close: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: '#eee5ce' },
   content: { padding: 18, paddingTop: 0, gap: 14 },
   balance: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, borderRadius: 15, backgroundColor: '#f0e1b9' },
   balanceText: { color: '#62450f', fontFamily: 'Fraunces_600SemiBold', fontSize: 26, flex: 1 },
   demo: { fontFamily: 'NunitoSans_800ExtraBold', color: '#755116', fontSize: 10 },
+  storeEntry: { minHeight: 72, flexDirection: 'row', alignItems: 'center', gap: 11, borderRadius: 16, padding: 13, backgroundColor: '#28594b' },
+  storeEntryIcon: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 21, backgroundColor: '#47766a' },
+  storeEntryTitle: { color: '#fff8e7', fontFamily: 'NunitoSans_800ExtraBold', fontSize: 17 },
+  storeEntryCopy: { color: '#e8e4cd', fontFamily: 'NunitoSans_600SemiBold', fontSize: 12, lineHeight: 17 },
   destinations: { gap: 9 },
   sectionLabel: { color: '#73745a', fontFamily: 'NunitoSans_800ExtraBold', fontSize: 9, letterSpacing: 1.2 },
   destination: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 11, borderWidth: 1,

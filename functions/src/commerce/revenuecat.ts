@@ -20,6 +20,10 @@ export function validWebhookAuthorization(actual: unknown, expected: string): bo
   return supplied.length === configured.length && timingSafeEqual(supplied, configured);
 }
 export interface PurchaseWebhook { customerIds: string[]; purchase: VerifiedPurchase; needsQuantityVerification: boolean }
+const stores = {
+  APP_STORE: 'app_store', PLAY_STORE: 'play_store', RC_BILLING: 'rc_billing', STRIPE: 'stripe', PADDLE: 'paddle',
+} as const satisfies Readonly<Record<string, VerifiedPurchase['store']>>;
+
 export function parsePurchaseWebhook(body: unknown, config: ProviderConfig): PurchaseWebhook | null {
   const envelope = object(body);
   if (envelope.api_version !== '1.0') throw new CommerceError('invalid-argument', 'Unsupported webhook version.');
@@ -29,12 +33,12 @@ export function parsePurchaseWebhook(body: unknown, config: ProviderConfig): Pur
   if (!config.appIds.includes(String(event.app_id))) throw new CommerceError('permission-denied', 'Unknown RevenueCat app.');
   const selected = environment(event.environment === 'SANDBOX' ? 'sandbox' : event.environment === 'PRODUCTION' ? 'production' : event.environment);
   requireConfiguration(config, selected);
-  if (event.is_family_share === true || !['APP_STORE', 'PLAY_STORE'].includes(String(event.store))) return null;
+  if (event.is_family_share === true || !Object.hasOwn(stores, String(event.store))) return null;
   if (typeof event.id !== 'string' || !event.id || !Number.isSafeInteger(event.event_timestamp_ms)) throw new CommerceError('invalid-argument', 'Malformed purchase event.');
   const purchase: VerifiedPurchase = {
     transactionId: event.transaction_id as string,
     productId: event.product_id as string,
-    store: event.store === 'APP_STORE' ? 'app_store' : 'play_store',
+    store: stores[event.store as keyof typeof stores],
     environment: selected,
     purchasedAt: event.purchased_at_ms as number,
     quantity: (event.quantity ?? 1) as number,
@@ -76,7 +80,8 @@ export async function fetchVerifiedPurchases(config: ProviderConfig, uid: string
     if (!Array.isArray(page.items)) throw new CommerceError('unavailable', 'Malformed purchase response.');
     for (const item of page.items) {
       const purchase = object(item);
-      if (purchase.environment !== selected || purchase.ownership !== 'purchased' || !['app_store', 'play_store'].includes(String(purchase.store))) continue;
+      if (purchase.environment !== selected || purchase.ownership !== 'purchased'
+        || !Object.values(stores).includes(purchase.store as VerifiedPurchase['store'])) continue;
       if (purchase.customer_id !== uid && purchase.original_customer_id !== uid) throw new CommerceError('permission-denied', 'Purchase belongs to another customer.');
       if (typeof purchase.product_id !== 'string') throw new CommerceError('unavailable', 'Malformed product identity.');
       if (!products.has(purchase.product_id)) {

@@ -15,17 +15,19 @@ export function createCommerceService(config = readCommerceConfig(), loader?: Na
   if (!config.enabled) return unavailable(config, 'Points purchases are not available in this build.');
   if (config.mock) return config.development && config.environment === 'sandbox' ? createMockCommerceService()
     : unavailable(config, 'Demo purchases require a development sandbox.');
-  if (config.platform !== 'ios' && config.platform !== 'android') return unavailable(config, 'Points purchases are available in the iPhone and Android apps.');
+  if (!['ios', 'android', 'web'].includes(config.platform)) return unavailable(config, 'Points purchases are unavailable on this platform.');
   if (!config.environment || !config.revenueCatKey?.trim()
     || !config.firebase.apiKey || !config.firebase.projectId || !config.firebase.appId) {
     return unavailable(config, 'Points purchases are not configured for this build.');
   }
-  if (!config.revenueCatKey.startsWith(config.platform === 'ios' ? 'appl_' : 'goog_')) {
+  const expectedKeyPrefix = config.platform === 'ios' ? 'appl_' : config.platform === 'android' ? 'goog_' : 'rcb_';
+  if (!config.revenueCatKey.startsWith(expectedKeyPrefix)) {
     return unavailable(config, 'Points purchases are not configured for this platform.');
   }
   try { resolveCommerceBackend(config); }
   catch (error) { return unavailable(config, error instanceof CommerceError ? error.message : 'The points backend is unavailable.'); }
-  return createNativeCommerceService(config, loader ?? (async () => (await import('./nativeRuntime')).loadNativeRuntime(config)));
+  return createNativeCommerceService(config, loader ?? (async () => (await import('./nativeRuntime')).loadNativeRuntime(config)),
+    config.platform === 'web' ? 'web' : 'native');
 }
 
 let singleton: CommerceService | undefined;
