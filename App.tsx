@@ -18,6 +18,7 @@ import {
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { RootNavigator } from './src/app/navigation/RootNavigator';
+import { AppMusic } from './src/game/feedback/AppMusic';
 import {
   hydrateEndlessProgress,
   useEndlessProgressStore,
@@ -72,6 +73,7 @@ export default function App() {
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
+        <AppMusic />
         <ReducedMotionConfig
           mode={
             reducedMotionEnabled

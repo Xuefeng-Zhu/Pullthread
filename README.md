@@ -31,8 +31,8 @@ and RevenueCat store verification. See [commerce setup](docs/COMMERCE_SETUP.md).
   in the same row, skipped rows, and repeated catches do not add points.
 - **Pause** suspends a run. **Play again** after a fall starts a fresh layout;
   there are no level breaks. A Revive tool can restore the last catch once per run.
-- **Settings** contains sound, haptics, reduced motion, high contrast, and
-  tutorial hints. **Done** returns to the current run.
+- **Settings** contains independent music and sound switches, haptics, reduced
+  motion, high contrast, and tutorial hints. **Done** returns to the current run.
 - A cold app launch normally starts a fresh run while keeping the local best;
   a saved paid-tool effect restores its run. Backgrounding pauses play and
   cancels an active pull.
@@ -53,6 +53,8 @@ npm run web
 
 The web build is useful for visual and interaction checks. Phone touch feel,
 audio, haptics, lifecycle, and performance require an installed native build.
+The background music starts after the first pointer or keyboard interaction on
+web because browsers block unsolicited autoplay.
 
 For a first native development build, install the platform tooling and connect
 a trusted device:

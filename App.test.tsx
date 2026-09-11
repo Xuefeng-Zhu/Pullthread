@@ -5,6 +5,7 @@ import MockReact from 'react';
 import { Text as MockText, View as MockView } from 'react-native';
 
 import App from './App';
+import { AppMusic } from './src/game/feedback/AppMusic';
 import { hydrateEndlessProgress } from './src/store/useEndlessProgressStore';
 import { hydratePreferences } from './src/store/usePreferencesStore';
 
@@ -18,6 +19,9 @@ jest.mock('react-native-reanimated', () => ({
 }));
 jest.mock('./src/app/navigation/RootNavigator', () => ({
   RootNavigator: () => MockReact.createElement(MockText, null, 'Game ready'),
+}));
+jest.mock('./src/game/feedback/AppMusic', () => ({
+  AppMusic: jest.fn(() => null),
 }));
 jest.mock('./src/store/useEndlessProgressStore', () => ({
   hydrateEndlessProgress: jest.fn(),
@@ -59,6 +63,7 @@ describe('App startup', () => {
     expect(view.getByLabelText('Loading Pullthread')).toBeTruthy();
     await act(async () => { endless.resolve(); await endless.promise; });
     await waitFor(() => expect(view.getByText('Game ready')).toBeTruthy());
+    expect(AppMusic).toHaveBeenCalledTimes(1);
     await view.unmount();
   });
 

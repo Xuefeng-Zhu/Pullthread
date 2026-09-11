@@ -195,7 +195,9 @@ describe('endless Pull & Launch screen', () => {
     await runFrames(3);
     expect(view.queryByTestId('launch-pause-button')).toBeNull();
     expect(view.queryByTestId('launch-paused')).toBeNull();
-    expect(view.getByTestId('launch-score-card')).toBeTruthy();
+    expect(view.getByTestId('launch-score-card').props.accessibilityRole).toBe('button');
+    expect(within(view.getByTestId('launch-hud')).getByTestId('launch-tool-tray')).toBeTruthy();
+    expect(within(view.getByTestId('launch-hud')).getByTestId('launch-settings-button')).toBeTruthy();
     expect(view.queryByTestId('launch-points-button')).toBeNull();
     expect(view.queryByTestId('launch-points-balance')).toBeNull();
     await fireEvent.press(view.getByTestId('launch-settings-button'));
@@ -221,6 +223,21 @@ describe('endless Pull & Launch screen', () => {
     expect(latestCanvas().state.velocity).toEqual({ x: 180, y: -540 });
     expect(latestCanvas().showTutorial).toBe(false);
     expect(view.queryByTestId('launch-cue')).toBeNull();
+    await view.unmount();
+  });
+
+  test('opens Points and tools from the score card without showing a points balance', async () => {
+    const view = await render(<EndlessGameScreen {...harness()} />);
+    await measure(view);
+
+    const scoreCard = view.getByTestId('launch-score-card');
+    expect(scoreCard.props.accessibilityLabel).toBe(
+      'Points and tools. 0 pockets reached. Best 0 pockets',
+    );
+    await fireEvent.press(scoreCard);
+
+    expect(view.getByTestId('points-shop')).toBeTruthy();
+    expect(view.queryByTestId('launch-points-balance')).toBeNull();
     await view.unmount();
   });
 
@@ -575,7 +592,7 @@ describe('endless Pull & Launch screen', () => {
       gesture.handlers.onEnd?.({ ...stale, state: State.END }, true);
     });
     const cue = view.getByTestId('launch-challenge-cue');
-    expect(StyleSheet.flatten(cue.props.style)).toMatchObject({ position: 'absolute', top: 243, left: 27, right: 29 });
+    expect(StyleSheet.flatten(cue.props.style)).toMatchObject({ position: 'absolute', top: 189, left: 27, right: 29 });
     expect(within(cue).getByText(bankChallenge.cue!).props.numberOfLines).toBe(3);
     expect(cue.props.pointerEvents).toBe('none');
     expect(latestCanvas().size).toEqual({ width: 320, height: 568 });

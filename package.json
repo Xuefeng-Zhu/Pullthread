@@ -57,6 +57,7 @@
     "test:watch": "jest --watch",
     "doctor": "npx expo-doctor@latest",
     "export": "expo export --platform all",
+    "generate:audio": "node scripts/generate-feedback-audio.mjs",
     "prebuild": "expo prebuild",
     "postinstall": "setup-skia-web"
   },

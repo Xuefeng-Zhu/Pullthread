@@ -156,13 +156,17 @@ Older saves retain their original inventory rules until a new run starts.
 
 - **Pause** suspends the current run; **Resume** continues it.
 - **New run** while paused and **Play again** after death start fresh attempts.
-- **Settings** pauses gameplay and offers sound, haptics, reduced motion, high
-  contrast, and tutorial hints. **Done** returns to the same run.
+- **Settings** pauses gameplay and offers independent music and sound switches,
+  haptics, reduced motion, high contrast, and tutorial hints. **Done** returns
+  to the same run.
 - Backgrounding cancels an active pull and pauses flight without consuming
   background time.
 
 Use cloth stretch/snap, cushion compression, catch motion, restrained sounds,
-and haptics to make actions legible. High contrast improves object separation.
+playful acoustic background music, and haptics to make actions legible. The
+music continues across app screens, pauses while the app is inactive, and waits
+for the first pointer or keyboard interaction on web. High contrast improves
+object separation.
 Reduced motion removes decorative effects without changing physics or the camera
 needed to follow the player. The short aim arc should help direction and power
 without revealing the complete route.

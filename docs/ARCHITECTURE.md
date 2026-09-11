@@ -3,7 +3,7 @@
 ## Application boundary
 
 The app has two routes: `EndlessGame` and `Settings`. It starts directly in the
-endless game. Settings exposes five feedback/accessibility preferences and Done,
+endless game. Settings exposes six feedback/accessibility preferences and Done,
 which returns to the existing run. There is no alternate game, campaign map,
 replay browser, Daily Scrap, paywall, or purchase setup in the application.
 
@@ -13,7 +13,8 @@ code, where retained for compatibility, are outside the active client graph.
 
 ```text
 App hydration
-  ├── preferences store ─────────── Settings / feedback
+  ├── preferences store ─────────── Settings / feedback / music
+  ├── app-level music controller ── Expo Audio loop / app lifecycle
   └── endless best store ───────── score display
 
 EndlessGameScreen
@@ -84,9 +85,12 @@ best: play continues in memory without overwriting the unknown saved record.
 A successfully read corrupt value is sanitized safely.
 
 `usePreferencesStore` retains the existing `pullthread.preferences` key for
-sound, haptics, reduced motion, high contrast, and tutorial hints. The current
-run is not persisted. Starting a new run or cold-launching resets its score,
-while the durable best and preferences remain.
+music, sound, haptics, reduced motion, high contrast, and tutorial hints. Its
+version-2 migration enables music when the older field is absent. `AppMusic`
+owns one looping Expo Audio player above navigation, pauses it while the app is
+inactive, and unlocks web playback from the first pointer or keyboard input.
+The current run is not persisted. Starting a new run or cold-launching resets
+its score, while the durable best and preferences remain.
 
 ## Verification and historical references
 

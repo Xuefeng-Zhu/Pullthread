@@ -1,5 +1,8 @@
 import { ExpoFeedbackService } from './ExpoFeedbackService';
 
+export { AppMusic } from './AppMusic';
+export { ExpoMusicService } from './ExpoMusicService';
+
 export {
   defaultFeedbackPreferences,
   feedbackCues,

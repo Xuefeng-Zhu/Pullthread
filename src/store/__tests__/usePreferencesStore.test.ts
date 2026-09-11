@@ -19,6 +19,7 @@ describe('persisted preferences store', () => {
     const state = usePreferencesStore.getState();
 
     expect({
+      musicEnabled: state.musicEnabled,
       soundEnabled: state.soundEnabled,
       hapticsEnabled: state.hapticsEnabled,
       reducedMotionEnabled: state.reducedMotionEnabled,
@@ -27,11 +28,13 @@ describe('persisted preferences store', () => {
       completedTutorialVersion: state.completedTutorialVersion,
     }).toEqual(defaultPreferences);
 
+    state.setMusicEnabled(false);
     state.setSoundEnabled(false);
     state.setReducedMotionEnabled(true);
     state.setTutorialHintsEnabled(false);
 
     expect(usePreferencesStore.getState()).toMatchObject({
+      musicEnabled: false,
       soundEnabled: false,
       hapticsEnabled: true,
       reducedMotionEnabled: true,
@@ -54,7 +57,7 @@ describe('persisted preferences store', () => {
         highContrastEnabled: true,
         completedTutorialVersion: CURRENT_TUTORIAL_VERSION,
       },
-      version: 1,
+      version: 2,
     });
 
     usePreferencesStore.setState({ ...defaultPreferences });
@@ -69,11 +72,15 @@ describe('persisted preferences store', () => {
     expect(typeof usePreferencesStore.getState().setSoundEnabled).toBe(
       'function',
     );
+    expect(typeof usePreferencesStore.getState().setMusicEnabled).toBe(
+      'function',
+    );
   });
 
   test('sanitizes missing and malformed durable values', () => {
     expect(
       sanitizePreferences({
+        musicEnabled: 'yes',
         soundEnabled: false,
         hapticsEnabled: 'yes',
         reducedMotionEnabled: true,
@@ -95,7 +102,7 @@ describe('persisted preferences store', () => {
       PREFERENCES_STORAGE_KEY,
       JSON.stringify({
         state: { soundEnabled: false, completedTutorialVersion: 1 },
-        version: 0,
+        version: 1,
       }),
     );
 
@@ -104,6 +111,7 @@ describe('persisted preferences store', () => {
     expect(usePreferencesStore.getState()).toMatchObject({
       ...defaultPreferences,
       soundEnabled: false,
+      musicEnabled: true,
       completedTutorialVersion: 1,
     });
   });

@@ -5,6 +5,7 @@ import { stdout } from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const SAMPLE_RATE = 22_050;
+const MUSIC_SAMPLE_RATE = 44_100;
 const TAU = Math.PI * 2;
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const outputDirectory = join(scriptDirectory, '..', 'assets', 'audio');
@@ -136,6 +137,160 @@ const sounds = [
   },
 ];
 
+const MUSIC_DURATION = 20;
+const BEAT_DURATION = 60 / 96;
+
+const frequencyFromMidi = (note) => 440 * 2 ** ((note - 69) / 12);
+
+const circularAge = (time, start, lifetime) => {
+  let age = time - start;
+  if (age < 0) age += MUSIC_DURATION;
+  return age < lifetime ? age : null;
+};
+
+const pluck = (age, frequency, lifetime) => {
+  const attack = Math.min(1, age / 0.006);
+  const release = Math.min(1, (lifetime - age) / 0.055);
+  const decay = Math.exp(-4.4 * age);
+  const shimmer = 0.2 * Math.sin(TAU * 4.2 * age);
+  return (
+    (Math.sin(TAU * frequency * age) +
+      0.38 * Math.sin(TAU * frequency * 2 * age + 0.16) +
+      0.13 * Math.sin(TAU * frequency * 3 * age + 0.41)) *
+    attack *
+    release *
+    decay *
+    (1 + shimmer)
+  );
+};
+
+const bass = (age, frequency, lifetime) => {
+  const attack = Math.min(1, age / 0.018);
+  const release = Math.min(1, (lifetime - age) / 0.12);
+  return (
+    (Math.sin(TAU * frequency * age) +
+      0.18 * Math.sin(TAU * frequency * 2 * age)) *
+    attack *
+    release *
+    Math.exp(-2.1 * age)
+  );
+};
+
+const indexedNoise = (index, seed) => {
+  let value = (index + seed) >>> 0;
+  value = Math.imul(value ^ (value >>> 16), 0x21f0_aaad);
+  value = Math.imul(value ^ (value >>> 15), 0x735a_2d97);
+  value ^= value >>> 15;
+  return (value / 0xffff_ffff) * 2 - 1;
+};
+
+const chords = [
+  [55, 59, 62],
+  [60, 64, 67],
+  [52, 55, 59],
+  [50, 54, 57],
+  [55, 59, 62],
+  [60, 64, 67],
+  [52, 55, 59],
+  [50, 54, 57],
+];
+const melodySteps = [74, 71, 69, 67, 71, 74, 76, 74];
+
+const pluckEvents = [];
+const bassEvents = [];
+const woodEvents = [];
+const brushEvents = [];
+
+for (let bar = 0; bar < chords.length; bar += 1) {
+  const barStart = bar * 4 * BEAT_DURATION;
+  const chord = chords[bar];
+
+  for (let step = 0; step < 8; step += 1) {
+    const start = barStart + step * BEAT_DURATION * 0.5;
+    const chordNote = chord[step % chord.length] + (step >= 4 ? 12 : 0);
+    pluckEvents.push({
+      start,
+      frequency: frequencyFromMidi(chordNote),
+      lifetime: 0.48,
+      pan: step % 2 === 0 ? -0.28 : 0.28,
+      gain: 0.48,
+    });
+    brushEvents.push({ start, lifetime: 0.13, pan: step % 2 ? -0.5 : 0.5 });
+  }
+
+  for (const beat of [0, 2]) {
+    bassEvents.push({
+      start: barStart + beat * BEAT_DURATION,
+      frequency: frequencyFromMidi(chord[0] - 12),
+      lifetime: 1.05,
+    });
+  }
+
+  for (const beat of [1, 3]) {
+    woodEvents.push({
+      start: barStart + beat * BEAT_DURATION,
+      lifetime: 0.12,
+      pan: beat === 1 ? -0.18 : 0.18,
+    });
+  }
+
+  for (const beat of [1.5, 3.5]) {
+    pluckEvents.push({
+      start: barStart + beat * BEAT_DURATION,
+      frequency: frequencyFromMidi(melodySteps[bar]),
+      lifetime: 0.52,
+      pan: bar % 2 === 0 ? 0.38 : -0.38,
+      gain: 0.38,
+    });
+  }
+}
+
+const makeMusicSample = (time, sampleIndex) => {
+  let left = 0;
+  let right = 0;
+
+  const add = (value, pan = 0) => {
+    left += value * Math.sqrt((1 - pan) * 0.5);
+    right += value * Math.sqrt((1 + pan) * 0.5);
+  };
+
+  for (const event of pluckEvents) {
+    const age = circularAge(time, event.start, event.lifetime);
+    if (age !== null) {
+      add(pluck(age, event.frequency, event.lifetime) * event.gain, event.pan);
+    }
+  }
+
+  for (const event of bassEvents) {
+    const age = circularAge(time, event.start, event.lifetime);
+    if (age !== null) {
+      add(bass(age, event.frequency, event.lifetime) * 0.3);
+    }
+  }
+
+  for (const event of woodEvents) {
+    const age = circularAge(time, event.start, event.lifetime);
+    if (age !== null) {
+      const envelope = Math.exp(-34 * age) * Math.min(1, age / 0.0025);
+      const knock = Math.sin(TAU * 185 * age) * Math.exp(-22 * age);
+      const grain = indexedNoise(sampleIndex, 0x574f_4f44) * 0.35;
+      add((knock + grain) * envelope * 0.24, event.pan);
+    }
+  }
+
+  for (const event of brushEvents) {
+    const age = circularAge(time, event.start, event.lifetime);
+    if (age !== null) {
+      const envelope =
+        Math.min(1, age / 0.008) *
+        Math.min(1, (event.lifetime - age) / 0.035);
+      add(indexedNoise(sampleIndex, 0x4252_5348) * envelope * 0.025, event.pan);
+    }
+  }
+
+  return [left, right];
+};
+
 const writeWav = ({ fileName, duration, gain, sample }) => {
   const sampleCount = Math.round(SAMPLE_RATE * duration);
   const dataLength = sampleCount * 2;
@@ -164,9 +319,50 @@ const writeWav = ({ fileName, duration, gain, sample }) => {
   writeFileSync(join(outputDirectory, fileName), wav);
 };
 
+const writeMusicWav = () => {
+  const sampleCount = Math.round(MUSIC_SAMPLE_RATE * MUSIC_DURATION);
+  const samples = new Float32Array(sampleCount * 2);
+  let peak = 0;
+
+  for (let index = 0; index < sampleCount; index += 1) {
+    const [left, right] = makeMusicSample(index / MUSIC_SAMPLE_RATE, index);
+    samples[index * 2] = left;
+    samples[index * 2 + 1] = right;
+    peak = Math.max(peak, Math.abs(left), Math.abs(right));
+  }
+
+  const scale = peak > 0 ? 0.22 / peak : 1;
+  const dataLength = sampleCount * 4;
+  const wav = Buffer.alloc(44 + dataLength);
+
+  wav.write('RIFF', 0);
+  wav.writeUInt32LE(36 + dataLength, 4);
+  wav.write('WAVE', 8);
+  wav.write('fmt ', 12);
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(2, 22);
+  wav.writeUInt32LE(MUSIC_SAMPLE_RATE, 24);
+  wav.writeUInt32LE(MUSIC_SAMPLE_RATE * 4, 28);
+  wav.writeUInt16LE(4, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write('data', 36);
+  wav.writeUInt32LE(dataLength, 40);
+
+  for (let index = 0; index < samples.length; index += 1) {
+    wav.writeInt16LE(
+      Math.round(clamp(samples[index] * scale) * 32_767),
+      44 + index * 2,
+    );
+  }
+
+  writeFileSync(join(outputDirectory, 'playful-climb-loop.wav'), wav);
+};
+
 mkdirSync(outputDirectory, { recursive: true });
 sounds.forEach(writeWav);
+writeMusicWav();
 
 stdout.write(
-  `Generated ${sounds.length} original feedback sounds in ${outputDirectory}\n`,
+  `Generated ${sounds.length} feedback sounds and 1 music loop in ${outputDirectory}\n`,
 );

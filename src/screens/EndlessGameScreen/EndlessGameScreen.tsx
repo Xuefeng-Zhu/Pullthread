@@ -51,12 +51,15 @@ function Action({ label, onPress, testID, primary = false, disabled = false }: {
   </Pressable>;
 }
 
-function IconAction({ label, icon, onPress, testID, disabled = false }: {
+function IconAction({ label, icon, onPress, testID, disabled = false, compact = false, micro = false }: {
   label: string; icon: 'settings-outline'; onPress: () => void; testID: string; disabled?: boolean;
+  compact?: boolean; micro?: boolean;
 }) {
   return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={label}
-    disabled={disabled} onPress={onPress} style={({ pressed }) => [styles.iconAction, disabled && styles.disabled, pressed && styles.pressed]}>
-    <Ionicons name={icon} size={23} color="#244b45" />
+    disabled={disabled} hitSlop={micro ? 3 : 0} onPress={onPress}
+    style={({ pressed }) => [styles.iconAction, compact && styles.iconActionCompact,
+      micro && styles.iconActionMicro, disabled && styles.disabled, pressed && styles.pressed]}>
+    <Ionicons name={icon} size={micro ? 21 : compact ? 22 : 23} color="#244b45" />
   </Pressable>;
 }
 
@@ -71,7 +74,7 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
 }) {
   const focused = useIsFocused();
   const insets = useSafeAreaInsets();
-  const { fontScale = 1 } = useWindowDimensions();
+  const { width: viewportWidth, fontScale = 1 } = useWindowDimensions();
   const [weeklyOpen, setWeeklyOpen] = useState(false);
   const [studioOpen, setStudioOpen] = useState(false);
   const appearance = useCollectionStore(s => s.appearance);
@@ -82,7 +85,6 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
   const [toolBusy, setToolBusy] = useState(true);
   const [toolError, setToolError] = useState('');
   const [toolNotice, setToolNotice] = useState('');
-  const [trayHeight, setTrayHeight] = useState(46);
   const [runId] = useState(() => ranked?.run.id ?? `run-${seed}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
   const operationCounter = useRef(0);
   const toolLock = useRef(false);
@@ -332,8 +334,10 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
   const showCue = hints && !session.hasAimed && score.pockets === 0 && state.phase === 'held' && !toolLayer;
   const showChallengeCue = !showWorldAnnouncement && !showCue && (hints || !!pocketCountdown) && focused && state.phase === 'held'
     && !toolLayer && choiceCue;
-  const trayTop = insets.top + hudHeight + 20;
-  const cueTop = trayTop + trayHeight + 8;
+  const compactHud = viewportWidth < 430;
+  const microHud = viewportWidth < 350;
+  const hudInset = microHud ? 6 : compactHud ? 8 : 12;
+  const cueTop = insets.top + hudHeight + 20;
   const teleportTargets = toolLayer?.type === 'land' ? toolLayer.pockets.map((pocket) => ({
     id: pocket.id, x: offsetX + pocket.x * scale,
     y: offsetY + (pocket.y - toolLayer.cameraY) * scale, width: pocket.width * scale,
@@ -358,29 +362,37 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
 
     {toolLayer?.type !== 'setup' && <View testID="launch-hud" pointerEvents="box-none"
       onLayout={(event) => setHudHeight(event.nativeEvent.layout.height)}
-      style={[styles.hud, { top: insets.top + 12, left: insets.left + 12, right: insets.right + 12 }]}>
-      <View testID="launch-score-card" style={[styles.scorePanel, highContrast && styles.contrastSurface]}>
-        <View style={styles.scoreBadge}>
+      style={[styles.hud, compactHud && styles.hudCompact,
+        { top: insets.top + 12, left: insets.left + hudInset, right: insets.right + hudInset }]}>
+      <Pressable testID="launch-score-card" accessibilityRole="button"
+        accessibilityLabel={`Points and tools. ${score.pockets} pockets reached. Best ${best} pockets`}
+        disabled={toolBusy || !!toolLayer} onPress={openShop}
+        style={({ pressed }) => [styles.scorePanel, compactHud && styles.scorePanelCompact,
+          microHud && styles.scorePanelMicro, highContrast && styles.contrastSurface,
+          (toolBusy || !!toolLayer) && styles.disabled, pressed && styles.pressed]}>
+        <View style={[styles.scoreBadge, compactHud && styles.scoreBadgeCompact, microHud && styles.scoreBadgeMicro]}>
           <View style={styles.metric}>
-            <Text style={styles.metricLabel}>POCKETS</Text>
-            <Text testID="launch-score" accessibilityLabel={`${score.pockets} pockets reached`} style={styles.metricValue}>{score.pockets}</Text>
+            <Text style={[styles.metricLabel, microHud && styles.metricLabelMicro]}>POCKETS</Text>
+            <Text testID="launch-score" accessibilityLabel={`${score.pockets} pockets reached`}
+              style={[styles.metricValue, compactHud && styles.metricValueCompact]}>{score.pockets}</Text>
           </View>
           <View style={styles.metricDivider} />
           <View style={styles.metric}>
-            <Text style={styles.metricLabel}>BEST</Text>
-            <Text testID="launch-best" accessibilityLabel={`Best ${best} pockets`} style={styles.bestValue}>{best}</Text>
+            <Text style={[styles.metricLabel, microHud && styles.metricLabelMicro]}>BEST</Text>
+            <Text testID="launch-best" accessibilityLabel={`Best ${best} pockets`}
+              style={[styles.bestValue, compactHud && styles.bestValueCompact]}>{best}</Text>
           </View>
         </View>
-      </View>
-      <View pointerEvents="box-none" style={styles.hudActions}>
-        <IconAction label="Settings" icon="settings-outline" testID="launch-settings-button" disabled={toolBusy || !!toolLayer} onPress={() => void openSettings()} />
-      </View>
-    </View>}
-    {toolLayer?.type !== 'setup' && <View pointerEvents="box-none" onLayout={(event) => setTrayHeight(event.nativeEvent.layout.height)}
-      style={[styles.toolTray, { top: trayTop, left: insets.left + 12, right: insets.right + 12 }]}>
+      </Pressable>
       <ToolTray inventory={session.tools.inventory} previewActive={session.tools.previewActive}
         reviveUsed={session.tools.reviveUsed} phase={state.phase} disabled={toolBusy || !!toolLayer}
-        highContrast={highContrast} onTool={chooseTool} onTools={openToolbox} preparedCount={preparedTools.length} preparedTools={preparedTools} creativeEnabled={session.tools.creativeEnabled} freeToolQueue={session.tools.freeToolQueue} />
+        highContrast={highContrast} onTool={chooseTool} onTools={openToolbox} preparedCount={preparedTools.length}
+        preparedTools={preparedTools} creativeEnabled={session.tools.creativeEnabled}
+        freeToolQueue={session.tools.freeToolQueue} compact={compactHud} micro={microHud} />
+      <View pointerEvents="box-none" style={styles.hudActions}>
+        <IconAction label="Settings" icon="settings-outline" testID="launch-settings-button"
+          disabled={toolBusy || !!toolLayer} compact={compactHud} micro={microHud} onPress={() => void openSettings()} />
+      </View>
     </View>}
 
     {showWorldAnnouncement && <View testID="launch-world-announcement" pointerEvents="none"
@@ -530,17 +542,26 @@ const styles = StyleSheet.create({
   playArea: { ...StyleSheet.absoluteFill },
   canvasFrame: { overflow: 'hidden' },
   hud: { position: 'absolute', zIndex: 2, flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
+  hudCompact: { gap: 6 },
   scorePanel: { borderRadius: 18, borderWidth: 1, borderColor: '#c3b695', backgroundColor: 'rgba(255,248,231,0.95)', flexShrink: 1, paddingHorizontal: 12, paddingVertical: 8 },
+  scorePanelCompact: { borderRadius: 15, paddingHorizontal: 8, paddingVertical: 6 },
+  scorePanelMicro: { paddingHorizontal: 6, paddingVertical: 5 },
   scoreBadge: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  toolTray: { position: 'absolute', zIndex: 2 },
+  scoreBadgeCompact: { gap: 8 },
+  scoreBadgeMicro: { gap: 5 },
   contrastSurface: { backgroundColor: '#fffdf5', borderColor: '#244b45' },
   metric: { alignItems: 'center', flexShrink: 1 },
   metricLabel: { fontFamily: 'NunitoSans_800ExtraBold', fontSize: 9, lineHeight: 12, letterSpacing: 0.6, color: '#62684d' },
+  metricLabelMicro: { fontSize: 7, lineHeight: 9, letterSpacing: 0.35 },
   metricValue: { fontFamily: 'Fraunces_600SemiBold', fontSize: 26, lineHeight: 30, color: '#244b45' },
+  metricValueCompact: { fontSize: 22, lineHeight: 25 },
   bestValue: { fontFamily: 'Fraunces_600SemiBold', fontSize: 22, lineHeight: 30, color: '#58715b' },
+  bestValueCompact: { fontSize: 20, lineHeight: 25 },
   metricDivider: { alignSelf: 'stretch', width: 1, backgroundColor: '#d5c7a9' },
   hudActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8 },
   iconAction: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#c3b695', backgroundColor: '#fff8e7' },
+  iconActionCompact: { width: 42, height: 42, borderRadius: 21 },
+  iconActionMicro: { width: 38, height: 38, borderRadius: 19 },
   cue: { position: 'absolute', alignSelf: 'center', left: 20, right: 20, maxWidth: 440, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 14, borderWidth: 1, borderColor: '#d5c7a9', backgroundColor: 'rgba(255,248,231,0.94)' },
   hint: { fontFamily: 'NunitoSans_700Bold', fontSize: 12, lineHeight: 17, color: '#425542', textAlign: 'center' },
   screenReaderStatus: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 },

@@ -197,7 +197,7 @@ data.
       completed replay state immediately.
 - [ ] High contrast visibly strengthens thread, route, goal, traveler, grid,
       and playfield outlines without hiding texture or copy.
-- [ ] Sound and Haptics toggles independently suppress their corresponding
+- [ ] Music, Sound, and Haptics toggles independently suppress their corresponding
       cues, then restore them when re-enabled.
 - [ ] Settings and tutorial completion survive a cold app relaunch.
 - [ ] Try Again clears the completed run and returns to zero-stitch planning.
@@ -245,6 +245,10 @@ calls are not substitutes.
 - [ ] Feedback timing matches the visible event closely enough to feel causal.
 - [ ] Placeholder audio is audible, free of obvious clipping, and does not stack
       uncontrollably during rapid retries.
+- [ ] Background music loops without a click, remains beneath feedback cues,
+      and continues without restarting while navigating between screens.
+- [ ] Backgrounding pauses music, foregrounding resumes from the same place,
+      and the Music switch takes effect immediately.
 - [ ] Unsupported/disabled feedback does not block controls or crash the run.
 - [ ] Behavior with the platform's silent/ringer and media-volume controls is
       recorded, not assumed.

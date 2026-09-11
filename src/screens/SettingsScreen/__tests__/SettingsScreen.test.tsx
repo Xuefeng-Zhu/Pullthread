@@ -8,18 +8,19 @@ import { SettingsScreen } from '../SettingsScreen';
 describe('SettingsScreen', () => {
   beforeEach(async () => { await resetPreferencesStoreForTests(); });
 
-  test('contains the five game preferences and updates each saved value', async () => {
+  test('contains the six game preferences and updates each saved value', async () => {
     const view = await render(<SettingsScreen navigation={{ goBack: jest.fn() }} />);
     expect(view.getByText('Settings')).toBeTruthy();
     expect(view.getByText('Changes save on this device.')).toBeTruthy();
-    expect(view.getAllByRole('switch')).toHaveLength(5);
+    expect(view.getAllByRole('switch')).toHaveLength(6);
+    await fireEvent(view.getByTestId('music-switch'), 'valueChange', false);
     await fireEvent(view.getByTestId('sound-switch'), 'valueChange', false);
     await fireEvent(view.getByTestId('haptics-switch'), 'valueChange', false);
     await fireEvent(view.getByTestId('reduced-motion-switch'), 'valueChange', true);
     await fireEvent(view.getByTestId('high-contrast-switch'), 'valueChange', true);
     await fireEvent(view.getByTestId('tutorial-hints-switch'), 'valueChange', false);
     expect(usePreferencesStore.getState()).toMatchObject({
-      soundEnabled: false, hapticsEnabled: false, reducedMotionEnabled: true,
+      musicEnabled: false, soundEnabled: false, hapticsEnabled: false, reducedMotionEnabled: true,
       highContrastEnabled: true, tutorialHintsEnabled: false,
     });
     expect(within(view.getByTestId('reduced-motion-switch-row')).getByText('ON')).toBeTruthy();

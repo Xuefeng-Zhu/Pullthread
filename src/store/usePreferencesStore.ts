@@ -7,10 +7,11 @@ import {
 } from 'zustand/middleware';
 
 export const PREFERENCES_STORAGE_KEY = 'pullthread.preferences';
-export const PREFERENCES_STORAGE_VERSION = 1;
+export const PREFERENCES_STORAGE_VERSION = 2;
 export const CURRENT_TUTORIAL_VERSION = 1;
 
 export interface PersistedPreferences {
+  readonly musicEnabled: boolean;
   readonly soundEnabled: boolean;
   readonly hapticsEnabled: boolean;
   readonly reducedMotionEnabled: boolean;
@@ -25,6 +26,7 @@ type BooleanPreferenceKey = Exclude<
 >;
 
 interface PreferencesStore extends PersistedPreferences {
+  readonly setMusicEnabled: (enabled: boolean) => void;
   readonly setSoundEnabled: (enabled: boolean) => void;
   readonly setHapticsEnabled: (enabled: boolean) => void;
   readonly setReducedMotionEnabled: (enabled: boolean) => void;
@@ -35,6 +37,7 @@ interface PreferencesStore extends PersistedPreferences {
 }
 
 export const defaultPreferences: PersistedPreferences = {
+  musicEnabled: true,
   soundEnabled: true,
   hapticsEnabled: true,
   reducedMotionEnabled: false,
@@ -99,6 +102,7 @@ export function sanitizePreferences(value: unknown): PersistedPreferences {
   const source = isRecord(value) ? value : {};
 
   return {
+    musicEnabled: booleanPreference(source, 'musicEnabled'),
     soundEnabled: booleanPreference(source, 'soundEnabled'),
     hapticsEnabled: booleanPreference(source, 'hapticsEnabled'),
     reducedMotionEnabled: booleanPreference(source, 'reducedMotionEnabled'),
@@ -110,6 +114,7 @@ export function sanitizePreferences(value: unknown): PersistedPreferences {
 
 function persistedPreferences(state: PreferencesStore): PersistedPreferences {
   return {
+    musicEnabled: state.musicEnabled,
     soundEnabled: state.soundEnabled,
     hapticsEnabled: state.hapticsEnabled,
     reducedMotionEnabled: state.reducedMotionEnabled,
@@ -129,6 +134,7 @@ export const usePreferencesStore = create<PreferencesStore>()(
   persist<PreferencesStore, [], [], PersistedPreferences>(
     (set) => ({
       ...defaultPreferences,
+      setMusicEnabled: (musicEnabled) => set({ musicEnabled }),
       setSoundEnabled: (soundEnabled) => set({ soundEnabled }),
       setHapticsEnabled: (hapticsEnabled) => set({ hapticsEnabled }),
       setReducedMotionEnabled: (reducedMotionEnabled) =>

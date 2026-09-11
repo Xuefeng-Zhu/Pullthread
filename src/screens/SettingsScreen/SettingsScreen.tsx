@@ -28,6 +28,7 @@ export interface SettingsScreenProps {
 }
 
 export function SettingsScreen({ navigation }: SettingsScreenProps) {
+  const musicEnabled = usePreferencesStore((state) => state.musicEnabled);
   const soundEnabled = usePreferencesStore((state) => state.soundEnabled);
   const hapticsEnabled = usePreferencesStore((state) => state.hapticsEnabled);
   const reducedMotionEnabled = usePreferencesStore(
@@ -38,6 +39,9 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
   );
   const tutorialHintsEnabled = usePreferencesStore(
     (state) => state.tutorialHintsEnabled,
+  );
+  const setMusicEnabled = usePreferencesStore(
+    (state) => state.setMusicEnabled,
   );
   const setSoundEnabled = usePreferencesStore(
     (state) => state.setSoundEnabled,
@@ -72,6 +76,13 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
         </View>
 
         <View style={styles.panel}>
+          <PreferenceSwitchRow
+            testID="music-switch"
+            label="Music"
+            icon="musical-notes-outline"
+            value={musicEnabled}
+            onValueChange={setMusicEnabled}
+          />
           <PreferenceSwitchRow
             testID="sound-switch"
             label="Sound"
