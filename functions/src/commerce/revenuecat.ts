@@ -22,7 +22,10 @@ export function validWebhookAuthorization(actual: unknown, expected: string): bo
 export interface PurchaseWebhook { customerIds: string[]; purchase: VerifiedPurchase; needsQuantityVerification: boolean }
 const stores = {
   APP_STORE: 'app_store', PLAY_STORE: 'play_store', RC_BILLING: 'rc_billing', STRIPE: 'stripe', PADDLE: 'paddle',
+  TEST_STORE: 'test_store',
 } as const satisfies Readonly<Record<string, VerifiedPurchase['store']>>;
+const storeAllowed = (store: unknown, selected: CommerceEnvironment): store is VerifiedPurchase['store'] =>
+  Object.values(stores).includes(store as VerifiedPurchase['store']) && (store !== 'test_store' || selected === 'sandbox');
 
 export function parsePurchaseWebhook(body: unknown, config: ProviderConfig): PurchaseWebhook | null {
   const envelope = object(body);
@@ -33,7 +36,8 @@ export function parsePurchaseWebhook(body: unknown, config: ProviderConfig): Pur
   if (!config.appIds.includes(String(event.app_id))) throw new CommerceError('permission-denied', 'Unknown RevenueCat app.');
   const selected = environment(event.environment === 'SANDBOX' ? 'sandbox' : event.environment === 'PRODUCTION' ? 'production' : event.environment);
   requireConfiguration(config, selected);
-  if (event.is_family_share === true || !Object.hasOwn(stores, String(event.store))) return null;
+  if (event.is_family_share === true || !Object.hasOwn(stores, String(event.store))
+    || !storeAllowed(stores[event.store as keyof typeof stores], selected)) return null;
   if (typeof event.id !== 'string' || !event.id || !Number.isSafeInteger(event.event_timestamp_ms)) throw new CommerceError('invalid-argument', 'Malformed purchase event.');
   const purchase: VerifiedPurchase = {
     transactionId: event.transaction_id as string,
@@ -81,7 +85,7 @@ export async function fetchVerifiedPurchases(config: ProviderConfig, uid: string
     for (const item of page.items) {
       const purchase = object(item);
       if (purchase.environment !== selected || purchase.ownership !== 'purchased'
-        || !Object.values(stores).includes(purchase.store as VerifiedPurchase['store'])) continue;
+        || !storeAllowed(purchase.store, selected)) continue;
       if (purchase.customer_id !== uid && purchase.original_customer_id !== uid) throw new CommerceError('permission-denied', 'Purchase belongs to another customer.');
       if (typeof purchase.product_id !== 'string') throw new CommerceError('unavailable', 'Malformed product identity.');
       if (!products.has(purchase.product_id)) {

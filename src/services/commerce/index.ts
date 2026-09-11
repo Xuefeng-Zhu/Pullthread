@@ -21,7 +21,8 @@ export function createCommerceService(config = readCommerceConfig(), loader?: Na
     return unavailable(config, 'Points purchases are not configured for this build.');
   }
   const expectedKeyPrefix = config.platform === 'ios' ? 'appl_' : config.platform === 'android' ? 'goog_' : 'rcb_';
-  if (!config.revenueCatKey.startsWith(expectedKeyPrefix)) {
+  const testStore = config.environment === 'sandbox' && config.revenueCatKey.startsWith('test_');
+  if (!testStore && !config.revenueCatKey.startsWith(expectedKeyPrefix)) {
     return unavailable(config, 'Points purchases are not configured for this platform.');
   }
   try { resolveCommerceBackend(config); }

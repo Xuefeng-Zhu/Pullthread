@@ -12,7 +12,7 @@
   "vars": {
     "FIREBASE_PROJECT_ID": "pullthread-xuefeng-zhu",
     "REVENUECAT_PROJECT_ID": "f8ab5b69",
-    "REVENUECAT_APP_IDS": "app518bafad2a",
+    "REVENUECAT_APP_IDS": "app518bafad2a,appc10a6c23e0",
     "COMMERCE_ENABLED_ENVIRONMENTS": "sandbox",
     "LEADERBOARD_ENABLED_ENVIRONMENTS": "sandbox",
     "COSMETICS_ENABLED_ENVIRONMENTS": "sandbox",

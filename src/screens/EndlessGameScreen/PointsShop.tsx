@@ -110,7 +110,7 @@ export function PointsShop({ onClose, onCustomize, onLeaderboard, initialScreen 
         <Text style={styles.copy}>{commerce.error || 'Points purchases will be available when this build is connected to its store. Free pickups and tools are ready to play.'}</Text>
       </View>}
       {enabled && <>
-        <Pressable testID="points-guest-disclosure" accessibilityRole="checkbox" accessibilityState={{ checked: accepted }}
+        <Pressable testID="points-guest-disclosure" accessibilityRole="checkbox" accessibilityState={{ checked: accepted }} aria-checked={accepted}
           disabled={busy} onPress={() => setAccepted((value) => !value)} style={styles.disclosure}>
           <Ionicons name={accepted ? 'checkbox' : 'square-outline'} size={25} color="#28594b" />
           <Text style={styles.disclosureText}>

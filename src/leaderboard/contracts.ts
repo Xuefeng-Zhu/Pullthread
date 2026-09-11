@@ -1,7 +1,7 @@
 import type { CommerceEnvironment, CommerceWallet } from '../commerce/contracts';
 import type { ToolUse } from '../commerce/toolUse';
 export const WEEK_MS = 7 * 86400000;
-export const RULESET = 'stitched-v6-weekly-1';
+export const RULESET = 'stitched-v6-weekly-2';
 /** Clients released before ruleset negotiation send no requested version. */
 export const LEGACY_REGISTRATION_RULESET = 'stitched-v4-weekly-3';
 export const MAX_BATCH_TICKS = 240;

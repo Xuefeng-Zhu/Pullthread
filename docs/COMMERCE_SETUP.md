@@ -1,6 +1,6 @@
 # Points and tools: backend setup
 
-New builds use Cloudflare Workers and D1 for the points ledger. Firebase remains the guest identity provider and can stay on Spark; this path does not deploy Firebase Functions. Live purchases require a connected native store or RevenueCat Web Billing provider, RevenueCat secrets, and the explicit environment gate. See [the dated setup record](IPHONE_SHOP_SETUP_STATUS.md) for what is actually connected.
+New builds use Cloudflare Workers and D1 for the points ledger. Firebase remains the guest identity provider and can stay on Spark; this path does not deploy Firebase Functions. Development builds can use RevenueCat Test Store without an Apple or Google developer account. Live purchases require a connected native store or RevenueCat Web Billing provider, RevenueCat secrets, and the explicit environment gate. See [the dated setup record](IPHONE_SHOP_SETUP_STATUS.md) for what is actually connected.
 
 ## Contract
 
@@ -26,11 +26,20 @@ A tool operation atomically deducts its catalog price and writes a durable `read
 ## RevenueCat and stores
 
 1. Create the three **consumable** products in App Store Connect / Google Play and import them into the RevenueCat project. Keep their exact store identifiers above. Configure the RevenueCat offering with the exact identifier `points`, containing these packs. Intended US store setup prices are 100 points for $0.99, 550 for $4.99, and 1,200 for $9.99; these are catalog setup choices, while the app displays localized store-provided prices. Prices displayed by the app come from the store, never from a hard-coded currency amount.
-2. Configure RevenueCat SDK public keys separately from server secrets. Configure purchases with Firebase's authenticated guest UID. The server accepts purchased App Store, Play Store, RevenueCat Billing, Stripe Billing, and Paddle Billing consumables from allowlisted apps; promotional, family-shared, and RevenueCat Test Store purchases do not grant points. Use an actual provider sandbox purchase for end-to-end validation.
+2. Configure RevenueCat SDK public keys separately from server secrets. Configure purchases with Firebase's authenticated guest UID. The server accepts purchased App Store, Play Store, RevenueCat Billing, Stripe Billing, and Paddle Billing consumables from allowlisted apps. It also accepts RevenueCat Test Store purchases only when the selected environment is `sandbox`. Promotional and family-shared purchases do not grant points. Use the matching provider's sandbox purchase for end-to-end validation.
 3. Create a RevenueCat **V2 secret API key** with read scopes `customer_information:purchases:read` and `project_configuration:products:read`. The backend reads every customer purchase page, validates its product/app/store/environment, and credits only owned purchases. V2 refunded purchases reconcile revocations. Unknown statuses fail closed. Product responses must report `consumable` or `one_time` with `one_time.is_consumable: true`.
 4. Set Worker secrets `REVENUECAT_API_KEY` and `REVENUECAT_WEBHOOK_AUTHORIZATION` using `npx wrangler secret put <name>` from `worker/`. Use a long random webhook authorization value, at least 24 characters. Set that exact value as RevenueCat's webhook Authorization header. Never use an `EXPO_PUBLIC_` variable for either secret. The HTTP handler compares the entire header in constant time.
 5. Set `worker/wrangler.jsonc` variables `REVENUECAT_PROJECT_ID` to the RevenueCat project ID, `REVENUECAT_APP_IDS` to a comma-separated allowlist of every enabled RevenueCat native and web app ID, and `COMMERCE_ENABLED_ENVIRONMENTS` to `sandbox` for the sandbox acceptance phase. Its default is empty, disabling commerce. Set `WEB_ALLOWED_ORIGINS` to comma-separated exact browser origins, including scheme and port with no path. Enabling `production` is a separate release decision after real store verification.
 6. Deploy the Worker and D1 schema using the steps below. The webhook endpoint is `<Worker HTTPS URL>/commerceRevenueCatWebhook`. Subscribe to `NON_RENEWING_PURCHASE` and `CANCELLATION` events for the configured environments. A configured authorization header is required; there is no unauthenticated webhook grant path.
+
+### Test Store configuration
+
+1. Use the RevenueCat project's pre-provisioned Test Store app. Create the three consumable products with the exact point-pack identifiers and prices above, then attach each one to its matching package in the `points` offering.
+2. Add the Test Store app ID to `REVENUECAT_APP_IDS`. For an internal iPhone or Android Debug build, set that platform's public SDK key to the project's `test_...` key and keep `EXPO_PUBLIC_COMMERCE_ENVIRONMENT=sandbox`. RevenueCat rejects Test Store keys in Release builds; use the real platform public SDK key there.
+3. Set Sandbox testing access to the intended testers. Configure the purchase webhook for the Test Store app, or for all project apps, while retaining the sandbox-only environment and the non-renewing purchase and cancellation event filters.
+4. A Test Store checkout is simulated by RevenueCat and does not use Apple StoreKit, App Store Connect, or real money. Never include a `test_...` key in an App Store, Play Store, or production build. Replace it with the platform's public key after the real store connection is configured and verified.
+
+Test Store requires a supported RevenueCat SDK. Pullthread uses `react-native-purchases` 10.8.0, newer than the React Native minimum of 9.5.4 documented by RevenueCat.
 
 ### Web Billing configuration
 
@@ -65,7 +74,7 @@ Enable Anonymous Auth in the existing Firebase project. Complete the provider se
 
 This repository retains `functions/` and its tests for legacy builds. Changing the transport does not copy Firestore data. Before cutting over any environment that has served purchases, freeze its commerce writes and migrate **all** wallet revisions, customer mappings, transaction ownership/refund tombstones, purchase lots, tool receipts/allocations, and revive reservations into D1. Reconcile balances and receipts before updating clients or webhooks. Preserve Firebase UIDs and operation IDs. An empty D1 database must never replace an active paid wallet. No Firestore-to-D1 data migration is claimed by this change.
 
-The current device build has commerce disabled and has not demonstrated a live paid wallet; the dated setup record states the verified scope. Keep the legacy backend and configuration available until existing pending tool operations have been reconciled. Switching environments or backends midway through a pending operation requires the matching ledger records first.
+The current iPhone Debug build has sandbox commerce enabled, but its simulated Test Store checkout has not yet demonstrated a connected paid wallet; the dated setup record states the verified scope. Keep the legacy backend and configuration available until existing pending tool operations have been reconciled. Switching environments or backends midway through a pending operation requires the matching ledger records first.
 
 Provider reference: [webhook delivery and authorization](https://www.revenuecat.com/docs/integrations/webhooks), [event fields](https://www.revenuecat.com/docs/integrations/webhooks/event-types-and-fields), [customer purchase API](https://www.revenuecat.com/docs/api-v2/customer/resources), [purchase API and store identity](https://www.revenuecat.com/docs/api-v2/purchase), [product schema](https://www.revenuecat.com/docs/api-v2/product). The linked OpenAPI purchase schema enumerates `owned` and `refunded`; V1 non-subscription IDs are not interchangeable with store transaction IDs.
 

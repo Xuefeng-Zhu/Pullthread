@@ -241,6 +241,22 @@ describe('endless Pull & Launch screen', () => {
     await view.unmount();
   });
 
+  test('replaces Points and tools when opening a destination screen', async () => {
+    const view = await render(<EndlessGameScreen {...harness()} />);
+    await measure(view);
+
+    await fireEvent.press(view.getByTestId('launch-score-card'));
+    await fireEvent.press(view.getByTestId('points-button-studio'));
+
+    expect(view.queryByTestId('points-shop')).toBeNull();
+    expect(view.getByText('Button Studio', { includeHiddenElements: true })).toBeTruthy();
+    const run = view.getByTestId('launch-run-screen', { includeHiddenElements: true });
+    expect(run.props['aria-hidden']).toBe(true);
+    expect(run.props.accessibilityElementsHidden).toBe(true);
+    expect(run.props.importantForAccessibility).toBe('no-hide-descendants');
+    await view.unmount();
+  });
+
   test('repeated drag updates and a scrolled catch avoid synchronous shared-value readbacks', async () => {
     const readback = rejectMotionReadbacks();
     const view = await render(<EndlessGameScreen {...harness()} />);

@@ -63,6 +63,9 @@ test('registration negotiates explicit rulesets while keeping prior request iden
   const installed = await board.register('installed-v5', 'sandbox', 'installed-v5-register', 'stitched-v5-weekly-1');
   assert.equal(installed.ruleset, 'stitched-v5-weekly-1');
   assert.deepEqual(await board.register('installed-v5', 'sandbox', 'installed-v5-register', RULESET), installed);
+  const installedV6 = await board.register('installed-v6', 'sandbox', 'installed-v6-register', 'stitched-v6-weekly-1');
+  assert.equal(installedV6.ruleset, 'stitched-v6-weekly-1');
+  assert.deepEqual(await board.register('installed-v6', 'sandbox', 'installed-v6-register', RULESET), installedV6);
   await assert.rejects(board.register('bad-ruleset', 'sandbox', 'bad-register', 'unknown'), /version is unavailable/);
   await assert.rejects(board.register('bad-ruleset', 'sandbox', 'bad-register-proto', 'constructor'), /version is unavailable/);
   await assert.rejects(board.register('bad-ruleset', 'sandbox', 'bad-register-retired', 'stitched-v4-weekly-1'), /version is unavailable/);

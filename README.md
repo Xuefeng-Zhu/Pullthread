@@ -9,6 +9,16 @@ handmade playground scrolls upward. Moving thorn gates and optional unraveling
 pockets interrupt the climb with short challenges. Falling off the fabric or
 touching thorns ends the run.
 
+<p align="center">
+  <img
+    src="docs/media/pullthread-gameplay-demo.gif"
+    width="360"
+    alt="Pullthread gameplay showing a button launch across the fabric playfield and land in a stitched pocket"
+  />
+</p>
+
+<p align="center"><em>Pull, launch, catch, and keep climbing.</em></p>
+
 Endless flight is the whole game. The climb and earned tools work offline,
 without an account or purchase. Your best pocket count is saved locally.
 Optional points purchases retain their separate commerce configuration.

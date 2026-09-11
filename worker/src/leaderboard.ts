@@ -7,6 +7,7 @@ import * as weekly2 from '../rulesets/stitched-v4-weekly-2';
 import * as weekly3 from '../rulesets/stitched-v4-weekly-3';
 import * as creativeWeekly1 from '../rulesets/stitched-v5-weekly-1';
 import * as inventoryWeekly1 from '../rulesets/stitched-v6-weekly-1';
+import * as inventoryWeekly2 from '../rulesets/stitched-v6-weekly-2';
 import type { Env } from './env';
 import { D1CommerceWallet } from './wallet';
 interface RunRow { id: string; uid: string; environment: CommerceEnvironment; seed: number; week: number; created_at: number; ruleset: string; sequence: number; elapsed: number; aiming: number; checkpoint: string }
@@ -17,10 +18,11 @@ const engines = {
   'stitched-v4-weekly-3': weekly3,
   'stitched-v5-weekly-1': creativeWeekly1,
   'stitched-v6-weekly-1': inventoryWeekly1,
+  'stitched-v6-weekly-2': inventoryWeekly2,
 } as const;
 type Engine = typeof weekly1;
 const engineFor = (ruleset: string): Engine | undefined => Object.hasOwn(engines, ruleset) ? engines[ruleset as keyof typeof engines] : undefined;
-const registrationRulesets: readonly string[] = [LEGACY_REGISTRATION_RULESET, 'stitched-v5-weekly-1', RULESET];
+const registrationRulesets: readonly string[] = [LEGACY_REGISTRATION_RULESET, 'stitched-v5-weekly-1', 'stitched-v6-weekly-1', RULESET];
 export const enabled = (value: string | undefined, environment: string) => (value ?? '').split(',').includes(environment);
 export class WeeklyLeaderboard {
   constructor(private env: Env, private now: () => number = Date.now) {}

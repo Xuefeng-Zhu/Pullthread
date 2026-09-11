@@ -43,15 +43,23 @@ function pressHandler(view: Awaited<ReturnType<typeof render>>, id: string): () 
   return fiber.memoizedProps.onPress;
 }
 
+function compositeProp(view: Awaited<ReturnType<typeof render>>, id: string, prop: string): unknown {
+  let fiber = view.getByTestId(id).unstable_fiber;
+  while (fiber && !(prop in (fiber.memoizedProps ?? {}))) fiber = fiber.return;
+  return fiber?.memoizedProps?.[prop];
+}
+
 describe('rendered points shop', () => {
   test('shows the localized store price and requires durable guest disclosure before checkout', async () => {
     const { view, service } = await mount();
     expect(view.queryByText('1,29 €')).toBeNull();
     await openStore(view);
     expect(view.getByText('1,29 €')).toBeTruthy();
+    expect(compositeProp(view, 'points-guest-disclosure', 'aria-checked')).toBe(false);
     await fireEvent.press(view.getByTestId('buy-pullthread_points_100'));
     expect(service.purchasePoints).not.toHaveBeenCalled();
     await fireEvent.press(view.getByTestId('points-guest-disclosure'));
+    expect(compositeProp(view, 'points-guest-disclosure', 'aria-checked')).toBe(true);
     let finish!: () => void;
     jest.mocked(AsyncStorage.setItem).mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
     await fireEvent.press(view.getByTestId('buy-pullthread_points_100'));

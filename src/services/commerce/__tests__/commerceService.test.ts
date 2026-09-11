@@ -47,6 +47,16 @@ describe('commerce service gates and native verification', () => {
     expect(service.environment).toBe('sandbox');
   });
 
+  test('RevenueCat Test Store keys are sandbox-only on every supported platform', () => {
+    const load = jest.fn<NativeRuntimeLoader>().mockResolvedValue(provider());
+    for (const platform of ['ios', 'android', 'web']) {
+      expect(createCommerceService({ ...config, platform, revenueCatKey: 'test_public' }, load).mode)
+        .toBe(platform === 'web' ? 'web' : 'native');
+      expect(createCommerceService({ ...config, platform, environment: 'production', revenueCatKey: 'test_public' }, load).mode)
+        .toBe('unavailable');
+    }
+  });
+
   test('concurrent initialization shares authentication/configuration and uses only native prices', async () => {
     const runtime = provider();
     runtime.getProducts.mockResolvedValue([

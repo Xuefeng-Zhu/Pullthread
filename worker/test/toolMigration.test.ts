@@ -56,3 +56,23 @@ test('web-billing migration preserves native lots and expands the transaction st
     await assert.rejects(db.prepare("INSERT INTO commerce_transactions(tx_key,uid,environment,transaction_id,product_id,store,quantity,purchased_at,refunded,points) VALUES ('bad-store','migration-web-player','sandbox','bad','pullthread_points_100','unknown',1,300,0,100)").run(), /CHECK constraint/);
   } finally { await runtime.dispose(); }
 });
+
+test('Test Store migration preserves prior store lots and expands the transaction store constraint', async () => {
+  const runtime = new Miniflare(convertV4MiniflareOptions({ modules: true, script: 'export default { fetch() { return new Response("fixture"); } }', compatibilityDate: '2026-09-07', d1Databases: ['DB'] }));
+  try {
+    const db = await runtime.getD1Database('DB') as unknown as D1Database;
+    for (const file of ['0001_commerce.sql', '0002_weekly.sql', '0003_cosmetics.sql', '0004_creative_tools.sql', '0005_web_billing.sql']) {
+      await db.batch((await migration(file)).map(sql => db.prepare(sql)));
+    }
+    const wallet = new D1CommerceWallet(db);
+    await wallet.applyVerifiedPurchase('migration-test-store-player', { transactionId: 'web-before-test-store',
+      productId: 'pullthread_points_100', store: 'rc_billing', environment: 'sandbox', purchasedAt: 100, quantity: 1, refunded: false });
+    await db.batch((await migration('0006_test_store.sql')).map(sql => db.prepare(sql)));
+    assert.deepEqual((await db.prepare('PRAGMA foreign_key_check').all()).results, []);
+    assert.equal((await wallet.getWallet('migration-test-store-player', 'sandbox')).points, 100);
+    await wallet.applyVerifiedPurchase('migration-test-store-player', { transactionId: 'test-store-after-migration',
+      productId: 'pullthread_points_100', store: 'test_store', environment: 'sandbox', purchasedAt: 200, quantity: 1, refunded: false });
+    assert.equal((await wallet.getWallet('migration-test-store-player', 'sandbox')).points, 200);
+    await assert.rejects(db.prepare("INSERT INTO commerce_transactions(tx_key,uid,environment,transaction_id,product_id,store,quantity,purchased_at,refunded,points) VALUES ('bad-store-v6','migration-test-store-player','sandbox','bad','pullthread_points_100','unknown',1,300,0,100)").run(), /CHECK constraint/);
+  } finally { await runtime.dispose(); }
+});

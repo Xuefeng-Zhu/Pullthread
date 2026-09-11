@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { CommerceError, parseRedemption } from '../src/commerce/domain';
+import { CommerceError, packPoints, parseRedemption } from '../src/commerce/domain';
 import { CREATIVE_TOOLS, TOOL_COSTS } from '../../src/commerce/contracts';
 import { fetchVerifiedPurchases, parsePurchaseWebhook, requireConfiguration, validWebhookAuthorization, type ProviderConfig, type ProviderFetch } from '../src/commerce/revenuecat';
 
@@ -37,6 +37,13 @@ test('provider API and webhook share the exact store transaction identity withou
   assert.deepEqual(parsePurchaseWebhook({ api_version: '1.0', event }, config)?.purchase, parsed[0]);
   await assert.rejects(fetchVerifiedPurchases(config, 'guest_fixture', 'sandbox', provider([{ ...purchase, store_purchase_identifier: 20000000000000001 }])), /Invalid verified/);
 });
+test('Test Store transactions are accepted only in sandbox', async () => {
+  const testPurchase = { ...purchase, store: 'test_store' };
+  const parsed = await fetchVerifiedPurchases(config, 'guest_fixture', 'sandbox', provider([testPurchase]));
+  assert.equal(parsed[0].store, 'test_store');
+  assert.equal(parsePurchaseWebhook({ api_version: '1.0', event: { ...event, store: 'TEST_STORE' } }, config)?.purchase.store, 'test_store');
+  assert.throws(() => packPoints({ ...parsed[0], environment: 'production' }), /Invalid verified/);
+});
 test('refund status and cancellation become matching tombstones; unrelated or temporary events grant nothing', async () => {
   assert.equal((await fetchVerifiedPurchases(config, 'guest_fixture', 'sandbox', provider([{ ...purchase, status: 'refunded' }])))[0].refunded, true);
   assert.equal(parsePurchaseWebhook({ api_version: '1.0', event: { ...event, type: 'CANCELLATION' } }, config)?.purchase.refunded, true);
@@ -44,7 +51,7 @@ test('refund status and cancellation become matching tombstones; unrelated or te
   for (const change of [{ store: 'PROMOTIONAL' }, { is_family_share: true }, { product_id: 'unrelated' }]) assert.equal(parsePurchaseWebhook({ api_version: '1.0', event: { ...event, ...change } }, config), null);
 });
 test('only purchased consumables from allowlisted apps and stores in selected environment are reconciled', async () => {
-  for (const change of [{ store: 'test_store' }, { ownership: 'family_shared' }, { environment: 'production' }]) assert.deepEqual(await fetchVerifiedPurchases(config, 'guest_fixture', 'sandbox', provider([{ ...purchase, ...change }])), []);
+  for (const change of [{ store: 'promotional' }, { ownership: 'family_shared' }, { environment: 'production' }]) assert.deepEqual(await fetchVerifiedPurchases(config, 'guest_fixture', 'sandbox', provider([{ ...purchase, ...change }])), []);
   for (const change of [{ type: 'subscription' }, { app_id: 'app_other' }, { store_identifier: 'unlisted' }, { one_time: { is_consumable: false } }]) assert.deepEqual(await fetchVerifiedPurchases(config, 'guest_fixture', 'sandbox', provider([purchase], { ...product, ...change })), []);
   await assert.rejects(fetchVerifiedPurchases(config, 'guest_fixture', 'sandbox', provider([{ ...purchase, customer_id: 'other', original_customer_id: 'other' }])), /another customer/);
   await assert.rejects(fetchVerifiedPurchases(config, 'guest_fixture', 'sandbox', provider([{ ...purchase, status: 'pending' }])), /Unknown purchase status/);

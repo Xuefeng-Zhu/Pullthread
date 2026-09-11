@@ -344,7 +344,10 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
   })).filter((target) => target.y - 12 >= cueTop && target.y + 32 < area.height - insets.bottom - 74
     && target.x - target.width / 2 >= 0 && target.x + target.width / 2 <= area.width) : [];
 
-  return <View style={styles.run} testID="launch-run-screen">
+  const destinationOpen = studioOpen || weeklyOpen;
+  return <View style={styles.run} testID="launch-run-screen" aria-hidden={destinationOpen}
+    accessibilityElementsHidden={destinationOpen}
+    importantForAccessibility={destinationOpen ? 'no-hide-descendants' : 'auto'}>
     {studioOpen && <ButtonStudio highContrast={highContrast} onClose={() => setStudioOpen(false)} />}
     {weeklyOpen && <WeeklyLeaderboard highContrast={highContrast} status={() => ranked?.status ?? 'Local run · start online to compete'} onClose={() => setWeeklyOpen(false)} />}
     {focused && <StatusBar style="dark" />}
@@ -465,7 +468,8 @@ function EndlessFlight({ seed, best, onRestart, onScore, onSettings, ranked }: {
       {toolLayer.type === 'toolbox' ? <Toolbox inventory={session.tools.inventory} prepared={preparedTools} freeToolQueue={session.tools.freeToolQueue}
         availability={{ phase: state.phase, previewActive: session.tools.previewActive, reviveUsed: session.tools.reviveUsed, preparedTools, creativeEnabled: session.tools.creativeEnabled }}
         onChoose={chooseTool} onClose={closeTools} /> : toolLayer.type === 'shop' ? <PointsShop initialScreen={toolLayer.initialScreen} onClose={closeTools}
-        onCustomize={() => setStudioOpen(true)} onLeaderboard={() => setWeeklyOpen(true)} /> : <ScrollView contentContainerStyle={styles.dialogScroll} style={styles.dialogScroller}>
+        onCustomize={() => { closeTools(); setStudioOpen(true); }}
+        onLeaderboard={() => { closeTools(); setWeeklyOpen(true); }} /> : <ScrollView contentContainerStyle={styles.dialogScroll} style={styles.dialogScroller}>
         <View testID={toolLayer.type === 'recovery' ? 'tool-recovery' : 'tool-confirmation'} style={styles.overlay} accessibilityViewIsModal>
           {toolLayer.type === 'tool' ? <>
             <ToolIcon kind={toolLayer.kind} size={36} color="#28594b" />

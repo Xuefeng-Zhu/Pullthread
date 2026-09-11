@@ -15,7 +15,7 @@ let ledger: D1CommerceWallet;
 before(async () => {
   runtime = new Miniflare(convertV4MiniflareOptions({ modules: true, script: 'export default { fetch() { return new Response("fixture"); } }', compatibilityDate: '2026-09-07', d1Databases: ['DB'] }));
   db = await runtime.getD1Database('DB') as unknown as D1Database;
-  const migration = (await Promise.all(['0001_commerce.sql', '0002_weekly.sql', '0003_cosmetics.sql', '0004_creative_tools.sql', '0005_web_billing.sql']
+  const migration = (await Promise.all(['0001_commerce.sql', '0002_weekly.sql', '0003_cosmetics.sql', '0004_creative_tools.sql', '0005_web_billing.sql', '0006_test_store.sql']
     .map(file => readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8')))).join('\n');
   // D1 exec treats each line as a statement; standalone SQL comments are not statements.
   await db.exec(migration.split('\n').filter((line) => line.trim() && !line.trimStart().startsWith('--')).join('\n'));
@@ -144,6 +144,16 @@ test('RevenueCat Billing transactions reconcile, refund, and remain isolated fro
   const refunded = await syncWallet(ledger, config, user, 'sandbox', undefined, provider(user, transactionId, true, 'rc_billing'));
   assert.equal(refunded.wallet.points, 100);
 });
+test('RevenueCat Test Store transactions reconcile and refund in sandbox', async () => {
+  const user = uid(); const transactionId = `test_store_${user}`;
+  const granted = await syncWallet(ledger, config, user, 'sandbox', {
+    transactionId, productId: 'pullthread_points_100',
+  }, provider(user, transactionId, false, 'test_store'));
+  assert.equal(granted.purchase?.verified, true);
+  assert.equal(granted.wallet.points, 100);
+  const refunded = await syncWallet(ledger, config, user, 'sandbox', undefined, provider(user, transactionId, true, 'test_store'));
+  assert.equal(refunded.wallet.points, 0);
+});
 test('sync returns exact provider verification after spending, and client transaction queries never grant credit', async () => {
   const user = uid(); const query = { transactionId: user, productId: 'pullthread_points_100' };
   const first = await syncWallet(ledger, config, user, 'sandbox', query, provider(user, user)); assert.equal(first.purchase?.verified, true);
@@ -167,6 +177,20 @@ test('trusted RevenueCat Billing webhooks use the same customer mapping and refu
     id: `web_event_${type}`, type, event_timestamp_ms: 300, app_id: 'app_fixture', app_user_id: user,
     original_app_user_id: user, product_id: 'pullthread_points_100', transaction_id: `webhook_${user}`,
     quantity: 1, purchased_at_ms: 100, environment: 'SANDBOX', store: 'RC_BILLING',
+  } });
+  await ledger.bindCustomer(user);
+  await receivePurchaseWebhook(ledger, config, body('NON_RENEWING_PURCHASE'));
+  assert.equal(await balance(user), 100);
+  await receivePurchaseWebhook(ledger, config, body('CANCELLATION'));
+  assert.equal(await balance(user), 0);
+});
+
+test('trusted Test Store webhooks use the sandbox customer mapping and refund tombstones', async () => {
+  const user = uid();
+  const body = (type: 'NON_RENEWING_PURCHASE' | 'CANCELLATION') => ({ api_version: '1.0', event: {
+    id: `test_store_event_${type}`, type, event_timestamp_ms: 300, app_id: 'app_fixture', app_user_id: user,
+    original_app_user_id: user, product_id: 'pullthread_points_100', transaction_id: `test_store_webhook_${user}`,
+    quantity: 1, purchased_at_ms: 100, environment: 'SANDBOX', store: 'TEST_STORE',
   } });
   await ledger.bindCustomer(user);
   await receivePurchaseWebhook(ledger, config, body('NON_RENEWING_PURCHASE'));
